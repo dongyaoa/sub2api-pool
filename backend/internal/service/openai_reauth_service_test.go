@@ -239,7 +239,9 @@ func TestOpenAIReauthRefusesNetworkAfterStateChanges(t *testing.T) {
 				a.ProxyID = nil
 			case "proxy_expired":
 				past := time.Now().Add(-time.Hour)
-				s.proxies.(*reauthProxyStub).proxy.ExpiresAt = &past
+				proxies, ok := s.proxies.(*reauthProxyStub)
+				require.True(t, ok)
+				proxies.proxy.ExpiresAt = &past
 			case "stale_lease":
 				store.valid = false
 			case "redis_down":
@@ -292,7 +294,9 @@ func TestOpenAIReauthImportKeepsPasswordAndUsesEncryptedStore(t *testing.T) {
 	require.Equal(t, "queued", results[0].Status)
 	require.Equal(t, "ciphertext-only", store.savedCipher)
 	var secret openAIReauthSecret
-	require.NoError(t, json.Unmarshal([]byte(s.encryptor.(*reauthCipherStub).plain), &secret))
+	cipher, ok := s.encryptor.(*reauthCipherStub)
+	require.True(t, ok)
+	require.NoError(t, json.Unmarshal([]byte(cipher.plain), &secret))
 	require.Equal(t, ` p\@ss word `, secret.Password)
 	after, _ := json.Marshal(a)
 	require.JSONEq(t, string(before), string(after))
