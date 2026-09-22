@@ -1230,21 +1230,10 @@ func hashSensitiveValueForLog(raw string) string {
 }
 
 // GetAccessToken gets the access token for an OpenAI account
-func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (token string, tokenType string, tokenErr error) {
-	routingAccount := account
-	defer func() {
-		if routingAccount != nil && routingAccount.openAIReauthRequestScoped &&
-			(OpenAIReauthEnabled(routingAccount) || routingAccount.IsShadow()) && tokenErr == nil && tokenType == "oauth" {
-			// Record the token actually returned after cache/refresh/parent lookup.
-			routingAccount.openAIReauthObservedTokenHash = openAIReauthAccessTokenHash(token)
-		}
-	}()
+func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
 	if account.IsShadow() {
 		credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 		if err != nil {
-			return "", "", err
-		}
-		if err := validateOpenAIReauthShadowRoute(account, credAccount, openAIAccountProxyURL(account)); err != nil {
 			return "", "", err
 		}
 		account = credAccount

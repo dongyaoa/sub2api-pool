@@ -117,17 +117,6 @@ func ProvideOpenAIOAuthService(
 	return svc
 }
 
-func ProvideOpenAIReauthService(repo OpenAIReauthRepository, accounts AccountRepository, proxies ProxyRepository,
-	admin AdminService, oauth *OpenAIOAuthService, encryptor SecretEncryptor, refresh *OAuthRefreshAPI,
-	cache TokenCacheInvalidator, cfg *config.Config, limits *RateLimitService, provider *OpenAITokenProvider) *OpenAIReauthService {
-	s := NewOpenAIReauthService(repo, accounts, proxies, admin, oauth, encryptor, refresh, cache,
-		os.Getenv("OPENAI_REAUTH_WORKER_URL"), os.Getenv("OPENAI_REAUTH_WORKER_TOKEN"), cfg.Totp.EncryptionKeyConfigured)
-	limits.openAIReauth = s
-	provider.openAIReauth = s
-	s.Start()
-	return s
-}
-
 // ProvideTokenRefreshService creates and starts TokenRefreshService
 func ProvideTokenRefreshService(
 	accountRepo AccountRepository,
@@ -144,10 +133,8 @@ func ProvideTokenRefreshService(
 	proxyRepo ProxyRepository,
 	refreshAPI *OAuthRefreshAPI,
 	runtimeBlocker AccountRuntimeBlocker,
-	reauth *OpenAIReauthService,
 ) *TokenRefreshService {
 	svc := NewTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthService)
-	svc.openAIReauth = reauth
 	// 注入 OpenAI privacy opt-out 依赖
 	svc.SetPrivacyDeps(privacyClientFactory, proxyRepo)
 	// 注入统一 OAuth 刷新 API（消除 TokenRefreshService 与 TokenProvider 之间的竞争条件）
@@ -888,7 +875,6 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
 	NewOAuthService,
 	ProvideOpenAIOAuthService,
-	ProvideOpenAIReauthService,
 	ProvideGrokOAuthService,
 	wire.Bind(new(GrokOAuthTokenService), new(*GrokOAuthService)),
 	NewGeminiOAuthService,

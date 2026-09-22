@@ -17,10 +17,6 @@
             @create="showCreate = true"
           >
             <template #after>
-              <button class="btn btn-secondary" data-testid="import-new-openai-account" @click="openAutoReauth()">
-                <Icon name="lock" size="sm" class="mr-1.5" />
-                {{ t('admin.accounts.autoReauth.importNew') }}
-              </button>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -137,12 +133,6 @@
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
                       </button>
-                      <button class="account-tools-menu-item" @click="openAutoReauth()">
-                        <span class="account-tools-menu-icon bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
-                          <Icon name="lock" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.autoReauth.title') }}</span>
-                      </button>
 
                       <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
                       <div class="px-2 py-2">
@@ -217,14 +207,6 @@
           :overscan="5"
           :virtualize-threshold="50"
         >
-          <template #empty>
-            <div class="flex flex-col items-center gap-4">
-              <p class="text-gray-500 dark:text-dark-400">{{ t('empty.noData') }}</p>
-              <button class="btn btn-primary" data-testid="empty-import-openai-account" @click="openAutoReauth()">
-                {{ t('admin.accounts.autoReauth.importNew') }}
-              </button>
-            </div>
-          </template>
           <template #header-select>
             <input
               type="checkbox"
@@ -242,15 +224,6 @@
           </template>
           <template #cell-name="{ row, value }">
             <div class="flex flex-col">
-              <button
-                v-if="supportsAutoReauth(row)"
-                class="mb-1 inline-flex items-center gap-2 self-start text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400"
-                :data-testid="`account-2fa-${row.id}`"
-                @click="openAutoReauth(row)"
-              >
-                <span class="rounded bg-violet-100 px-1.5 py-1 text-[10px] font-semibold text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">2FA</span>
-                {{ t(autoReauthByID.has(row.id) ? 'admin.accounts.autoReauth.reauthorize2fa' : 'admin.accounts.autoReauth.configure2fa') }}
-              </button>
               <HelpTooltip
                 v-if="accountHomepageUrl(row)"
                 :content="accountHomepageUrl(row)"
@@ -314,14 +287,8 @@
             <AccountCapacityCell :account="row" />
           </template>
           <template #cell-status="{ row }">
-            <div class="flex flex-col items-start gap-1.5">
+            <div class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
-              <AccountAutoReauthStatus
-                v-if="supportsAutoReauth(row)"
-                :status="autoReauthByID.get(row.id)"
-                :loaded="autoReauthLoaded"
-                :load-failed="autoReauthLoadFailed"
-              />
             </div>
           </template>
           <template #cell-schedulable="{ row }">
@@ -524,21 +491,19 @@
     </ConfirmDialog>
     <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
-    <OpenAIAutoReauthPanel :show="showAutoReauth" :account="autoReauthAccount" :groups="groups" @close="showAutoReauth = false" @changed="handleAutoReauthChanged" @manual="handleAutoReauthManual" />
     <TotpStepUpDialog :controller="accountExportStepUp" />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, onActivated, onDeactivated, toRaw, watch } from 'vue'
-import { useDocumentVisibility, useIntervalFn } from '@vueuse/core'
+import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useAccountListRefresh } from '@/composables/useAccountListRefresh'
-import { useOpenAIAutoReauth } from '@/composables/useOpenAIAutoReauth'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
@@ -555,8 +520,6 @@ import AccountTableFilters from '@/components/admin/account/AccountTableFilters.
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
-import OpenAIAutoReauthPanel from '@/components/admin/account/OpenAIAutoReauthPanel.vue'
-import AccountAutoReauthStatus from '@/components/admin/account/AccountAutoReauthStatus.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
@@ -583,7 +546,6 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 import type { AccountRecentRequest } from '@/api/admin/accounts'
-import type { OpenAIAutoReauthAccount } from '@/api/admin/openaiAutoReauth'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -654,17 +616,6 @@ const showTest = ref(false)
 const showStats = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
-const showAutoReauth = ref(false)
-const autoReauthAccount = ref<AccountListItem | null>(null)
-const accountPageActive = ref(true)
-const documentVisibility = useDocumentVisibility()
-const autoReauthPollingActive = computed(() => accountPageActive.value && documentVisibility.value === 'visible' && !showAutoReauth.value)
-const { overview: autoReauthOverview, loadFailed: autoReauthLoadFailed } = useOpenAIAutoReauth(autoReauthPollingActive)
-const autoReauthByID = ref(new Map<number, OpenAIAutoReauthAccount>())
-const autoReauthLoaded = ref(false)
-const supportsAutoReauth = (account: AccountListItem) => account.platform === 'openai' && account.type === 'oauth' && !account.parent_account_id
-onActivated(() => { accountPageActive.value = true })
-onDeactivated(() => { accountPageActive.value = false })
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
@@ -1490,7 +1441,6 @@ const isAnyModalOpen = computed(() => {
     showStats.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
-    showAutoReauth.value ||
     showTLSFingerprintProfiles.value
   )
 })
@@ -1648,12 +1598,6 @@ const openErrorPassthrough = () => {
 const openTLSFingerprintProfiles = () => {
   closeAccountToolsDropdown()
   showTLSFingerprintProfiles.value = true
-}
-
-const openAutoReauth = (account: AccountListItem | null = null) => {
-  closeAccountToolsDropdown()
-  autoReauthAccount.value = account
-  showAutoReauth.value = true
 }
 
 const syncPendingListChanges = async () => {
@@ -2323,43 +2267,6 @@ const patchAccountInList = (updatedAccount: Account) => {
   accounts.value = nextAccounts
   syncAccountRefs(mergedAccount)
 }
-
-const autoReauthRefreshVersions = new Map<number, number>()
-const refreshAutoReauthAccount = async (accountID: number) => {
-  if (!accounts.value.some(account => account.id === accountID)) return
-  const version = (autoReauthRefreshVersions.get(accountID) ?? 0) + 1
-  autoReauthRefreshVersions.set(accountID, version)
-  try {
-    const account = await adminAPI.accounts.getById(accountID)
-    if (accountPageActive.value && autoReauthRefreshVersions.get(accountID) === version) patchAccountInList(account)
-  } catch {
-    // Status polling continues; a detail-read failure must not clear a known row.
-  }
-}
-const autoReauthRuntimeSignature = (status: OpenAIAutoReauthAccount | undefined) => status
-  ? `${status.enabled}:${status.status}:${status.last_success_at ?? ''}`
-  : ''
-
-watch(autoReauthOverview, (overview) => {
-  if (!overview) return
-  const previous = autoReauthByID.value
-  const hadOverview = autoReauthLoaded.value
-  autoReauthByID.value = new Map(overview.accounts.map(status => [status.account_id, status]))
-  autoReauthLoaded.value = true
-  if (!hadOverview) return
-  // Fetch only rows whose authorization result changed, never reload the table on every poll.
-  for (const status of overview.accounts) {
-    if (autoReauthRuntimeSignature(previous.get(status.account_id)) !== autoReauthRuntimeSignature(status)) {
-      void refreshAutoReauthAccount(status.account_id)
-    }
-  }
-})
-
-const handleAutoReauthChanged = async () => {
-  if (autoReauthAccount.value) await refreshAutoReauthAccount(autoReauthAccount.value.id)
-  else await reload()
-}
-
 const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBillingProbeSnapshot) => {
   const account = accounts.value.find(item => item.id === accountID)
   if (!account) return
@@ -2478,14 +2385,6 @@ const handleSchedule = async (a: Account) => {
 }
 const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
 const handleReAuth = (a: Account) => { reAuthAcc.value = a; showReAuth.value = true }
-const handleAutoReauthManual = async (accountID: number) => {
-  try {
-    const account = await adminAPI.accounts.getById(accountID)
-    handleReAuth(account)
-  } catch {
-    appStore.showError(t('admin.accounts.autoReauth.loadFailed'))
-  }
-}
 const duplicatingAccountIDs = new Set<number>()
 const handleDuplicateAccount = async (a: Account) => {
   if (duplicatingAccountIDs.has(a.id)) return
@@ -2709,7 +2608,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  accountPageActive.value = false
   autoRefreshAbortController?.abort()
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {

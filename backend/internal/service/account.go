@@ -87,11 +87,6 @@ type Account struct {
 	headerOverrideCacheRawPtr         uintptr
 	headerOverrideCacheRawLen         int
 	headerOverrideCacheRawSig         uint64
-
-	// Request-only authorization provenance. Scheduling creates an owned copy;
-	// neither the ownership marker nor the token hash is persisted or exported.
-	openAIReauthRequestScoped     bool
-	openAIReauthObservedTokenHash string
 }
 
 type OpenAIEndpointCapability string
@@ -192,13 +187,10 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
-	if a == nil || !a.IsActive() || !a.Schedulable {
+	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
 	now := time.Now()
-	if a.isOpenAIReauthPending() || !a.isOpenAIReauthProxyUsable(now) {
-		return false
-	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}
@@ -234,9 +226,6 @@ func (a *Account) IsCredentialUsableForShadow() bool {
 		return false
 	}
 	now := time.Now()
-	if a.isOpenAIReauthPending() || !a.isOpenAIReauthProxyUsable(now) {
-		return false
-	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}

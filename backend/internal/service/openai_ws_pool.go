@@ -86,8 +86,6 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
-	reauthProxy         string
-	reauthToken         string
 	tlsFingerprint      string
 	betaFeatures        string
 	codexInstallationID string
@@ -1138,9 +1136,6 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 }
 
 func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireRequest, retry int, queueWait *openAIWSAcquireQueueWait) (*openAIWSConnLease, error) {
-	if err := validateOpenAIReauthTransportProxy(req.Account, req.ProxyURL); err != nil {
-		return nil, err
-	}
 	if p == nil || req.Account == nil || req.Account.ID <= 0 {
 		return nil, errors.New("invalid ws acquire request")
 	}
@@ -2123,9 +2118,6 @@ func (p *openAIWSConnPool) UnpinConn(accountID int64, connID string) {
 }
 
 func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequest) (*openAIWSConn, error) {
-	if err := validateOpenAIReauthTransportProxy(req.Account, req.ProxyURL); err != nil {
-		return nil, err
-	}
 	if p == nil || p.clientDialer == nil {
 		return nil, errors.New("openai ws client dialer is nil")
 	}
@@ -2374,12 +2366,7 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header, profiles ...*tlsfingerprint.Profile) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
-		reauthProxy:  openAIReauthProxyCompatibility(account),
 		betaFeatures: normalizeOpenAIWSBetaFeatures(headers),
-	}
-	if account != nil && (OpenAIReauthEnabled(account) || account.IsShadow()) {
-		// A reused socket must carry the same authorization as this attempt.
-		key.reauthToken = openAIReauthAccessTokenHash(strings.TrimSpace(headers.Get("Authorization")))
 	}
 	if len(profiles) > 0 {
 		key.tlsFingerprint = profiles[0].CacheKey()

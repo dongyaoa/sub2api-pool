@@ -49,7 +49,6 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 
 // AccountHandler handles admin account management
 type AccountHandler struct {
-	openAIReauth            *service.OpenAIReauthService
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
 	openaiOAuthService      *service.OpenAIOAuthService
@@ -1670,10 +1669,9 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 
 // ApplyOAuthCredentialsRequest is the payload for persisting re-authorized OAuth credentials.
 type ApplyOAuthCredentialsRequest struct {
-	Type               string                             `json:"type" binding:"required,oneof=oauth setup-token"`
-	Credentials        map[string]any                     `json:"credentials" binding:"required"`
-	Extra              map[string]any                     `json:"extra"`
-	OpenAIOAuthSession *service.OpenAIManualReauthSession `json:"openai_oauth_session,omitempty"`
+	Type        string         `json:"type" binding:"required,oneof=oauth setup-token"`
+	Credentials map[string]any `json:"credentials" binding:"required"`
+	Extra       map[string]any `json:"extra"`
 }
 
 // ApplyOAuthCredentials 将"重新授权"得到的新凭据原子落库。
@@ -1712,20 +1710,6 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	}
 	if !existing.IsOAuth() {
 		response.ErrorFrom(c, infraerrors.BadRequest("NOT_OAUTH", "cannot apply oauth credentials to non-OAuth account"))
-		return
-	}
-	if existing.Platform == service.PlatformOpenAI && service.OpenAIReauthPending(existing) {
-		if req.OpenAIOAuthSession == nil || h.openAIReauth == nil {
-			response.BadRequest(c, "manual_reauth_session_required")
-			return
-		}
-		updated, recoveryErr := h.openAIReauth.CompleteManualOAuth(ctx, accountID, *req.OpenAIOAuthSession)
-		if recoveryErr != nil {
-			response.BadRequest(c, recoveryErr.Error())
-			return
-		}
-		// This dedicated path preserves manual disable and genuine quota limits.
-		response.Success(c, h.buildAccountResponseWithRuntime(ctx, updated))
 		return
 	}
 	if err := service.ValidateOpenAILongContextBillingExtra(existing.Platform, req.Extra); err != nil {

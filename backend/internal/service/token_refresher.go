@@ -92,9 +92,6 @@ func (r *OpenAITokenRefresher) CacheKey(account *Account) string {
 
 // CanRefresh 检查是否能处理此账号
 func (r *OpenAITokenRefresher) CanRefresh(account *Account) bool {
-	if OpenAIReauthPending(account) {
-		return false
-	}
 	if account.IsCredentialShadow() {
 		return false
 	}

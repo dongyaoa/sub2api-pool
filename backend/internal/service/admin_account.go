@@ -475,10 +475,6 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
-	if internal, _ := ctx.Value(openAIReauthCreateContextKey{}).(bool); !internal {
-		delete(input.Extra, OpenAIReauthEnabledKey)
-		delete(input.Extra, OpenAIReauthPendingKey)
-	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -591,8 +587,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
-	delete(input.Extra, OpenAIReauthEnabledKey)
-	delete(input.Extra, OpenAIReauthPendingKey)
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1720,9 +1714,6 @@ func (s *adminServiceImpl) ResetAccountQuota(ctx context.Context, id int64) erro
 // EnsureOpenAIPrivacy 检查 OpenAI OAuth 账号是否已设置 privacy_mode，
 // 未设置则调用 disableOpenAITraining 并持久化到 Extra，返回设置的 mode 值。
 func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Account) string {
-	if OpenAIReauthPending(account) {
-		return ""
-	}
 	// 影子账号不持凭据，隐私设置由母账号管理，直接跳过。
 	if account.IsCredentialShadow() {
 		return ""
@@ -1743,13 +1734,7 @@ func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Acc
 	}
 
 	var proxyURL string
-	if OpenAIReauthEnabled(account) {
-		p, err := StrictOpenAIProxy(ctx, account, s.proxyRepo)
-		if err != nil {
-			return ""
-		}
-		proxyURL = p.URL()
-	} else if account.ProxyID != nil {
+	if account.ProxyID != nil {
 		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
 			proxyURL = p.URL()
 		}
@@ -1766,9 +1751,6 @@ func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Acc
 
 // ForceOpenAIPrivacy 强制重新设置 OpenAI OAuth 账号隐私，无论当前状态。
 func (s *adminServiceImpl) ForceOpenAIPrivacy(ctx context.Context, account *Account) string {
-	if OpenAIReauthPending(account) {
-		return ""
-	}
 	// 影子账号不持凭据,隐私由母账号管理,直接跳过(与 EnsureOpenAIPrivacy 一致——外审第4轮)。
 	if account.IsCredentialShadow() {
 		return ""
@@ -1786,13 +1768,7 @@ func (s *adminServiceImpl) ForceOpenAIPrivacy(ctx context.Context, account *Acco
 	}
 
 	var proxyURL string
-	if OpenAIReauthEnabled(account) {
-		p, err := StrictOpenAIProxy(ctx, account, s.proxyRepo)
-		if err != nil {
-			return ""
-		}
-		proxyURL = p.URL()
-	} else if account.ProxyID != nil {
+	if account.ProxyID != nil {
 		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
 			proxyURL = p.URL()
 		}

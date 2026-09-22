@@ -55,7 +55,6 @@ type GrokOAuthRefreshMutationRepository interface {
 // TokenRefreshService OAuth token自动刷新服务
 // 定期检查并刷新即将过期的token
 type TokenRefreshService struct {
-	openAIReauth     *OpenAIReauthService
 	accountRepo      AccountRepository
 	candidatePager   OAuthRefreshCandidatePager
 	registrations    []tokenRefreshRegistration
@@ -985,9 +984,6 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 
 		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
 		if isNonRetryableRefreshError(err) {
-			if openAIReauthRefreshRejected(err) && s.openAIReauth.Trigger(ctx, account, "refresh_rejected") {
-				return errRefreshSkipped
-			}
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())
 			isGrokOAuth := account.IsGrokOAuth()
 			if !isGrokOAuth {
@@ -1445,9 +1441,6 @@ func isNonRetryableRefreshError(err error) bool {
 // ensureOpenAIPrivacy 检查 OpenAI OAuth 账号是否已设置 privacy_mode，
 // 未设置则调用 disableOpenAITraining 并持久化结果到 Extra。
 func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *Account) {
-	if OpenAIReauthPending(account) {
-		return
-	}
 	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
 		return
 	}
@@ -1464,13 +1457,7 @@ func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *
 	}
 
 	var proxyURL string
-	if OpenAIReauthEnabled(account) {
-		p, err := StrictOpenAIProxy(ctx, account, s.proxyRepo)
-		if err != nil {
-			return
-		}
-		proxyURL = p.URL()
-	} else if account.ProxyID != nil && s.proxyRepo != nil {
+	if account.ProxyID != nil && s.proxyRepo != nil {
 		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
 			proxyURL = p.URL()
 		}

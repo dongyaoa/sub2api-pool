@@ -9,9 +9,6 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // doOpenAIUpstream 只在 OpenAI OAuth 能力绑定已启用时把真实请求交给插件。
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
-	if err := validateOpenAIReauthCredentialOwnerProxy(request.Context(), s.accountRepo, account, proxyURL); err != nil {
-		return nil, err
-	}
 	if profile := s.tlsFPProfileService.ResolveTLSProfile(account); profile != nil {
 		// The v1 plugin transport cannot receive TLS profiles. An explicit account
 		// profile selects the core transport for both HTTP and WebSocket traffic.
@@ -34,9 +31,6 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	account *Account,
 	useTLSFallback bool,
 ) (response *http.Response, err error) {
-	if err := validateOpenAIReauthCredentialOwnerProxy(request.Context(), s.accountRepo, account, proxyURL); err != nil {
-		return nil, err
-	}
 	request, received := beginAccountTestHTTPRequest(request)
 	defer func() { received(response) }()
 	if profile := s.tlsFPProfileService.ResolveTLSProfile(account); profile != nil {

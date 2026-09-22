@@ -30,48 +30,6 @@ type AccountProxyPoolEntry struct {
 
 var accountProxyPoolRoundRobin atomic.Uint64
 
-// IsOpenAIAutoReauthEnabled also enables strict proxy affinity for ordinary
-// requests: expiry must never change this account to direct or a backup IP.
-func (a *Account) IsOpenAIAutoReauthEnabled() bool {
-	return OpenAIReauthEnabled(a)
-}
-
-func (a *Account) isOpenAIReauthPending() bool {
-	return OpenAIReauthPending(a)
-}
-
-func (a *Account) isOpenAIReauthProxyUsable(now time.Time) bool {
-	if !a.IsOpenAIAutoReauthEnabled() {
-		return true
-	}
-	if a.ProxyID == nil || *a.ProxyID <= 0 || a.ProxyFallbackOriginID != nil {
-		return false
-	}
-	pool, err := ParseAccountProxyPool(a.Extra[AccountProxyPoolExtraKey])
-	if err != nil || len(pool) > 1 || len(a.ProxyPool) > 1 {
-		return false
-	}
-	if len(pool) == 1 && pool[0].ProxyID != *a.ProxyID {
-		return false
-	}
-	proxy := a.Proxy
-	if len(a.ProxyPool) == 1 {
-		if a.ProxyPool[0].ProxyID != *a.ProxyID {
-			return false
-		}
-		if proxy == nil {
-			proxy = a.ProxyPool[0].Proxy
-		}
-	}
-	if proxy == nil || proxy.ID != *a.ProxyID || !proxy.IsActive() || proxy.IsExpired(now) {
-		return false
-	}
-	if proxy.Protocol == "socks5" && (proxy.Username != "" || proxy.Password != "") {
-		return false
-	}
-	return proxy.Protocol == "http" || proxy.Protocol == "https" || proxy.Protocol == "socks5"
-}
-
 // ParseAccountProxyPool accepts values decoded from JSON (including
 // []any/float64 values) and validates the user-configurable portion.
 func ParseAccountProxyPool(value any) ([]AccountProxyPoolEntry, error) {
@@ -183,16 +141,6 @@ func selectAccountProxy(account *Account, excluded map[int64]struct{}) {
 	if account == nil || len(account.ProxyPool) == 0 {
 		return
 	}
-	if account.IsOpenAIAutoReauthEnabled() {
-		// Preserve the configured binding even if unavailable. Clearing ProxyID
-		// here would make older transport paths interpret failure as direct mode.
-		if len(account.ProxyPool) == 1 && account.ProxyID != nil &&
-			account.ProxyPool[0].ProxyID == *account.ProxyID && account.ProxyPool[0].Proxy != nil {
-			account.Proxy = account.ProxyPool[0].Proxy
-		}
-		account.ProxyPoolSelected = true
-		return
-	}
 	valid := make([]AccountProxyPoolEntry, 0, len(account.ProxyPool))
 	for _, entry := range account.ProxyPool {
 		if entry.Concurrency <= 0 {
@@ -232,15 +180,6 @@ func selectNextAccountProxy(account *Account, excluded map[int64]struct{}) bool 
 	if account == nil {
 		return false
 	}
-	if account.IsOpenAIAutoReauthEnabled() {
-		if !account.isOpenAIReauthProxyUsable(time.Now()) {
-			return false
-		}
-		if _, skip := excluded[*account.ProxyID]; skip {
-			return false
-		}
-		return true
-	}
 	selectAccountProxy(account, excluded)
 	return account.ProxyID != nil
 }
@@ -250,10 +189,6 @@ func selectNextAccountProxy(account *Account, excluded map[int64]struct{}) bool 
 // and acquiring a slot for a different proxy than the transport uses.
 func CarryAccountProxySelection(source, target *Account) {
 	if target == nil {
-		return
-	}
-	if target.IsOpenAIAutoReauthEnabled() {
-		SelectAccountProxy(target)
 		return
 	}
 	if source == nil || !source.ProxyPoolSelected || source.ProxyID == nil {

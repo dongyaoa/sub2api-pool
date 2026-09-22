@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Pool image version, e.g. 0.2.7-pool.1 (without v)'
+        description: 'Pool image version, e.g. 0.2.7-pool.2 (without v)'
         required: true
         type: string
       ref:
@@ -47,7 +47,6 @@ jobs:
             echo "version=$RELEASE_VERSION"
             echo "commit=$RELEASE_REF"
             echo "image=$image"
-            echo "worker_image=${image}-openai-reauth-worker"
             echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } >> "$GITHUB_OUTPUT"
 
@@ -65,7 +64,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Load each image once and test both before updating any registry tag.
+      # Load and test the image before updating any registry tag.
       - name: Build pool image
         uses: docker/build-push-action@v6
         with:
@@ -92,42 +91,19 @@ jobs:
           cache-from: type=gha,scope=pool-main-amd64
           cache-to: type=gha,mode=max,scope=pool-main-amd64
 
-      - name: Build login worker image
-        uses: docker/build-push-action@v6
-        with:
-          context: tools/openai-reauth-worker
-          file: tools/openai-reauth-worker/Dockerfile
-          platforms: linux/amd64
-          load: true
-          pull: true
-          provenance: false
-          tags: |
-            ${{ steps.release.outputs.worker_image }}:${{ steps.release.outputs.version }}
-            ${{ steps.release.outputs.worker_image }}:latest
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ steps.release.outputs.version }}
-            org.opencontainers.image.revision=${{ steps.release.outputs.commit }}
-            org.opencontainers.image.created=${{ steps.release.outputs.created }}
-          cache-from: type=gha,scope=pool-reauth-worker-amd64
-          cache-to: type=gha,mode=max,scope=pool-reauth-worker-amd64
-
       - name: Verify image metadata and pool runtime
         env:
           POOL_IMAGE: ${{ steps.release.outputs.image }}
-          WORKER_IMAGE: ${{ steps.release.outputs.worker_image }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_REF: ${{ steps.release.outputs.commit }}
         shell: bash
         run: |
           set -euo pipefail
-          for image in "$POOL_IMAGE" "$WORKER_IMAGE"; do
-            metadata=$(docker image inspect "$image:$RELEASE_VERSION")
-            jq -e --arg sha "$RELEASE_REF" --arg version "$RELEASE_VERSION" \
-              '.[0] | .Os == "linux" and .Architecture == "amd64" and
-              .Config.Labels["org.opencontainers.image.revision"] == $sha and
-              .Config.Labels["org.opencontainers.image.version"] == $version' <<< "$metadata"
-          done
+          metadata=$(docker image inspect "$POOL_IMAGE:$RELEASE_VERSION")
+          jq -e --arg sha "$RELEASE_REF" --arg version "$RELEASE_VERSION" \
+            '.[0] | .Os == "linux" and .Architecture == "amd64" and
+            .Config.Labels["org.opencontainers.image.revision"] == $sha and
+            .Config.Labels["org.opencontainers.image.version"] == $version' <<< "$metadata"
           version_output=$(docker run --rm --network none "$POOL_IMAGE:$RELEASE_VERSION" --version 2>&1)
           printf '%s\n' "$version_output"
           grep -F "Sub2API $RELEASE_VERSION (commit: $RELEASE_REF," <<< "$version_output"
@@ -145,33 +121,6 @@ jobs:
           done
           docker logs pool-runtime-smoke
           echo '::error::Pool setup server did not become ready'
-          exit 1
-
-      - name: Test worker image and health endpoint
-        env:
-          WORKER_IMAGE: ${{ steps.release.outputs.worker_image }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Synthetic browser fixtures and the local test proxy need no external network.
-          docker run --rm --network none --shm-size=1g \
-            --mount "type=bind,source=$PWD/tools/openai-reauth-worker/test,target=/app/test,readonly" \
-            "$WORKER_IMAGE:$RELEASE_VERSION" npm test
-          worker_token=$(openssl rand -hex 32)
-          echo "::add-mask::$worker_token"
-          docker run -d --name pool-worker-smoke --network none \
-            -e OPENAI_REAUTH_WORKER_TOKEN="$worker_token" "$WORKER_IMAGE:$RELEASE_VERSION"
-          trap 'docker rm -f pool-worker-smoke >/dev/null 2>&1 || true' EXIT
-          for attempt in {1..30}; do
-            if docker exec pool-worker-smoke node --input-type=module -e \
-              'const response = await fetch("http://127.0.0.1:8091/health"); process.exit(response.ok && (await response.json()).status === "ok" ? 0 : 1)'; then
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs pool-worker-smoke
-          echo '::error::Login worker did not become healthy'
           exit 1
 
       - name: Require successful CI for the release commit
@@ -226,31 +175,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish tested images and verify registry digests
+      - name: Publish tested image and verify registry digests
         env:
           POOL_IMAGE: ${{ steps.release.outputs.image }}
-          WORKER_IMAGE: ${{ steps.release.outputs.worker_image }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_REF: ${{ steps.release.outputs.commit }}
         shell: bash
         run: |
           set -euo pipefail
-          for image in "$POOL_IMAGE" "$WORKER_IMAGE"; do
-            docker push "$image:$RELEASE_VERSION"
-          done
-          for image in "$POOL_IMAGE" "$WORKER_IMAGE"; do
-            docker push "$image:latest"
-          done
+          docker push "$POOL_IMAGE:$RELEASE_VERSION"
+          docker push "$POOL_IMAGE:latest"
           {
             printf 'Built and tested commit `%s` for **linux/amd64**.\n\n' "$RELEASE_REF"
             printf '| Image | Registry digest |\n| --- | --- |\n'
           } >> "$GITHUB_STEP_SUMMARY"
-          for image in "$POOL_IMAGE" "$WORKER_IMAGE"; do
-            version_digest=$(docker buildx imagetools inspect "$image:$RELEASE_VERSION" --format '{{.Manifest.Digest}}')
-            latest_digest=$(docker buildx imagetools inspect "$image:latest" --format '{{.Manifest.Digest}}')
-            [[ "$version_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            test "$version_digest" = "$latest_digest"
-            local_digest=$(docker image inspect "$image:$RELEASE_VERSION" --format '{{index .RepoDigests 0}}')
-            test "${local_digest##*@}" = "$version_digest"
-            printf '| `%s:%s` | `%s` |\n' "$image" "$RELEASE_VERSION" "$version_digest" >> "$GITHUB_STEP_SUMMARY"
-          done
+          version_digest=$(docker buildx imagetools inspect "$POOL_IMAGE:$RELEASE_VERSION" --format '{{.Manifest.Digest}}')
+          latest_digest=$(docker buildx imagetools inspect "$POOL_IMAGE:latest" --format '{{.Manifest.Digest}}')
+          [[ "$version_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$version_digest" = "$latest_digest"
+          local_digest=$(docker image inspect "$POOL_IMAGE:$RELEASE_VERSION" --format '{{index .RepoDigests 0}}')
+          test "${local_digest##*@}" = "$version_digest"
+          printf '| `%s:%s` | `%s` |\n' "$POOL_IMAGE" "$RELEASE_VERSION" "$version_digest" >> "$GITHUB_STEP_SUMMARY"

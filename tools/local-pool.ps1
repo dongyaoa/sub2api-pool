@@ -33,19 +33,15 @@ $RedisBin = Join-Path $DevRoot 'runtime\redis'
 $BackendExe = Join-Path $DevRoot 'bin\sub2api-pool.exe'
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 $ViteEntry = Join-Path $FrontendDir 'node_modules\vite\bin\vite.js'
-$WorkerDir = Join-Path $RepoRoot 'tools\openai-reauth-worker'
-$WorkerEntry = Join-Path $WorkerDir 'src\server.mjs'
-$WorkerTokenFile = Join-Path $DevRoot 'openai-reauth-worker-token.txt'
-$WorkerBrowserPath = Join-Path $DevRoot 'cache\playwright'
 $SecretsFile = Join-Path $DevRoot 'local-secrets.json'
-$Ports = [ordered]@{ postgres = 5433; redis = 6380; worker = 8091; backend = 8081; frontend = 3001 }
+$Ports = [ordered]@{ postgres = 5433; redis = 6380; backend = 8081; frontend = 3001 }
 $Executables = @{
     postgres = Join-Path $PgBin 'postgres.exe'
     redis = Join-Path $RedisBin 'redis-server.exe'
     backend = $BackendExe
 }
 $NodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
-if ($NodeCommand) { $Executables.frontend = $NodeCommand.Source; $Executables.worker = $NodeCommand.Source }
+if ($NodeCommand) { $Executables.frontend = $NodeCommand.Source }
 
 function Require-File([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -75,9 +71,6 @@ function Read-Record([string]$Name) {
     }
     if ($Name -eq 'frontend' -and $Record.EntryPoint -ne $ViteEntry) {
         throw "Frontend process record belongs to another checkout: $RecordPath"
-    }
-    if ($Name -eq 'worker' -and $Record.EntryPoint -ne $WorkerEntry) {
-        throw "Worker process record belongs to another checkout: $RecordPath"
     }
     return $Record
 }
@@ -118,7 +111,7 @@ function Save-Record([string]$Name, $Process) {
         ProcessId = $Process.Id
         Executable = Get-CanonicalPath $Executables[$Name]
         StartTimeUtcTicks = $Process.StartTime.ToUniversalTime().Ticks.ToString()
-        EntryPoint = $(if ($Name -eq 'frontend') { $ViteEntry } elseif ($Name -eq 'worker') { $WorkerEntry } else { '' })
+        EntryPoint = $(if ($Name -eq 'frontend') { $ViteEntry } else { '' })
     }
     $Record | ConvertTo-Json | Set-Content -LiteralPath (Get-RecordPath $Name) -Encoding UTF8
 }
@@ -316,8 +309,6 @@ function Get-BackendEnvironment($Secrets) {
         ADMIN_EMAIL = [string]$Secrets.AdminEmail; ADMIN_PASSWORD = [string]$Secrets.AdminPassword
         JWT_SECRET = [string]$Secrets.JwtSecret; JWT_EXPIRE_HOUR = '24'
         TOTP_ENCRYPTION_KEY = [string]$Secrets.TotpEncryptionKey
-        OPENAI_REAUTH_WORKER_URL = 'http://127.0.0.1:8091'
-        OPENAI_REAUTH_WORKER_TOKEN = Get-WorkerToken
         ZONEINFO = Join-Path $DevRoot 'runtime\go\lib\time\zoneinfo.zip'
         PRICING_FALLBACK_FILE = Join-Path $RepoRoot 'backend\resources\model-pricing\model_prices_and_context_window.json'
         PRICING_DATA_DIR = Join-Path $AppData 'data'
@@ -325,49 +316,15 @@ function Get-BackendEnvironment($Secrets) {
     }
 }
 
-function Get-WorkerToken {
-    if (-not (Test-Path -LiteralPath $WorkerTokenFile)) {
-        $TokenBytes = New-Object byte[] 32
-        $Generator = [Security.Cryptography.RandomNumberGenerator]::Create()
-        try { $Generator.GetBytes($TokenBytes) } finally { $Generator.Dispose() }
-        # Stable, local-only secret; it is never placed in command arguments or output.
-        [IO.File]::WriteAllText($WorkerTokenFile, [Convert]::ToBase64String($TokenBytes))
-    }
-    $WorkerToken = [IO.File]::ReadAllText($WorkerTokenFile).Trim()
-    if ($WorkerToken.Length -lt 32 -or $WorkerToken -match '\s') { throw 'Invalid saved worker token.' }
-    return $WorkerToken
-}
-
-function Start-PoolWorker {
-    Require-File $WorkerEntry
-    Require-File (Join-Path $WorkerDir 'node_modules\playwright\package.json')
-    $WorkerEnvironment = @{
-        OPENAI_REAUTH_WORKER_TOKEN = Get-WorkerToken
-        HOST = '127.0.0.1'; PORT = '8091'
-        OPENAI_REAUTH_WORKER_CONCURRENCY = '1'
-        PLAYWRIGHT_BROWSERS_PATH = $WorkerBrowserPath
-    }
-    $StartedWorker = $false
-    try {
-        $StartedWorker = Start-PoolProcess 'worker' @($WorkerEntry) $WorkerDir $WorkerEnvironment
-        Wait-PoolReady 'worker' 'http://127.0.0.1:8091/health' 30
-        return $StartedWorker
-    } catch {
-        if ($StartedWorker) { Stop-PoolProcess 'worker' }
-        throw
-    }
-}
-
 function Restart-PoolBackend {
     # Only replace the recorded backend; PostgreSQL, Redis and Vite stay running.
-    foreach ($Name in @('postgres', 'redis', 'backend', 'worker')) {
+    foreach ($Name in @('postgres', 'redis', 'backend')) {
         Assert-PortOwnership $Name (Get-VerifiedProcess (Read-Record $Name))
     }
     $BackendEnvironment = Get-BackendEnvironment (Read-Secrets)
     $StagedBackend = Build-PoolBackend -ForRestart
     $BackupBackend = Join-Path $DevRoot 'bin\sub2api-pool-before-restart.exe'
     try {
-        $null = Start-PoolWorker
         Copy-Item -LiteralPath $BackendExe -Destination $BackupBackend -Force
         Stop-PoolProcess 'backend'
         try {
@@ -465,7 +422,6 @@ function Start-Pool {
         # The bundled MSYS Redis interprets Windows absolute config paths as relative.
         if (Start-PoolProcess 'redis' @('redis.conf') $RedisData @{}) { $StartedNames.Add('redis') }
         Wait-PoolReady 'redis'
-        if (Start-PoolWorker) { $StartedNames.Add('worker') }
         if (Start-PoolProcess 'backend' @() $AppData (Get-BackendEnvironment $Secrets)) { $StartedNames.Add('backend') }
         Wait-PoolReady 'backend' 'http://127.0.0.1:8081/health'
         $FrontendEnvironment = @{ VITE_DEV_PORT = '3001'; VITE_DEV_PROXY_TARGET = 'http://127.0.0.1:8081'; VITE_API_BASE_URL = '/api/v1' }
@@ -494,7 +450,7 @@ try {
         'Start' { Start-Pool }
         'Stop' {
             $StopErrors = @()
-            foreach ($Name in @('frontend', 'backend', 'worker', 'redis', 'postgres')) {
+            foreach ($Name in @('frontend', 'backend', 'redis', 'postgres')) {
                 try { Stop-PoolProcess $Name } catch { $StopErrors += $_.Exception.Message }
             }
             if ($StopErrors.Count -gt 0) { throw ($StopErrors -join [Environment]::NewLine) }

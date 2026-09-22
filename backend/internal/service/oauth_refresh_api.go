@@ -194,9 +194,6 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	if api.tokenCache != nil {
 		acquired, lockErr := api.tokenCache.AcquireRefreshLock(ctx, cacheKey, api.lockTTL)
 		if lockErr != nil {
-			if OpenAIReauthEnabled(account) {
-				return nil, errors.New("openai refresh lock unavailable")
-			}
 			// Redis 错误，降级为无锁刷新（进程内互斥锁仍生效）
 			slog.Warn("oauth_refresh_lock_failed_degraded",
 				"account_id", account.ID,

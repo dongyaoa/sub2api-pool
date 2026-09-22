@@ -14,7 +14,6 @@ D:\内容\sub2api\sub2api-pool\.dev\data
 | --- | --- | --- |
 | 浏览器入口 | `http://localhost:3001` | `http://127.0.0.1:3000` |
 | 后端 | `127.0.0.1:8081` | `127.0.0.1:8080` |
-| OpenAI 自动授权 worker | `127.0.0.1:8091` | 不使用 |
 | PostgreSQL | `127.0.0.1:5433`，库及用户 `sub2api_pool` | `127.0.0.1:5432`，库 `sub2api` |
 | Redis | 独立实例 `127.0.0.1:6380` | `127.0.0.1:6379` |
 | 数据目录 | 本仓库 `.dev/data` | `C:\tmp\sub2api-preview` |
@@ -34,7 +33,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-pool.ps1 -Acti
 # 查看本号池实例状态。
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-pool.ps1 -Action Status
 
-# 编译并仅重启号池后端，同时启动自动授权 worker；保留数据库、Redis 和前端进程。
+# 编译并仅重启号池后端；保留数据库、Redis 和前端进程。
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-pool.ps1 -Action RestartBackend
 
 # 停止脚本管理的本号池实例，数据继续保留。
@@ -68,15 +67,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-pool.ps1 -Acti
 `Build` 仅编译 Go 后端到 `.dev/bin/sub2api-pool.exe`；正常前端开发不需要构建生产资源。
 
 也可直接执行 `-Action RestartBackend`：先编译新程序，编译通过后才替换当前后端；启动失败会恢复旧程序。前端热更新不会自动更新后端，如果新功能接口返回 404，需执行此操作。
-
-自动授权 worker 随 `Start` 或 `RestartBackend` 在后台启动，随 `Stop` 停止。两端共享的随机令牌首次启动时保存在被 Git 忽略的 `.dev/openai-reauth-worker-token.txt`，无需手动复制或每次设置环境变量；已有 `TOTP_ENCRYPTION_KEY` 保持不变。首次准备环境时需要在 `tools/openai-reauth-worker` 安装依赖，再从仓库根目录安装其专用浏览器：
-
-```powershell
-$env:PLAYWRIGHT_BROWSERS_PATH = [IO.Path]::GetFullPath('.dev/cache/playwright')
-node tools/openai-reauth-worker/node_modules/playwright/cli.js install chromium
-```
-
-账号页可直接“导入新账号并授权”。已有 OpenAI OAuth 账号在对应行“配置 2FA”，保存后等待授权失效自动恢复；需要立即测试时再选择“立即重新授权”。密码与 TOTP 不会回显，也不会进入账号导出。实际出口 IP 由账号固定代理提供。
 
 前端的本机配置位于 `frontend/.env.local`，同时用于开发和构建预览，都会使用号池端口和后端代理。可追踪的模板是 `frontend/.env.pool.example`。`VITE_*` 变量会进入浏览器环境，不能在其中存储数据库密码或其他密钥。
 
