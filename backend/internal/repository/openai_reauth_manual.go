@@ -31,7 +31,7 @@ func (r *openAIReauthRepository) CompleteManual(ctx context.Context, account *se
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Account first, configuration second, matching Save/Enqueue/Complete lock
 	// order. Preserve status, schedulable, all limits and ordinary settings.
 	result, err := tx.ExecContext(ctx, `UPDATE accounts a SET

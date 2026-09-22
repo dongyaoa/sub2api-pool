@@ -16,7 +16,7 @@ func reauthMock(t *testing.T) (service.OpenAIReauthRepository, sqlmock.Sqlmock) 
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, mock.ExpectationsWereMet()); db.Close() })
+	t.Cleanup(func() { require.NoError(t, mock.ExpectationsWereMet()); _ = db.Close() })
 	return NewOpenAIReauthRepository(db), mock
 }
 

@@ -22,7 +22,7 @@ func (r *openAIReauthRepository) SaveBinding(ctx context.Context, account *servi
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var rawExtra []byte
 	var existingCipher, proxyStatus string
 	var proxyID, fallbackID sql.NullInt64

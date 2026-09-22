@@ -58,7 +58,7 @@ func (r *openAIReauthRepository) Save(ctx context.Context, id int64, cipher stri
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var platform, accountType, proxyStatus, existingCipher, credentialsHash, proxyHash string
 	var parentID, proxyID sql.NullInt64
 	var proxyDeleted, proxyExpires sql.NullTime
@@ -158,7 +158,7 @@ func (r *openAIReauthRepository) ListStatuses(ctx context.Context, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := make([]service.OpenAIReauthStatus, 0)
 	for rows.Next() {
 		var status service.OpenAIReauthStatus
@@ -184,7 +184,7 @@ func (r *openAIReauthRepository) Enqueue(ctx context.Context, id int64, reason s
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Account first, config second: the same lock order used by Save/Complete.
 	var credentialsHash, proxyHash string
 	err = tx.QueryRowContext(ctx, `SELECT md5(COALESCE(a.credentials, '{}'::jsonb)::text), `+
@@ -345,7 +345,7 @@ func (r *openAIReauthRepository) Complete(ctx context.Context, job *service.Open
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Only credentials and our private marker are updated; all user settings,
 	// manual status/schedulable controls and unrelated cooldowns are untouched.
 	result, err := tx.ExecContext(ctx, `UPDATE accounts a SET

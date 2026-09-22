@@ -15,11 +15,18 @@ func reauthBindingInput() OpenAIReauthCredentialsInput {
 	return OpenAIReauthCredentialsInput{Email: "fixture@example.test", Password: "fixture-password", TOTPSecret: "JBSWY3DPEHPK3PXP", Enabled: &enabled}
 }
 
+func reauthBindingAccounts(t *testing.T, s *OpenAIReauthService) *reauthAccountsStub {
+	t.Helper()
+	accounts, ok := s.accounts.(*reauthAccountsStub)
+	require.True(t, ok)
+	return accounts
+}
+
 func TestOpenAIReauthBindingDoesNotInterruptHealthyOrDisabledAccounts(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "healthy", true: "manual-disabled"}[disabled], func(t *testing.T) {
 			s, _, store, oauth, _ := reauthFixture(t)
-			a := s.accounts.(*reauthAccountsStub).account
+			a := reauthBindingAccounts(t, s).account
 			delete(a.Extra, OpenAIReauthPendingKey)
 			if disabled {
 				a.Status = "disabled"
@@ -40,7 +47,9 @@ func TestOpenAIReauthBindingDoesNotInterruptHealthyOrDisabledAccounts(t *testing
 			after, _ := json.Marshal(a)
 			require.JSONEq(t, string(before), string(after), "binding must preserve tokens, proxy, groups and manual controls")
 			var secret openAIReauthSecret
-			require.NoError(t, json.Unmarshal([]byte(s.encryptor.(*reauthCipherStub).plain), &secret))
+			cipher, ok := s.encryptor.(*reauthCipherStub)
+			require.True(t, ok)
+			require.NoError(t, json.Unmarshal([]byte(cipher.plain), &secret))
 			require.Equal(t, input.Password, secret.Password)
 		})
 	}
@@ -49,7 +58,7 @@ func TestOpenAIReauthBindingDoesNotInterruptHealthyOrDisabledAccounts(t *testing
 func TestOpenAIReauthBindingRefusesAnotherOrUnknownIdentity(t *testing.T) {
 	for _, tc := range []struct{ email, want string }{{"other@example.test", "identity_mismatch"}, {"", "identity_unknown"}} {
 		s, _, store, _, _ := reauthFixture(t)
-		s.accounts.(*reauthAccountsStub).account.Credentials["email"] = tc.email
+		reauthBindingAccounts(t, s).account.Credentials["email"] = tc.email
 		_, err := s.BindCredentials(context.Background(), 1, reauthBindingInput())
 		require.EqualError(t, err, tc.want)
 		require.Zero(t, store.bound)
@@ -58,7 +67,7 @@ func TestOpenAIReauthBindingRefusesAnotherOrUnknownIdentity(t *testing.T) {
 
 func TestOpenAIReauthBindingAcceptsStableIdentityWithoutStoredEmail(t *testing.T) {
 	s, _, store, _, _ := reauthFixture(t)
-	a := s.accounts.(*reauthAccountsStub).account
+	a := reauthBindingAccounts(t, s).account
 	delete(a.Credentials, "email")
 	a.Name = "legacy-account"
 	a.Credentials["chatgpt_user_id"] = "original-user"
@@ -84,7 +93,7 @@ func TestOpenAIReauthExplicitImportModesDoNotReauthorizeExisting(t *testing.T) {
 	require.Equal(t, "bound", results[0].Status)
 	require.Zero(t, store.enqueued)
 	require.Zero(t, oauth.refreshes)
-	s.accounts.(*reauthAccountsStub).account = nil
+	reauthBindingAccounts(t, s).account = nil
 	results, err = s.Import(context.Background(), OpenAIReauthImportInput{Mode: "bind", Content: content})
 	require.NoError(t, err)
 	require.Equal(t, "account_not_found", results[0].ErrorCode)
@@ -92,7 +101,7 @@ func TestOpenAIReauthExplicitImportModesDoNotReauthorizeExisting(t *testing.T) {
 
 func TestOpenAIReauthCreateFindsExistingIdentityInIDToken(t *testing.T) {
 	s, _, store, _, _ := reauthFixture(t)
-	a := s.accounts.(*reauthAccountsStub).account
+	a := reauthBindingAccounts(t, s).account
 	delete(a.Credentials, "email")
 	a.Name = "legacy-account"
 	claims, err := json.Marshal(map[string]any{"email": "fixture@example.test"})
@@ -116,7 +125,7 @@ func (s *reauthCreateAdminStub) CreateAccount(_ context.Context, input *CreateAc
 
 func TestOpenAIReauthCreateWorksWithoutAnyExistingAccounts(t *testing.T) {
 	s, _, store, _, _ := reauthFixture(t)
-	s.accounts.(*reauthAccountsStub).account = nil
+	reauthBindingAccounts(t, s).account = nil
 	admin := &reauthCreateAdminStub{}
 	s.admin = admin
 	proxyID := int64(2)
@@ -134,7 +143,7 @@ func TestOpenAIReauthCreateWorksWithoutAnyExistingAccounts(t *testing.T) {
 
 func TestOpenAIReauthEnableOnlyBindsAndRunRespectsManualDisable(t *testing.T) {
 	s, _, store, _, _ := reauthFixture(t)
-	a := s.accounts.(*reauthAccountsStub).account
+	a := reauthBindingAccounts(t, s).account
 	a.Schedulable = false
 	require.NoError(t, s.SetEnabled(context.Background(), a.ID, true))
 	require.Equal(t, 1, store.bound)

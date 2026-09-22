@@ -53,7 +53,7 @@ func NewOpenAIReauthService(repo OpenAIReauthRepository, accounts AccountReposit
 	u, err := url.Parse(workerURL)
 	// Do not send reusable account passwords over an unencrypted remote link.
 	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
-		(u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1"))) {
+		(u.Scheme != "https" && (u.Scheme != "http" || (u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && u.Hostname() != "::1"))) {
 		workerURL = ""
 	}
 	return &OpenAIReauthService{repo: repo, accounts: accounts, proxies: proxies, admin: admin, oauth: oauth,
@@ -370,17 +370,19 @@ func (s *OpenAIReauthService) execute(ctx context.Context, job *OpenAIReauthJob)
 		}
 		body, _ := json.Marshal(map[string]string{"email": secret.Email, "password": secret.Password, "totp_secret": secret.TOTPSecret,
 			"auth_url": u.String(), "redirect_uri": openai.DefaultRedirectURI, "proxy_url": p.URL(), "expected_email": secret.Email, "workspace_id": a.GetCredential("chatgpt_account_id")})
+		// #nosec G704 -- The constructor validates the fixed operator-configured worker URL; request data cannot select its destination.
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.workerURL+"/login", bytes.NewReader(body))
 		if err != nil {
 			return "worker_unavailable"
 		}
 		req.Header.Set("Authorization", "Bearer "+s.workerToken)
 		req.Header.Set("Content-Type", "application/json")
+		// #nosec G704 -- The destination is the fixed configured worker, and the client rejects redirects.
 		resp, err := s.client.Do(req)
 		if err != nil {
 			return "worker_unavailable"
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		var result struct {
 			Code      string `json:"code"`
 			State     string `json:"state"`
