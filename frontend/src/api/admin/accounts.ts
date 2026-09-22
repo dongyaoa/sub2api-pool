@@ -336,6 +336,7 @@ export async function applyOAuthCredentials(
     type: 'oauth' | 'setup-token'
     credentials: Record<string, unknown>
     extra?: Record<string, unknown>
+    openai_oauth_session?: { session_id: string; code: string; state: string }
   }
 ): Promise<Account> {
   const { data } = await apiClient.post<Account>(

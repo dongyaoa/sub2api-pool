@@ -863,7 +863,7 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
-	return service.Account{
+	metadata := service.Account{
 		ID:                      account.ID,
 		Name:                    account.Name,
 		Platform:                account.Platform,
@@ -893,6 +893,17 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		Credentials:             filterSchedulerCredentials(account.Credentials),
 		Extra:                   filterSchedulerExtra(account.Extra),
 	}
+	if service.OpenAIReauthEnabled(&account) {
+		// Strict accounts need proxy health while filtering candidates. Keep only
+		// routing identity/health; authentication secrets stay in the full account.
+		metadata.ProxyID = account.ProxyID
+		metadata.ProxyFallbackOriginID = account.ProxyFallbackOriginID
+		if account.Proxy != nil {
+			metadata.Proxy = &service.Proxy{ID: account.Proxy.ID, Protocol: account.Proxy.Protocol,
+				Status: account.Proxy.Status, ExpiresAt: account.Proxy.ExpiresAt}
+		}
+	}
+	return metadata
 }
 
 func filterSchedulerProxyPool(entries []service.AccountProxyPoolEntry) []service.AccountProxyPoolEntry {
@@ -1049,6 +1060,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"auto_pause_7d_disabled",
 		"model_rate_limits",
 		service.AccountProxyPoolExtraKey,
+		service.OpenAIReauthEnabledKey,
+		service.OpenAIReauthPendingKey,
 		service.UpstreamBillingProbeExtraKey,
 		service.GrokMediaEligibleExtraKey,
 		"grok_billing_snapshot",

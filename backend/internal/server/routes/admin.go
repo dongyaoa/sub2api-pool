@@ -448,6 +448,11 @@ func registerAnnouncementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	openai := admin.Group("/openai")
 	{
+		openai.GET("/auto-reauth", h.Admin.OpenAIOAuth.ListAutoReauth)
+		openai.POST("/auto-reauth/import", h.Admin.OpenAIOAuth.ImportAutoReauth)
+		openai.PUT("/accounts/:id/auto-reauth", h.Admin.OpenAIOAuth.SetAutoReauthEnabled)
+		openai.POST("/accounts/:id/auto-reauth/credentials", h.Admin.OpenAIOAuth.BindAutoReauthCredentials)
+		openai.POST("/accounts/:id/auto-reauth/run", h.Admin.OpenAIOAuth.RunAutoReauth)
 		openai.POST("/generate-auth-url", h.Admin.OpenAIOAuth.GenerateAuthURL)
 		openai.POST("/exchange-code", h.Admin.OpenAIOAuth.ExchangeCode)
 		openai.POST("/refresh-token", h.Admin.OpenAIOAuth.RefreshToken)

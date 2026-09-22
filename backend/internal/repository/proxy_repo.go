@@ -790,6 +790,15 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 		service.StatusExpired, proxyID); err != nil {
 		return nil, err
 	}
+	// Reauthorization accounts keep their original proxy binding. Publish the
+	// expired proxy to their scheduler snapshots so they pause without fallback.
+	if _, err := exec.ExecContext(ctx, `INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
+		SELECT $1, id, NULL, NULL FROM accounts
+		WHERE proxy_id = $2 AND deleted_at IS NULL
+		AND extra->'openai_auto_reauth_enabled' = 'true'::jsonb`,
+		service.SchedulerOutboxEventAccountChanged, proxyID); err != nil {
+		return nil, err
+	}
 	if !change {
 		accountIDs, err := invalidateProxyProbeSnapshots(ctx, exec, proxyID)
 		if err != nil {
@@ -816,6 +825,7 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 				END,
 				updated_at=NOW()
 			WHERE proxy_id=$1 AND deleted_at IS NULL
+			AND COALESCE(extra->'openai_auto_reauth_enabled', 'false'::jsonb) <> 'true'::jsonb
 			RETURNING id`, proxyID)
 	} else {
 		rows, err = exec.QueryContext(ctx, `
@@ -827,6 +837,7 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 				END,
 				updated_at=NOW()
 			WHERE proxy_id=$1 AND deleted_at IS NULL
+			AND COALESCE(extra->'openai_auto_reauth_enabled', 'false'::jsonb) <> 'true'::jsonb
 			RETURNING id`, proxyID, *target)
 	}
 	if err != nil {

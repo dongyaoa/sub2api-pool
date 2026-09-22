@@ -77,6 +77,7 @@ type OpenAITokenCache = GeminiTokenCache
 
 // OpenAITokenProvider manages access_token for OpenAI OAuth accounts.
 type OpenAITokenProvider struct {
+	openAIReauth       *OpenAIReauthService
 	accountRepo        AccountRepository
 	tokenCache         OpenAITokenCache
 	openAIOAuthService *OpenAIOAuthService
@@ -139,14 +140,35 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
 		return "", errors.New("not an openai oauth account")
 	}
+	// Disabling the automation does not repair a revoked authorization. Keep
+	// its durable pending gate effective before any cache hit or fallback.
+	if OpenAIReauthPending(account) {
+		return "", errors.New("reauth_account_pending")
+	}
 
 	cacheKey := OpenAITokenCacheKey(account)
+	strictReauth := OpenAIReauthEnabled(account)
+	routingAccount := account
+	if strictReauth {
+		if p.openAIReauth == nil {
+			return "", errors.New("reauth_account_unavailable")
+		}
+		fresh, err := p.openAIReauth.CheckForUse(ctx, account)
+		if err != nil {
+			return "", err
+		}
+		account = fresh
+	}
 
 	// 1) Try cache first.
 	if p.tokenCache != nil {
 		if token, err := p.tokenCache.GetAccessToken(ctx, cacheKey); err == nil && strings.TrimSpace(token) != "" {
-			slog.Debug("openai_token_cache_hit", "account_id", account.ID)
-			return token, nil
+			// A successful rotation must not depend on a best-effort Redis
+			// deletion. The authoritative credential snapshot wins over cache.
+			if !strictReauth || token == account.GetCredential("access_token") {
+				slog.Debug("openai_token_cache_hit", "account_id", account.ID)
+				return token, nil
+			}
 		} else if err != nil {
 			slog.Warn("openai_token_cache_get_failed", "account_id", account.ID, "error", err)
 		}
@@ -156,10 +178,25 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 
 	// 2) Refresh if needed (pre-expiry skew).
 	expiresAt := account.GetCredentialAsTime("expires_at")
+	acceptWaitedToken := func(token string) (bool, error) {
+		if strictReauth {
+			fresh, err := p.openAIReauth.CheckForUse(ctx, routingAccount)
+			if err != nil {
+				return false, err
+			}
+			account = fresh
+			expiresAt = fresh.GetCredentialAsTime("expires_at")
+			return strings.TrimSpace(token) != "" && token == fresh.GetCredential("access_token"), nil
+		}
+		return strings.TrimSpace(token) != "", nil
+	}
 	needsRefresh := !account.IsOpenAIPersonalAccessToken() && (expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew)
 	if needsRefresh && strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
 		if expiresAt != nil && !time.Now().Before(*expiresAt) {
 			const reason = "openai access_token expired and refresh_token is missing"
+			if p.openAIReauth.Trigger(ctx, account, "refresh_token_missing") {
+				return "", errors.New("reauth_account_pending")
+			}
 			// 永久故障：缺失 refresh_token 时账号无法自愈，必须立即从调度池剔除，
 			// 否则会被反复选中、每次都在 token 阶段直接返回错误，对用户呈现持续 502。
 			p.disableAccountMissingRefreshToken(account, reason)
@@ -175,6 +212,9 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 
 		result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, openAITokenRefreshSkew)
 		if err != nil {
+			if openAIReauthRefreshRejected(err) && p.openAIReauth.Trigger(ctx, account, "refresh_rejected") {
+				return "", errors.New("reauth_account_pending")
+			}
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", err
 			}
@@ -189,7 +229,11 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 				if waitErr != nil {
 					return "", waitErr
 				}
-				if strings.TrimSpace(token) != "" {
+				accepted, err := acceptWaitedToken(token)
+				if err != nil {
+					return "", err
+				}
+				if accepted {
 					slog.Debug("openai_token_cache_hit_after_wait", "account_id", account.ID)
 					return token, nil
 				}
@@ -220,13 +264,25 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			if waitErr != nil {
 				return "", waitErr
 			}
-			if strings.TrimSpace(token) != "" {
+			accepted, err := acceptWaitedToken(token)
+			if err != nil {
+				return "", err
+			}
+			if accepted {
 				slog.Debug("openai_token_cache_hit_after_wait", "account_id", account.ID)
 				return token, nil
 			}
 		}
 	}
 
+	if strictReauth {
+		fresh, err := p.openAIReauth.CheckForUse(ctx, routingAccount)
+		if err != nil {
+			return "", err
+		}
+		account = fresh
+		expiresAt = fresh.GetCredentialAsTime("expires_at")
+	}
 	accessToken := account.GetCredential("access_token")
 	if strings.TrimSpace(accessToken) == "" {
 		return "", errors.New("access_token not found in credentials")
@@ -234,7 +290,11 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 
 	// 3) Populate cache with TTL.
 	if p.tokenCache != nil {
-		latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
+		var latestAccount *Account
+		isStale := false
+		if !strictReauth {
+			latestAccount, isStale = CheckTokenVersion(ctx, account, p.accountRepo)
+		}
 		if isStale && latestAccount != nil {
 			slog.Debug("openai_token_version_stale_use_latest", "account_id", account.ID)
 			accessToken = latestAccount.GetOpenAIAccessToken()

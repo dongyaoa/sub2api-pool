@@ -121,6 +121,9 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		return true
 	}
 
+	if s != nil && s.rateLimitService.tryOpenAIReauth(stateCtx, account, statusCode) {
+		return true
+	}
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIContextWindowError("", responseBody) {
 		return false
 	}

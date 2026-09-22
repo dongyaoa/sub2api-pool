@@ -34,6 +34,16 @@ build/
 # Node modules (will be installed in container)
 frontend/node_modules/
 node_modules/
+**/node_modules/
+.pnpm-store/
+
+# Local runtimes, credentials, tooling state, and caches
+.dev/
+.codex/
+.agents/
+.cache/
+.gocache/
+backend/.gocache/
 
 # Go build cache (will be built in container)
 backend/vendor/
@@ -47,6 +57,9 @@ coverage/
 # Environment files
 .env
 .env.*
+**/.env
+**/.env.*
+**/*.env
 !.env.example
 
 # 本地闭源插件目录可能包含发布签名私钥，绝不能进入 Docker 构建上下文。
@@ -55,6 +68,9 @@ coverage/
 # Local config
 config.yaml
 config.local.yaml
+backend/config.yaml
+backend/.installed
+backend/data/
 
 # Logs
 *.log

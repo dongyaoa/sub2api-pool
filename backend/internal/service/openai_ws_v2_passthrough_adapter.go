@@ -867,6 +867,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	if err := validateOpenAIReauthCredentialOwnerProxy(ctx, s.accountRepo, account, proxyURL); err != nil {
+		return err
+	}
 
 	dialer := s.getOpenAIWSPassthroughDialer()
 	if dialer == nil {

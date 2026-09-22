@@ -12,6 +12,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOpenAIReauthPrivacyNeverFallsBackToDirect(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		a := reauthTransportAccount()
+		a.Credentials = map[string]any{"access_token": "fixture-token"}
+		a.Extra[OpenAIReauthPendingKey] = pending
+		calls := 0
+		factory := func(string) (*req.Client, error) { calls++; return nil, errors.New("must not send") }
+		proxies := &reauthProxyStub{err: errors.New("proxy unavailable")}
+		admin := &adminServiceImpl{proxyRepo: proxies, privacyClientFactory: factory}
+		require.Empty(t, admin.EnsureOpenAIPrivacy(context.Background(), a))
+		require.Empty(t, admin.ForceOpenAIPrivacy(context.Background(), a))
+		refresh := &TokenRefreshService{proxyRepo: proxies, privacyClientFactory: factory}
+		refresh.ensureOpenAIPrivacy(context.Background(), a)
+		require.Zero(t, calls)
+	}
+}
+
 func TestAdminService_EnsureOpenAIPrivacy_RetriesNonSuccessModes(t *testing.T) {
 	t.Parallel()
 

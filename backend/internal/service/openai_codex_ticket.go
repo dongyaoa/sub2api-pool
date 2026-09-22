@@ -585,9 +585,10 @@ func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, a
 			_ = resp.Body.Close()
 		}
 	}()
-	if resp.StatusCode == http.StatusUnauthorized {
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
 		s.stopOpenAICodexTicketHarvestOnUnauthorized(ctx, account, token)
-	} else if resp.StatusCode == http.StatusTooManyRequests {
+	case http.StatusTooManyRequests:
 		s.pauseOpenAICodexTicketHarvestOnQuota(ctx, account, resp.Header)
 	}
 	return extractOpenAICodexTurnState(resp.Header), resp.StatusCode, attempt, egress, nil

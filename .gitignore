@@ -33,6 +33,7 @@ backend/.gocache/
 # Node.js / Vue 前端
 # ===================
 node_modules/
+.pnpm-store/
 frontend/node_modules/
 frontend/dist/
 *.local

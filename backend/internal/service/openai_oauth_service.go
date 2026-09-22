@@ -337,6 +337,9 @@ func resolveChatGPTSubscriptionAccountID(tokenInfo *OpenAITokenInfo, orgID strin
 
 // RefreshAccountToken refreshes token for an OpenAI OAuth account
 func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*OpenAITokenInfo, error) {
+	if OpenAIReauthPending(account) {
+		return nil, infraerrors.New(http.StatusConflict, "OPENAI_REAUTH_PENDING", "account authorization recovery is pending")
+	}
 	if account.Platform != PlatformOpenAI {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT", "account is not an OpenAI account")
 	}
@@ -345,7 +348,13 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	}
 
 	var proxyURL string
-	if account.ProxyID != nil && s.proxyRepo != nil {
+	if OpenAIReauthEnabled(account) {
+		proxy, err := StrictOpenAIProxy(ctx, account, s.proxyRepo)
+		if err != nil {
+			return nil, err
+		}
+		proxyURL = proxy.URL()
+	} else if account.ProxyID != nil && s.proxyRepo != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
 		if err == nil && proxy != nil {
 			proxyURL = proxy.URL()

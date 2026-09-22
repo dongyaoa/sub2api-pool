@@ -277,6 +277,14 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 	if sel == nil {
 		return nil
 	}
+	if sel.Account != nil && (OpenAIReauthEnabled(sel.Account) || sel.Account.IsShadow()) {
+		// Advanced and legacy selection both return through this helper. Token
+		// provenance belongs to one selected attempt, never a shared cache row.
+		account := *sel.Account
+		account.openAIReauthRequestScoped = true
+		account.openAIReauthObservedTokenHash = ""
+		sel.Account = &account
+	}
 	if gate, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && gate != nil {
 		sel.profitGate = gate
 	}

@@ -19,6 +19,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCanTraceCodexTicketEgressRestrictsOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, target, host, opaque string
+		allowed                            bool
+	}{
+		{name: "official", method: http.MethodPost, target: "https://chatgpt.com/backend-api/codex/responses", allowed: true},
+		{name: "explicit_tls_port", method: http.MethodPost, target: "https://chatgpt.com:443/backend-api/codex/responses", allowed: true},
+		{name: "plaintext", method: http.MethodPost, target: "http://chatgpt.com/backend-api/codex/responses"},
+		{name: "other_origin", method: http.MethodPost, target: "https://example.com/backend-api/codex/responses"},
+		{name: "other_port", method: http.MethodPost, target: "https://chatgpt.com:8443/backend-api/codex/responses"},
+		{name: "other_path", method: http.MethodPost, target: "https://chatgpt.com/other"},
+		{name: "other_method", method: http.MethodGet, target: "https://chatgpt.com/backend-api/codex/responses"},
+		{name: "host_override", method: http.MethodPost, target: "https://chatgpt.com/backend-api/codex/responses", host: "example.com"},
+		{name: "opaque_origin", method: http.MethodPost, target: "https://chatgpt.com/backend-api/codex/responses", opaque: "//example.com/backend-api/codex/responses"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), tc.method, tc.target, nil)
+			require.NoError(t, err)
+			req.Host = tc.host
+			req.URL.Opaque = tc.opaque
+			require.Equal(t, tc.allowed, canTraceCodexTicketEgress(req))
+		})
+	}
+	require.False(t, canTraceCodexTicketEgress(nil))
+	require.False(t, canTraceCodexTicketEgress(&http.Request{}))
+}
+
 func startCodexEgressConnectProxy(t *testing.T, target string) (string, *atomic.Int64) {
 	t.Helper()
 	var connects atomic.Int64
@@ -220,11 +247,12 @@ func TestCodexTicketEgressTraceFailuresDoNotPreventTickets(t *testing.T) {
 				"duplicate": "ambiguous_ip", "missing": "missing_ip", "read_error": "response_read_error", "timeout": "timeout",
 			}
 			require.Equal(t, reasons[scenario], result.Error.Reason)
-			if scenario == "redirect" {
+			switch scenario {
+			case "redirect":
 				require.Equal(t, http.StatusFound, result.Error.HTTPStatus)
-			} else if scenario == "status" {
+			case "status":
 				require.Equal(t, http.StatusForbidden, result.Error.HTTPStatus)
-			} else {
+			default:
 				require.Zero(t, result.Error.HTTPStatus)
 			}
 		})

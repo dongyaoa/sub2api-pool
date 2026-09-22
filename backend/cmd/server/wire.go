@@ -112,6 +112,7 @@ func provideCleanup(
 	subscriptionService *service.SubscriptionService,
 	oauth *service.OAuthService,
 	openaiOAuth *service.OpenAIOAuthService,
+	openaiReauth *service.OpenAIReauthService,
 	geminiOAuth *service.GeminiOAuthService,
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
@@ -309,6 +310,7 @@ func provideCleanup(
 				return nil
 			}},
 			{"OpenAIOAuthService", func() error {
+				openaiReauth.Stop()
 				openaiOAuth.Stop()
 				return nil
 			}},

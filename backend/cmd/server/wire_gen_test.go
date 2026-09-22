@@ -81,6 +81,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		&service.SubscriptionService{},
 		oauthSvc,
 		openAIOAuthSvc,
+		nil, // openAIReauth
 		geminiOAuthSvc,
 		antigravityOAuthSvc,
 		nil, // grokOAuth

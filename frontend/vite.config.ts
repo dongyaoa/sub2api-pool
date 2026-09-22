@@ -82,6 +82,13 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080'
   const devPort = Number(env.VITE_DEV_PORT || 3000)
+  const devHost = env.VITE_DEV_HOST || '0.0.0.0'
+  const strictPort = env.VITE_DEV_STRICT_PORT === 'true'
+  const apiProxy = {
+    '/api': { target: backendUrl, changeOrigin: true },
+    '/v1': { target: backendUrl, changeOrigin: true },
+    '/setup': { target: backendUrl, changeOrigin: true }
+  }
 
   return {
     plugins: [
@@ -155,22 +162,18 @@ export default defineConfig(({ mode }) => {
     }
   },
     server: {
-      host: '0.0.0.0',
+      host: devHost,
       port: devPort,
-      proxy: {
-        '/api': {
-          target: backendUrl,
-          changeOrigin: true
-        },
-        '/v1': {
-          target: backendUrl,
-          changeOrigin: true
-        },
-        '/setup': {
-          target: backendUrl,
-          changeOrigin: true
-        }
-      }
+      strictPort,
+      proxy: apiProxy
+    },
+    preview: {
+      host: env.VITE_PREVIEW_HOST || devHost,
+      port: Number(env.VITE_PREVIEW_PORT || 4173),
+      strictPort: env.VITE_PREVIEW_STRICT_PORT
+        ? env.VITE_PREVIEW_STRICT_PORT === 'true'
+        : strictPort,
+      proxy: apiProxy
     }
   }
 })

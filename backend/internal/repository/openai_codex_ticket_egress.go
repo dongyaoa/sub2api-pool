@@ -22,7 +22,7 @@ const codexTicketEgressTraceTimeout = 10 * time.Second
 // Only the known Codex endpoint opts into this additional same-origin request.
 func canTraceCodexTicketEgress(req *http.Request) bool {
 	return req != nil && req.URL != nil && req.Method == http.MethodPost &&
-		req.URL.Scheme == "https" && req.URL.Hostname() == "chatgpt.com" &&
+		req.URL.Scheme == "https" && req.URL.Opaque == "" && req.URL.Hostname() == "chatgpt.com" &&
 		(req.URL.Port() == "" || req.URL.Port() == "443") &&
 		(req.Host == "" || req.Host == "chatgpt.com") &&
 		req.URL.Path == "/backend-api/codex/responses"
@@ -111,7 +111,7 @@ func traceCodexTicketEgress(client *http.Client, req *http.Request, timeout time
 	target.Path, target.RawPath, target.RawQuery, target.Fragment = "/cdn-cgi/trace", "", "", ""
 	target.ForceQuery = false
 	target.User = nil
-	traceReq, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	traceReq, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil) // #nosec G704 -- The sole production caller validates the official HTTPS origin with canTraceCodexTicketEgress; only the fixed diagnostic path changes.
 	if err != nil {
 		return codexTicketEgressFailure("request_error"), nil
 	}
@@ -122,7 +122,7 @@ func traceCodexTicketEgress(client *http.Client, req *http.Request, timeout time
 	traceClient := *client
 	traceClient.Jar = nil
 	traceClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	resp, err := traceClient.Do(traceReq)
+	resp, err := traceClient.Do(traceReq) // #nosec G704 -- Official origin is allowlisted by canTraceCodexTicketEgress before entry; redirects are disabled above.
 	if err != nil {
 		return codexTicketEgressFailure(codexTicketEgressErrorReason(err, "network_error")), nil
 	}

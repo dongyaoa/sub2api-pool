@@ -57,7 +57,9 @@ func ProvideAdminHandlers(
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	settingService *service.SettingService,
 	openaiGatewayService *service.OpenAIGatewayService,
+	openAIReauthService *service.OpenAIReauthService,
 ) *AdminHandlers {
+	accountHandler.SetOpenAIReauthService(openAIReauthService)
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetCodexTicketSettings(settingService)
@@ -276,7 +278,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewDataManagementHandler,
 	admin.NewBackupHandler,
 	admin.NewOAuthHandler,
-	admin.NewOpenAIOAuthHandler,
+	admin.ProvideOpenAIOAuthHandler,
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
 	admin.NewGrokOAuthHandler,

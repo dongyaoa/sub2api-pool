@@ -138,3 +138,25 @@ func (s *ProxyExpirySuite) TestSweep_NoneMode_KeepsAccount() {
 	s.Require().NoError(err)
 	s.Require().Nil(origin)
 }
+
+func (s *ProxyExpirySuite) TestSweep_AutoReauthKeepsOriginalProxyForEveryFallback() {
+	for _, mode := range []string{service.FallbackModeDirect, service.FallbackModeProxy} {
+		s.Run(mode, func() {
+			past := time.Now().Add(-time.Hour)
+			backup := s.mkProxy("reauth-backup-"+mode, service.FallbackModeNone, nil, nil)
+			pid := s.mkProxy("reauth-main-"+mode, mode, &past, &backup)
+			aid := s.mkAccountWithProxy(pid)
+			_, err := s.tx.ExecContext(s.ctx, `UPDATE accounts SET platform='openai', type='oauth',
+				extra='{"openai_auto_reauth_enabled":true}'::jsonb WHERE id=$1`, aid)
+			s.Require().NoError(err)
+			_, err = s.repo.SweepExpiredProxies(s.ctx, time.Now())
+			s.Require().NoError(err)
+			s.Require().Equal(pid, *s.accountProxyID(aid))
+			var events int
+			err = scanSingleRow(s.ctx, s.tx, `SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1 AND event_type=$2`,
+				[]any{aid, service.SchedulerOutboxEventAccountChanged}, &events)
+			s.Require().NoError(err)
+			s.Require().Greater(events, 0)
+		})
+	}
+}

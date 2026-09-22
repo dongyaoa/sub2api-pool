@@ -747,6 +747,9 @@ func lockAndMergeAccountProbeExtra(
 		}
 	}
 	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
+	// These are managed authorization state. Ordinary account edits must neither
+	// erase a concurrent pending fault nor forge an enabled configuration.
+	extra = preserveOpenAIReauthExtra(extra, currentExtra)
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
@@ -2699,6 +2702,7 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
+	updates = stripOpenAIReauthExtraUpdate(updates)
 	if len(updates) == 0 {
 		return nil
 	}
@@ -2976,6 +2980,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		return 0, nil
 	}
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
+	updates.Extra = stripOpenAIReauthExtraUpdate(updates.Extra)
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)

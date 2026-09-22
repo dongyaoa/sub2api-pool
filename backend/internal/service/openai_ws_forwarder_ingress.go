@@ -83,6 +83,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	proxyURL := openAIAccountProxyURL(account)
+	if err := validateOpenAIReauthCredentialOwnerProxy(ctx, s.accountRepo, account, proxyURL); err != nil {
+		return err
+	}
 	hooks, finishRecentWebSocket := beginAccountRecentWebSocket(ctx, c, s.cache, account, recentRequestModel(firstClientMessage), hooks)
 	defer func() { finishRecentWebSocket(returnErr) }()
 	// A handler may reuse the same gin context across account failover attempts.
@@ -803,14 +807,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		WSURL:      wsURL,
 		Headers:    wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
+			if err := validateOpenAIReauthCredentialOwnerProxy(factoryCtx, s.accountRepo, account, proxyURL); err != nil {
+				return nil, err
+			}
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		ProxyURL:     proxyURL,
 		ForceNewConn: false,
 	}
 	pool := s.getOpenAIWSConnPool()

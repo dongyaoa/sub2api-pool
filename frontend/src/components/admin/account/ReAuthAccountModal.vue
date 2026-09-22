@@ -120,6 +120,10 @@
         </div>
       </div>
 
+      <p v-if="isAutomaticRecoveryPending" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+        {{ t('admin.accounts.autoReauth.manualHint') }}
+      </p>
+
       <OAuthAuthorizationFlow
         ref="oauthFlowRef"
         :add-method="addMethod"
@@ -130,7 +134,7 @@
         :show-help="isAnthropic"
         :show-proxy-warning="isAnthropic"
         :show-cookie-option="isAnthropic"
-        :show-refresh-token-option="isOpenAI || isAntigravity || isGrok"
+        :show-refresh-token-option="(isOpenAI && !isAutomaticRecoveryPending) || isAntigravity || isGrok"
         :show-sso-option="isGrok"
         :show-email-password-option="false"
         :allow-multiple="false"
@@ -250,6 +254,7 @@ const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('code_as
 // Computed - check platform
 const isOpenAI = computed(() => props.account?.platform === 'openai')
 const isOpenAILike = computed(() => isOpenAI.value)
+const isAutomaticRecoveryPending = computed(() => isOpenAI.value && props.account?.extra?.openai_auto_reauth_pending === true)
 const isGemini = computed(() => props.account?.platform === 'gemini')
 const isAnthropic = computed(() => props.account?.platform === 'anthropic')
 const isAntigravity = computed(() => props.account?.platform === 'antigravity')
@@ -400,6 +405,28 @@ const handleExchangeCode = async () => {
     if (!stateToUse) {
       oauthClient.error.value = t('admin.accounts.oauth.authFailed')
       appStore.showError(oauthClient.error.value)
+      return
+    }
+
+    if (props.account.extra?.openai_auto_reauth_pending === true) {
+      // The server must exchange this live PKCE session itself before clearing
+      // the automatic recovery marker; arbitrary token updates cannot do so.
+      oauthClient.loading.value = true
+      try {
+        const updatedAccount = await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
+          type: 'oauth',
+          credentials: {},
+          openai_oauth_session: { session_id: sessionId, code: authCode.trim(), state: stateToUse }
+        })
+        appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
+        emit('reauthorized', updatedAccount)
+        handleClose()
+      } catch {
+        oauthClient.error.value = t('admin.accounts.autoReauth.manualFailed')
+        appStore.showError(oauthClient.error.value)
+      } finally {
+        oauthClient.loading.value = false
+      }
       return
     }
 

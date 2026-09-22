@@ -38,6 +38,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
+	proxyURL := openAIAccountProxyURL(account)
+	if err := validateOpenAIReauthCredentialOwnerProxy(ctx, s.accountRepo, account, proxyURL); err != nil {
+		return nil, err
+	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -208,16 +212,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		WSURL:      wsURL,
 		Headers:    wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
+			if err := validateOpenAIReauthCredentialOwnerProxy(factoryCtx, s.accountRepo, account, proxyURL); err != nil {
+				return nil, err
+			}
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		ProxyURL:        proxyURL,
 	})
 	if err != nil {
 		var agentDialErr *openAIWSDialError
