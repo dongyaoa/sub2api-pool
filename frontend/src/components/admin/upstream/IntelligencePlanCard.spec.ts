@@ -14,6 +14,26 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it('places completed artwork duration at the right end of the model and reasoning row', () => {
+    const completed = { ...run(91), duration_ms: 14500 }
+    const view = render(plan({ recent_runs: [completed], latest_run: completed }))
+    const metadata = view.get('[data-testid="artwork-metadata"]')
+    expect(metadata.text()).toContain('gpt-6-astra · high')
+    const duration = metadata.get('[data-testid="artwork-duration"]')
+    expect(duration.text()).toBe('intelligenceMonitor.seconds:14.5')
+    expect(metadata.element.lastElementChild).toBe(duration.element)
+    expect(duration.classes()).toEqual(expect.arrayContaining(['ml-auto', 'shrink-0', 'whitespace-nowrap']))
+    expect(duration.attributes('title')).toBe('intelligenceMonitor.duration · intelligenceMonitor.seconds:14.5')
+    view.unmount()
+  })
+
+  it.each(['pending', 'running', 'failed'] as const)('does not label a %s run with a completed artwork duration', status => {
+    const latest = { ...run(91, status), duration_ms: 14500 }
+    const view = render(plan({ recent_runs: [latest], latest_run: latest }))
+    expect(view.find('[data-testid="artwork-duration"]').exists()).toBe(false)
+    view.unmount()
+  })
+
   it.each([
     [30, 'seconds', 30],
     [75, 'seconds', 75],

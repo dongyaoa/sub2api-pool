@@ -1,6 +1,6 @@
 <template>
-  <div ref="container" class="relative isolate overflow-hidden bg-slate-50 dark:bg-dark-900" :class="large ? 'aspect-[16/10] min-h-[420px]' : 'min-h-[144px] flex-1'" :aria-busy="active || loading">
-    <iframe v-if="preview && !active" :key="`${run?.id}-${replay}`" :srcdoc="preview" sandbox="" credentialless referrerpolicy="no-referrer" scrolling="no" :title="t('intelligenceMonitor.preview')" class="absolute origin-top-left border-0 bg-white" :style="canvasStyle" :class="!large && 'pointer-events-none'" />
+  <div ref="container" class="relative isolate overflow-hidden bg-slate-50 dark:bg-dark-900" :class="large ? 'aspect-[16/10]' : 'min-h-[144px] flex-1'" :aria-busy="active || loading" @mouseenter="hovered = true" @mouseleave="hovered = false" @focusin="focused = true" @focusout="focused = false">
+    <iframe v-if="preview && !active" ref="frame" :key="`${run?.id}-${replay}`" :srcdoc="preview" sandbox="allow-scripts" credentialless referrerpolicy="no-referrer" scrolling="no" :title="t('intelligenceMonitor.preview')" class="absolute origin-top-left border-0 bg-white" :style="canvasStyle" :class="!large && 'pointer-events-none'" @load="syncPlayback" />
     <PelicanLoadingScene v-else-if="active" :label="t(`intelligenceMonitor.status.${run?.status}`)" :queued="run?.status === 'pending'" />
     <div v-else-if="loading" class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6" role="status">
       <div class="preview-skeleton relative h-10 w-16 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-dark-600 dark:bg-dark-800" aria-hidden="true"><div class="absolute bottom-2 left-2 right-2 h-1 rounded bg-slate-100 dark:bg-dark-600" /><div class="absolute left-2 top-2 h-2 w-2 rounded-full bg-slate-200 dark:bg-dark-600" /></div>
@@ -12,10 +12,8 @@
       <p v-if="run?.status === 'failed' && run.error" class="max-w-full break-words text-[10px] leading-4 text-slate-400 dark:text-dark-400" :class="large ? 'line-clamp-4' : 'line-clamp-2'" :title="run.error">{{ run.error }}</p>
       <button v-if="error" type="button" class="text-xs text-primary-600" @click="load">{{ t('intelligenceMonitor.refresh') }}</button>
     </div>
-    <button v-if="preview && !large" type="button" class="preview-open absolute inset-0 z-10 flex items-end justify-end bg-transparent p-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500" :class="durationLabel && 'pb-9'" :aria-label="t('intelligenceMonitor.open')" @click="emit('open')"><span class="preview-open-label inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-medium text-gray-700 shadow-sm backdrop-blur-sm"><Icon name="eye" size="xs" />{{ t('intelligenceMonitor.open') }}</span></button>
-    <div v-if="durationLabel" class="pointer-events-none absolute bottom-2 right-2 z-20 inline-flex items-center gap-1.5 rounded-md border border-white/70 bg-white/90 px-2 py-1 font-medium tabular-nums text-slate-600 shadow-sm backdrop-blur-sm dark:border-dark-600/70 dark:bg-dark-800/90 dark:text-dark-200" :class="large ? 'text-xs' : 'text-[10px]'" data-testid="artwork-duration" :title="`${t('intelligenceMonitor.totalDuration')} · ${durationLabel}`" :aria-label="`${t('intelligenceMonitor.totalDuration')} · ${durationLabel}`"><Icon name="clock" size="xs" /><span>{{ durationLabel }}</span></div>
+    <button v-if="preview && !large" type="button" class="preview-open absolute inset-0 z-10 flex items-end justify-end bg-transparent p-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500" :aria-label="t('intelligenceMonitor.open')" @click="emit('open')"><span class="preview-open-label inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-medium text-gray-700 shadow-sm backdrop-blur-sm"><Icon name="eye" size="xs" />{{ t('intelligenceMonitor.open') }}</span></button>
     <div v-if="preview && large" class="absolute right-3 top-3 z-10"><button type="button" class="rounded-lg border border-gray-200 bg-white/90 p-2 text-gray-500 shadow-sm" :title="t('intelligenceMonitor.reloadPreview')" @click="replay++"><Icon name="refresh" size="sm" /></button></div>
-    <p v-if="preview && large && prepared?.scriptsDisabled" class="pointer-events-none absolute left-3 top-3 z-10 max-w-[calc(100%-4.5rem)] rounded-md bg-white/95 px-2 py-1 text-[10px] leading-relaxed text-slate-500 shadow-sm" role="note">{{ t('intelligenceMonitor.scriptsDisabled') }}</p>
   </div>
 </template>
 <script setup lang="ts">
@@ -24,19 +22,20 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { intelligenceMonitorAPI, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { intelligencePreviewContent } from './intelligencePreview'
-import { intelligenceDurationLabel } from './intelligenceDuration'
 import PelicanLoadingScene from './PelicanLoadingScene.vue'
 const props = withDefaults(defineProps<{ run: IntelligenceRun | null; large?: boolean }>(), { large: false })
 const emit = defineEmits<{ open: [] }>()
 const { t } = useI18n()
 const container = ref<HTMLElement | null>(null), visible = ref(false), loading = ref(false), error = ref(''), html = ref(''), replay = ref(0)
+const frame = ref<HTMLIFrameElement | null>(null)
+const hovered = ref(false), focused = ref(false), pageVisible = ref(!document.hidden)
+const playing = computed(() => pageVisible.value && (props.large || hovered.value || focused.value))
 const canvasWidth = 960
+const canvasHeight = 600
 const viewport = ref({ width: 0, height: 0 })
 const canvasStyle = computed(() => {
-  // Taller thumbnails get a taller HTML viewport, keeping a uniform scale instead of stretching or cropping the artwork.
-  const canvasHeight = !props.large && viewport.value.width > 0
-    ? Math.max(600, canvasWidth * viewport.value.height / viewport.value.width)
-    : 600
+  // Use the same logical viewport in both modes. The isolated document fits its
+  // full content inside this canvas, so changing card size never changes layout.
   const scale = Math.max(0, Math.min(viewport.value.width / canvasWidth, viewport.value.height / canvasHeight))
   return {
     width: `${canvasWidth}px`, height: `${canvasHeight}px`, transform: `scale(${scale})`,
@@ -45,9 +44,13 @@ const canvasStyle = computed(() => {
   }
 })
 const active = computed(() => Boolean(props.run && ['pending', 'running'].includes(props.run.status)))
-const prepared = computed(() => html.value ? intelligencePreviewContent(html.value) : null)
+const prepared = computed(() => html.value ? intelligencePreviewContent(html.value, { autoplay: props.large }) : null)
 const preview = computed(() => prepared.value?.document || '')
-const durationLabel = computed(() => props.run?.status === 'succeeded' ? intelligenceDurationLabel(props.run, t) : null)
+function syncPlayback() {
+  frame.value?.contentWindow?.postMessage({ type: 'intelligence-preview-playback', playing: playing.value }, '*')
+}
+function updatePageVisibility() { pageVisible.value = !document.hidden }
+watch(playing, syncPlayback)
 let controller: AbortController | undefined, observer: IntersectionObserver | undefined, resizeObserver: ResizeObserver | undefined
 function measureViewport() {
   if (!container.value) return
@@ -65,6 +68,7 @@ async function load() {
 }
 watch([() => props.run?.id, () => props.run?.status, () => props.run?.html, visible], () => void load())
 onMounted(() => {
+  document.addEventListener('visibilitychange', updatePageVisibility)
   measureViewport()
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(entries => {
@@ -77,7 +81,7 @@ onMounted(() => {
   observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { visible.value = true; observer?.disconnect() } }, { rootMargin: '150px' })
   if (container.value) observer.observe(container.value)
 })
-onBeforeUnmount(() => { controller?.abort(); observer?.disconnect(); resizeObserver?.disconnect(); window.removeEventListener('resize', measureViewport) })
+onBeforeUnmount(() => { controller?.abort(); observer?.disconnect(); resizeObserver?.disconnect(); window.removeEventListener('resize', measureViewport); document.removeEventListener('visibilitychange', updatePageVisibility) })
 </script>
 <style scoped>
 .preview-open-label { opacity: 0; transform: translateY(3px); transition: opacity .18s ease, transform .18s ease; }

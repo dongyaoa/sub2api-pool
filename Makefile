@@ -6,6 +6,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/tokenRefresh.spec.ts \
 	src/api/__tests__/admin.system.poolUpdate.spec.ts \
 	src/components/common/__tests__/VersionBadge.spec.ts \
+	src/components/admin/upstream/IntelligenceArtifactPreview.spec.ts \
+	src/components/admin/upstream/IntelligenceHistoryDialog.spec.ts \
+	src/components/admin/upstream/IntelligencePlanCard.spec.ts \
+	src/components/admin/upstream/intelligencePreview.spec.ts \
+	src/components/admin/upstream/intelligencePreviewRuntime.spec.ts \
 	src/stores/__tests__/app.spec.ts \
 	src/api/__tests__/keys.bulkUpdate.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \

@@ -15,7 +15,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<
 const run = (id: number, status: IntelligenceRun['status'], changes: Partial<IntelligenceRun> = {}): IntelligenceRun => ({ id, status, ...changes } as IntelligenceRun)
 let wrapper: VueWrapper | undefined
 function render(value: IntelligenceRun, large = false) {
-  wrapper = mount(IntelligenceArtifactPreview, { props: { run: value, large }, global: { stubs: { Icon: true } } })
+  wrapper = mount(IntelligenceArtifactPreview, { attachTo: document.body, props: { run: value, large }, global: { stubs: { Icon: true } } })
   return wrapper
 }
 beforeEach(() => { vi.resetAllMocks(); vi.stubGlobal('IntersectionObserver', undefined) })
@@ -55,19 +55,19 @@ describe('intelligence artifact preview states', () => {
     await flushPromises()
     expect(detail).toHaveBeenCalledTimes(1)
     expect(view.get('iframe').element).toBe(originalFrame)
-    expect(view.get('[data-testid="artwork-duration"]').text()).toBe('4.2 秒')
+    expect(view.find('[data-testid="artwork-duration"]').exists()).toBe(false)
   })
 
-  it('autoplays sanitized CSS and SMIL in a compact card and provides a focusable full-preview open target', async () => {
+  it('preserves inline CSS, SMIL and scripts in an isolated card with a focusable open target', async () => {
     const html = '<style>@keyframes cycle{to{transform:rotate(360deg)}}.wheel{animation:cycle 2s linear infinite}</style><svg><circle class="wheel"><animate attributeName="opacity" values="1;.5;1" dur="1s" repeatCount="indefinite" /></circle></svg><script>alert(1)</script>'
     const view = render(run(2, 'succeeded', { html }))
     await flushPromises()
     const frame = view.get('iframe')
-    expect(frame.attributes('sandbox')).toBe('')
+    expect(frame.attributes('sandbox')).toBe('allow-scripts')
     expect(frame.attributes('srcdoc')).toContain('@keyframes cycle')
-    expect(frame.attributes('srcdoc')).toContain('<animate')
-    expect(frame.attributes('srcdoc')).toContain("script-src 'none'")
-    expect(frame.attributes('srcdoc')).not.toContain('<script>')
+    expect(frame.attributes('srcdoc')).toContain('animate attributeName')
+    expect(frame.attributes('srcdoc')).toContain("frame-src 'none'")
+    expect(frame.attributes('srcdoc')).toContain('alert(1)')
     expect(view.find('[role="note"]').exists()).toBe(false)
     const open = view.get('button[aria-label="intelligenceMonitor.open"]')
     expect(open.classes()).toContain('preview-open')
@@ -87,29 +87,55 @@ describe('intelligence artifact preview states', () => {
     expect(view.find('[data-testid="artwork-duration"]').exists()).toBe(false)
   })
 
-  it.each([false, true])('shows a persistent generation duration on a successful artwork (large=%s)', async large => {
+  it.each([false, true])('keeps duration out of the artwork canvas (large=%s)', async large => {
     const view = render(run(4, 'succeeded', { html: '<svg></svg>', duration_ms: 754000 }), large)
     await flushPromises()
-    const duration = view.get('[data-testid="artwork-duration"]')
-    expect(duration.text()).toBe('12 分 34 秒')
-    expect(duration.attributes('aria-label')).toBe('总耗时 · 12 分 34 秒')
-    expect(duration.classes()).toEqual(expect.arrayContaining(['bottom-2', 'right-2', 'pointer-events-none']))
-    expect(duration.classes()).not.toContain('preview-open-label')
+    expect(view.find('[data-testid="artwork-duration"]').exists()).toBe(false)
     if (!large) {
       const open = view.get('button[aria-label="intelligenceMonitor.open"]')
-      expect(open.classes()).toContain('pb-9')
+      expect(open.classes()).not.toContain('pb-9')
       await open.trigger('click')
       expect(view.emitted('open')).toEqual([[]])
     }
   })
 
-  it('uses execution timestamps for older successful results and hides missing duration', async () => {
-    const view = render(run(5, 'succeeded', { html: '<svg></svg>', duration_ms: null, created_at: '2026-09-24T00:00:00Z', started_at: '2026-09-24T00:05:00Z', finished_at: '2026-09-24T00:17:34Z' }))
+  it('plays on hover or keyboard focus and pauses on leave without rebuilding the iframe', async () => {
+    const view = render(run(5, 'succeeded', { html: '<svg></svg>' }))
     await flushPromises()
-    expect(view.get('[data-testid="artwork-duration"]').text()).toBe('12 分 34 秒')
-    await view.setProps({ run: run(6, 'succeeded', { html: '<svg></svg>', duration_ms: null }) })
+    const frame = view.get('iframe').element as HTMLIFrameElement
+    const postMessage = vi.spyOn(frame.contentWindow!, 'postMessage')
+    const originalDocument = frame.srcdoc
+    await view.get('iframe').trigger('load')
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: false }, '*')
+    await view.trigger('mouseenter')
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: true }, '*')
+    await view.trigger('mouseleave')
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: false }, '*')
+    await view.get('button').trigger('focusin')
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: true }, '*')
+    await view.get('button').trigger('focusout')
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: false }, '*')
+    expect(view.get('iframe').element).toBe(frame)
+    expect(frame.srcdoc).toBe(originalDocument)
+  })
+
+  it('autoplays enlarged art, pauses while the page is hidden and replays on request', async () => {
+    const view = render(run(6, 'succeeded', { html: '<svg></svg>' }), true)
     await flushPromises()
-    expect(view.find('[data-testid="artwork-duration"]').exists()).toBe(false)
-    expect(view.get('button[aria-label="intelligenceMonitor.open"]').classes()).not.toContain('pb-9')
+    const frame = view.get('iframe').element as HTMLIFrameElement
+    const postMessage = vi.spyOn(frame.contentWindow!, 'postMessage')
+    await view.get('iframe').trigger('load')
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: true }, '*')
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: false }, '*')
+    hidden.mockReturnValue(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: true }, '*')
+    await view.get('button[title="intelligenceMonitor.reloadPreview"]').trigger('click')
+    expect(view.get('iframe').element).not.toBe(frame)
+    hidden.mockRestore()
   })
 })

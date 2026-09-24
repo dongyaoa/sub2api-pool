@@ -32,7 +32,10 @@
           <button type="button" class="w-full shrink-0 p-2.5 text-left hover:bg-gray-50 dark:hover:bg-dark-700/50" @click="emit('history', work.id)">
             <div class="flex items-center justify-between gap-1"><span class="text-[10px] font-semibold" :class="index === 0 ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'">{{ isActive(work) ? t(`intelligenceMonitor.status.${work.status}`) : index === 0 ? t('intelligenceMonitor.latest') : `#${work.id}` }}</span><span class="h-1.5 w-1.5 rounded-full" :class="work.status === 'succeeded' ? 'bg-emerald-500' : work.status === 'failed' ? 'bg-rose-500' : 'bg-amber-400'"></span></div>
             <p class="mt-1 text-[10px] tabular-nums text-gray-600 dark:text-dark-300" :title="dateTime(work.started_at || work.created_at)">{{ dateTime(work.started_at || work.created_at) }}</p>
-            <p class="mt-1 truncate text-[9px] text-gray-400">{{ work.model }} · {{ work.reasoning_effort }}</p>
+            <div class="mt-1 flex min-w-0 items-center justify-between gap-2 text-[9px]" data-testid="artwork-metadata">
+              <span class="min-w-0 truncate text-gray-400" :title="`${work.model} · ${work.reasoning_effort}`">{{ work.model }} · {{ work.reasoning_effort }}</span>
+              <span v-if="work.status === 'succeeded' && intelligenceDurationLabel(work, t)" class="ml-auto shrink-0 whitespace-nowrap font-medium tabular-nums text-gray-600 dark:text-dark-300" :title="`${t('intelligenceMonitor.duration')} · ${intelligenceDurationLabel(work, t)}`" data-testid="artwork-duration">{{ intelligenceDurationLabel(work, t) }}</span>
+            </div>
           </button>
         </div>
       </div>
@@ -48,6 +51,7 @@ import type { IntelligencePlan, IntelligenceRate, IntelligenceRun } from '@/api/
 import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
 import { intelligenceRateLabel } from './intelligencePreview'
+import { intelligenceDurationLabel } from './intelligenceDuration'
 import { dateTime } from './format'
 const props = defineProps<{ plan: IntelligencePlan; overview: UpstreamOverview | null; busy: boolean }>()
 const emit = defineEmits<{ run: []; toggle: []; edit: []; archive: []; history: [runID?: number] }>()

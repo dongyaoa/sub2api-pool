@@ -9,7 +9,8 @@ vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: { de
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 function parsePreview(value: string): Document {
-  return new DOMParser().parseFromString(value, 'text/html')
+  const shell = new DOMParser().parseFromString(value, 'text/html')
+  return new DOMParser().parseFromString(shell.querySelector('iframe')?.getAttribute('srcdoc') || '', 'text/html')
 }
 
 describe('intelligence preview isolation', () => {
@@ -18,12 +19,12 @@ describe('intelligence preview isolation', () => {
     const doc = parsePreview(result.document)
 
     expect(result.scriptsDisabled).toBe(true)
-    expect(doc.querySelector('script,meta[http-equiv="refresh"],link,iframe,form,a,base')).toBeNull()
+    expect(doc.querySelector('meta[http-equiv="refresh"],link,iframe,form,a,base')).toBeNull()
     expect(doc.querySelector('[onload], [formaction], [target], [href^="http"], [src^="http"]')).toBeNull()
     expect(doc.querySelector('svg use')).not.toBeNull()
     expect(doc.querySelector('svg use')?.getAttribute('href')).toBeNull()
     expect(doc.querySelector('svg animate')).toBeNull()
-    expect(doc.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("script-src 'none'")
+    expect(doc.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("connect-src 'none'")
   })
 
   it('keeps inert SVG SMIL, local SVG references and inline CSS animations', () => {
@@ -48,18 +49,21 @@ describe('intelligence preview isolation', () => {
     expect(doc.querySelector('animate')).not.toBeNull()
   })
 
-  it('keeps all sandbox privileges disabled and preserves the raw run for source/download', async () => {
+  it('executes inline animation only inside two opaque sandboxes and preserves raw source', async () => {
     const raw = '<svg><script>window.top.location = "https://evil.test"</script><circle /></svg>'
     const run = Object.freeze({ id: 1, status: 'succeeded', html: raw }) as IntelligenceRun
     const wrapper = mount(IntelligenceArtifactPreview, { props: { run, large: true }, global: { stubs: { Icon: true } } })
     await flushPromises()
     const frame = wrapper.get('iframe')
-    expect(frame.attributes('sandbox')).toBe('')
+    expect(frame.attributes('sandbox')).toBe('allow-scripts')
     expect(frame.attributes('referrerpolicy')).toBe('no-referrer')
     expect(frame.attributes('credentialless')).toBeDefined()
-    expect(frame.attributes('srcdoc')).not.toContain('<script>')
-    expect(frame.attributes('srcdoc')).toContain("script-src 'none'")
-    expect(wrapper.get('[role="note"]').text()).toBe('intelligenceMonitor.scriptsDisabled')
+    const shell = new DOMParser().parseFromString(frame.attributes('srcdoc'), 'text/html')
+    expect(shell.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(shell.querySelector('meta')?.getAttribute('content')).toContain("frame-src 'none'")
+    expect(Array.from(shell.querySelectorAll('script')).map(script => script.textContent).join('')).not.toContain('evil.test')
+    expect(parsePreview(frame.attributes('srcdoc')).body.textContent).toContain('window.top.location')
+    expect(wrapper.find('[role="note"]').exists()).toBe(false)
     expect(run.html).toBe(raw)
     wrapper.unmount()
   })
@@ -100,7 +104,7 @@ describe('intelligence preview isolation', () => {
     expect(disconnect).toHaveBeenCalledOnce()
   })
 
-  it('fills taller thumbnails with a proportional HTML viewport without cropping or restarting the iframe', async () => {
+  it('uses the same logical canvas for tall thumbnails and detail without restarting the iframe', async () => {
     let resize: ResizeObserverCallback | undefined
     vi.stubGlobal('IntersectionObserver', undefined)
     vi.stubGlobal('ResizeObserver', class {
@@ -121,18 +125,43 @@ describe('intelligence preview isolation', () => {
       const scale = Number(frame.style.transform.match(/scale\((.+)\)/)?.[1])
       expect(parseFloat(frame.style.width)).toBe(960)
       expect(scale).toBeCloseTo(174 / 960)
-      expect(parseFloat(frame.style.height) * scale).toBeCloseTo(height)
-      expect(parseFloat(frame.style.top)).toBeCloseTo(0)
+      expect(parseFloat(frame.style.height)).toBe(600)
+      expect(parseFloat(frame.style.top)).toBeCloseTo((height - 600 * scale) / 2)
       expect(parseFloat(frame.style.left)).toBeCloseTo(0)
       expect(wrapper.get('iframe').element).toBe(frame)
     }
     await wrapper.setProps({ run: { ...run, duration_ms: 4500 } })
     expect(wrapper.get('iframe').element).toBe(frame)
-    expect(frame.getAttribute('sandbox')).toBe('')
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
     await resizeTo(0, 0)
     expect(frame.style.height).toBe('600px')
     expect(frame.style.transform).toBe('scale(0)')
     wrapper.unmount()
+  })
+
+  it('blocks remote loaders and handlers while preserving classic and module inline scripts', () => {
+    const result = intelligencePreviewContent('<script src="https://evil.test/x.js" nonce="unsafe"></script><script type="module">document.body.dataset.ready = "module"</script><script>requestAnimationFrame(() => {})</script><script type="importmap">{"imports":{"evil":"https://evil.test"}}</script><svg onload="alert(1)"></svg>')
+    const doc = parsePreview(result.document)
+    expect(doc.querySelector('script[src],script[type="importmap"],[onload]')).toBeNull()
+    expect(doc.querySelector('script[type="module"]')?.textContent).toContain('dataset.ready')
+    expect(Array.from(doc.querySelectorAll('script')).some(script => script.textContent === 'requestAnimationFrame(() => {})')).toBe(true)
+    expect(doc.querySelector('meta')?.getAttribute('content')).toContain("script-src 'unsafe-inline'; script-src-attr 'none'")
+    expect(doc.querySelector('meta')?.getAttribute('content')).not.toContain('nonce-')
+  })
+
+  it('satisfies the inherited host nonce policy without authorizing external script sources', () => {
+    const hostScript = document.createElement('script')
+    hostScript.setAttribute('nonce', 'host-page-nonce')
+    document.head.append(hostScript)
+    try {
+      const result = intelligencePreviewContent('<script>document.body.dataset.ready = "yes"</script>')
+      const shell = new DOMParser().parseFromString(result.document, 'text/html')
+      const inner = parsePreview(result.document)
+      for (const script of [...shell.querySelectorAll('script'), ...inner.querySelectorAll('script')]) expect(script.getAttribute('nonce')).toBe('host-page-nonce')
+      expect(shell.querySelector('meta')?.getAttribute('content')).not.toContain('nonce-')
+      expect(inner.head.firstElementChild?.getAttribute('http-equiv')).toBe('Content-Security-Policy')
+      expect(inner.head.querySelector('script')?.textContent).toContain('intelligence-preview-playback')
+    } finally { hostScript.remove() }
   })
 
   it('keeps an existing iframe when polling replaces the run object and loads a different run', async () => {

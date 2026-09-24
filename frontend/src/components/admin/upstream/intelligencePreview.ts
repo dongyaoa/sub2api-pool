@@ -1,15 +1,21 @@
 import type { IntelligenceRate } from '@/api/admin/intelligenceMonitor'
 import DOMPurify from 'dompurify'
+import { intelligencePreviewRuntime } from './intelligencePreviewRuntime'
 
-// An opaque iframe alone cannot prevent script-driven self-navigation. Keep
-// scripts disabled in both CSP and the iframe sandbox. CSS and SVG SMIL animate
-// without script privileges; the original HTML is kept separately for download.
-export const INTELLIGENCE_PREVIEW_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+// The generated document lives in a second opaque-origin sandbox. Its trusted
+// parent shell's frame-src blocks self-navigation out to another URL as well as
+// the resource/connect restrictions inside the artwork. Neither frame receives
+// same-origin, navigation, popup, form, download, or storage privileges.
+// Keep URL/nonce sources OUT of this policy: inline scripts may read their nonce,
+// but must not use it to authorize a remote script. The host's inherited nonce
+// policy is satisfied separately on each inline script below.
+export const INTELLIGENCE_PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline'; script-src-attr 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
 const LOCAL_SVG_REFERENCES = new Set(['use', 'textpath', 'mpath', 'pattern', 'lineargradient', 'radialgradient', 'filter', 'animate', 'animatemotion', 'animatetransform', 'set'])
 const ANIMATION_TAGS = new Set(['animate', 'animatemotion', 'animatetransform', 'set'])
 const ACTIVE_ATTRIBUTES = /^(?:on|href$|xlink:href$|src$|srcset$|action$|formaction$|target$)/i
 
-export function intelligencePreviewContent(html: string): { document: string; scriptsDisabled: boolean } {
+export function intelligencePreviewContent(html: string, options: { autoplay?: boolean } = {}): { document: string; scriptsDisabled: boolean } {
+  const nonce = document.querySelector<HTMLScriptElement>('script[nonce]')?.nonce || ''
   // Template content is inert even during parsing. Never insert remote markup
   // into the administrator's live document or let a parser load remote assets.
   const template = document.createElement('template')
@@ -17,11 +23,22 @@ export function intelligencePreviewContent(html: string): { document: string; sc
   root.innerHTML = html
   template.content.append(root)
   const elements = Array.from(template.content.querySelectorAll('*'))
-  const scriptsDisabled = elements.some(node => node.localName.toLowerCase() === 'script' || Array.from(node.attributes).some(attr => /^on/i.test(attr.name) || /^\s*javascript:/i.test(attr.value)))
+  const scriptsDisabled = elements.some(node => (node.localName.toLowerCase() === 'script' && node.hasAttribute('src')) || Array.from(node.attributes).some(attr => /^on/i.test(attr.name)))
   // Strip navigation elements themselves: SVG SMIL can restore an anchor href
   // after sanitization, so merely removing its initial href is insufficient.
   template.content.querySelectorAll('a, form').forEach(node => node.replaceWith(...Array.from(node.childNodes)))
-  template.content.querySelectorAll('script, base, meta, link, iframe, frame, frameset, object, embed, area, template').forEach(node => node.remove())
+  template.content.querySelectorAll('base, meta, link, iframe, frame, frameset, object, embed, area, template').forEach(node => node.remove())
+  template.content.querySelectorAll('script').forEach(node => {
+    const type = (node.getAttribute('type') || '').trim().toLowerCase()
+    if (node.hasAttribute('src') || !['', 'text/javascript', 'application/javascript', 'module'].includes(type)) {
+      node.remove()
+      return
+    }
+    // Recreate inline scripts after sanitizing, without remote loaders, nonces,
+    // async flags, legacy for/event handlers or arbitrary generated attributes.
+    for (const attr of Array.from(node.attributes)) if (attr.name !== 'type') node.removeAttribute(attr.name)
+    if (type) node.setAttribute('type', type)
+  })
   template.content.querySelectorAll('*').forEach(node => {
     const tag = node.localName.toLowerCase()
     if (ANIMATION_TAGS.has(tag) && ACTIVE_ATTRIBUTES.test(node.getAttribute('attributeName') || '')) {
@@ -38,9 +55,9 @@ export function intelligencePreviewContent(html: string): { document: string; sc
   })
   const content = DOMPurify.sanitize(root, {
     USE_PROFILES: { html: true, svg: true, svgFilters: true },
-    ADD_TAGS: ['animate', 'animateMotion', 'animateTransform', 'set', 'mpath', 'use'],
+    ADD_TAGS: ['animate', 'animateMotion', 'animateTransform', 'set', 'mpath', 'use', 'script'],
     ADD_ATTR: ['from', 'to', 'calcMode'],
-    FORBID_TAGS: ['a', 'area', 'base', 'meta', 'link', 'iframe', 'frame', 'frameset', 'object', 'embed', 'form', 'script', 'template'],
+    FORBID_TAGS: ['a', 'area', 'base', 'meta', 'link', 'iframe', 'frame', 'frameset', 'object', 'embed', 'form', 'template'],
     FORBID_ATTR: ['action', 'formaction', 'target', 'ping', 'srcdoc', 'srcset'],
     WHOLE_DOCUMENT: true,
     RETURN_DOM: true,
@@ -51,6 +68,10 @@ export function intelligencePreviewContent(html: string): { document: string; sc
   csp.setAttribute('http-equiv', 'Content-Security-Policy')
   csp.setAttribute('content', INTELLIGENCE_PREVIEW_CSP)
   doc.head.replaceChildren(csp)
+  const runtime = doc.createElement('script')
+  if (nonce) runtime.setAttribute('nonce', nonce)
+  runtime.textContent = intelligencePreviewRuntime(options.autoplay ?? false)
+  doc.head.append(runtime)
   const style = doc.createElement('style')
   style.textContent = 'html{color-scheme:light}body{margin:0}*{box-sizing:border-box}'
   doc.head.append(style)
@@ -61,7 +82,44 @@ export function intelligencePreviewContent(html: string): { document: string; sc
     for (const attr of Array.from(safeBody.attributes)) doc.body.setAttribute(attr.name, attr.value)
     doc.body.append(...Array.from(safeBody.childNodes))
   }
-  return { document: '<!doctype html>\n' + doc.documentElement.outerHTML, scriptsDisabled }
+  for (const node of Array.from(doc.querySelectorAll('script'))) {
+    if (node === runtime) continue
+    const script = doc.createElement('script')
+    if (nonce) script.setAttribute('nonce', nonce)
+    if (node.getAttribute('type') === 'module') script.type = 'module'
+    script.textContent = node.textContent
+    node.replaceWith(script)
+  }
+  // The outer shell contains only our own markup and relay. Never place remote
+  // content directly in it, otherwise the child could remove its navigation guard.
+  const shell = document.implementation.createHTMLDocument('')
+  shell.head.replaceChildren(csp.cloneNode(true))
+  const shellStyle = shell.createElement('style')
+  shellStyle.textContent = 'html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#fff}iframe{display:block;width:100%;height:100%;border:0}'
+  shell.head.append(shellStyle)
+  const frame = shell.createElement('iframe')
+  frame.setAttribute('sandbox', 'allow-scripts')
+  frame.setAttribute('credentialless', '')
+  frame.setAttribute('referrerpolicy', 'no-referrer')
+  frame.setAttribute('scrolling', 'no')
+  frame.title = 'Artwork'
+  frame.srcdoc = '<!doctype html>\n' + doc.documentElement.outerHTML
+  shell.body.append(frame)
+  const relay = shell.createElement('script')
+  if (nonce) relay.setAttribute('nonce', nonce)
+  relay.textContent = `(() => {
+    const frame = document.querySelector('iframe');
+    let playing = ${options.autoplay ? 'true' : 'false'};
+    const sync = () => frame.contentWindow?.postMessage({type:'intelligence-preview-playback',playing}, '*');
+    window.addEventListener('message', event => {
+      if (event.source === parent && event.data?.type === 'intelligence-preview-playback' && typeof event.data.playing === 'boolean') {
+        playing = event.data.playing; sync();
+      } else if (event.source === frame.contentWindow && event.data?.type === 'intelligence-preview-ready') sync();
+    });
+    frame.addEventListener('load', sync);
+  })();`
+  shell.body.append(relay)
+  return { document: '<!doctype html>\n' + shell.documentElement.outerHTML, scriptsDisabled }
 }
 
 export function intelligencePreviewDocument(html: string): string {

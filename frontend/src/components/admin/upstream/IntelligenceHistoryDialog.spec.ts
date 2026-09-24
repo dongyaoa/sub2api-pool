@@ -12,11 +12,6 @@ const dialog = defineComponent({
   props: ['show'],
   template: '<div v-if="show"><slot /></div>',
 })
-const pagination = defineComponent({
-  props: { page: { type: Number, required: true } },
-  emits: ['update:page'],
-  template: '<div><span data-testid="page">{{ page }}</span><button data-testid="next-page" @click="$emit(\'update:page\', page + 1)">Next page</button></div>',
-})
 const preview = defineComponent({
   props: ['run'],
   template: '<div data-testid="artifact-preview">{{ run.id }}</div>',
@@ -52,7 +47,7 @@ function render(initialPlan: IntelligencePlan = plan(), initialRunID?: number) {
   wrapper = mount(IntelligenceHistoryDialog, {
     props: { show: true, plan: initialPlan },
     attrs: { 'initial-run-id': initialRunID },
-    global: { stubs: { BaseDialog: dialog, Pagination: pagination, Icon: true, IntelligenceArtifactPreview: preview } },
+    global: { stubs: { BaseDialog: dialog, Icon: true, IntelligenceArtifactPreview: preview } },
   })
   return wrapper
 }
@@ -100,6 +95,49 @@ afterEach(() => {
 })
 
 describe('intelligence history polling state', () => {
+  it('uses compact sidebar pagination and disables requests outside the page bounds', async () => {
+    const view = render()
+    await flushPromises()
+    const pagination = view.get('[data-testid="history-pagination"]')
+    expect(pagination.get('p').classes()).toContain('whitespace-nowrap')
+    expect(pagination.text().replace(/\s/g, '')).toBe('1/2')
+    expect(view.get('[data-testid="previous-page"]').attributes('disabled')).toBeDefined()
+    await view.get('[data-testid="previous-page"]').trigger('click')
+    expect(mocks.runs).toHaveBeenCalledTimes(1)
+
+    await view.get('[data-testid="next-page"]').trigger('click')
+    await flushPromises()
+    expect(pagination.text().replace(/\s/g, '')).toBe('2/2')
+    expect(view.get('[data-testid="next-page"]').attributes('disabled')).toBeDefined()
+    await view.get('[data-testid="next-page"]').trigger('click')
+    expect(mocks.runs).toHaveBeenCalledTimes(2)
+    await view.get('[data-testid="previous-page"]').trigger('click')
+    await flushPromises()
+    expect(mocks.runs).toHaveBeenLastCalledWith(1, 1, expect.any(AbortSignal))
+  })
+
+  it('hides pagination when the history fits on one page', async () => {
+    mocks.runs.mockResolvedValueOnce({ items: [run(111)], total: 1, page: 1, page_size: 12 })
+    const view = render()
+    await flushPromises()
+    expect(view.find('[data-testid="history-pagination"]').exists()).toBe(false)
+  })
+
+  it('disables both page controls while a requested page is loading', async () => {
+    const view = render()
+    await flushPromises()
+    let resolveRuns: (value: { items: IntelligenceRun[]; total: number }) => void = () => undefined
+    mocks.runs.mockReturnValueOnce(new Promise(resolve => { resolveRuns = resolve }))
+    await view.get('[data-testid="next-page"]').trigger('click')
+    expect(view.get('[data-testid="previous-page"]').attributes('disabled')).toBeDefined()
+    expect(view.get('[data-testid="next-page"]').attributes('disabled')).toBeDefined()
+    await view.get('[data-testid="previous-page"]').trigger('click')
+    expect(mocks.runs).toHaveBeenCalledTimes(2)
+    resolveRuns({ items: [run(121)], total: 24 })
+    await flushPromises()
+    expect(view.get('[data-testid="previous-page"]').attributes('disabled')).toBeUndefined()
+  })
+
   it('keeps a manually selected slow detail request alive across history polls', async () => {
     const view = render()
     await flushPromises()

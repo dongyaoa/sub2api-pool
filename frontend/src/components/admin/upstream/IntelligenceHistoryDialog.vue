@@ -1,7 +1,24 @@
 <template>
   <BaseDialog :show="show" :title="plan?.name || t('intelligenceMonitor.history')" width="full" @close="emit('close')">
     <div class="grid min-h-[520px] gap-5 lg:grid-cols-[225px_minmax(0,1fr)]">
-      <aside class="min-w-0"><div class="mb-3 flex items-center justify-between"><p class="text-xs font-medium text-gray-500">{{ t('intelligenceMonitor.times',{count:total}) }}</p><button class="rounded-md p-1 text-gray-400 hover:text-primary-600" :title="t('intelligenceMonitor.refresh')" @click="loadRuns"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'"/></button></div><div class="flex max-h-[580px] gap-2 overflow-auto lg:flex-col"><button v-for="run in runs" :key="run.id" type="button" class="min-w-[190px] rounded-xl border p-3 text-left transition-colors lg:min-w-0" :class="selectedID===run.id ? 'border-primary-300 bg-primary-50/60 dark:border-primary-700 dark:bg-primary-500/10' : 'border-gray-100 hover:border-gray-300 dark:border-dark-700 dark:hover:border-dark-500'" @click="select(run.id)"><div class="flex items-center justify-between"><span class="font-mono text-[10px] text-gray-400">#{{ run.id }}</span><span class="text-[10px] font-medium" :class="run.status==='failed' ? 'text-rose-600' : run.status==='succeeded' ? 'text-emerald-600' : 'text-amber-600'">{{ t(`intelligenceMonitor.status.${run.status}`) }}</span></div><p class="mt-1.5 text-xs font-medium text-gray-800 dark:text-gray-200">{{ dateTime(run.started_at || run.created_at) }}</p><p class="mt-1 truncate text-[10px] text-gray-500">{{ run.model }} · {{ run.reasoning_effort }}</p></button></div><Pagination v-if="total>12" class="mt-3" :page="page" :total="total" :page-size="12" :show-page-size-selector="false" @update:page="page=$event; loadRuns()"/></aside>
+      <aside class="min-w-0">
+        <div class="mb-3 flex items-center justify-between">
+          <p class="text-xs font-medium text-gray-500">{{ t('intelligenceMonitor.times', { count: total }) }}</p>
+          <button type="button" class="rounded-md p-1 text-gray-400 hover:text-primary-600" :title="t('intelligenceMonitor.refresh')" @click="loadRuns"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" /></button>
+        </div>
+        <div class="flex max-h-[580px] gap-2 overflow-auto lg:flex-col">
+          <button v-for="run in runs" :key="run.id" type="button" class="min-w-[190px] shrink-0 rounded-xl border p-3 text-left transition-colors lg:min-w-0" :class="selectedID === run.id ? 'border-primary-300 bg-primary-50/60 dark:border-primary-700 dark:bg-primary-500/10' : 'border-gray-100 hover:border-gray-300 dark:border-dark-700 dark:hover:border-dark-500'" @click="select(run.id)">
+            <div class="flex items-center justify-between"><span class="font-mono text-[10px] text-gray-400">#{{ run.id }}</span><span class="text-[10px] font-medium" :class="run.status === 'failed' ? 'text-rose-600' : run.status === 'succeeded' ? 'text-emerald-600' : 'text-amber-600'">{{ t(`intelligenceMonitor.status.${run.status}`) }}</span></div>
+            <p class="mt-1.5 text-xs font-medium text-gray-800 dark:text-gray-200">{{ dateTime(run.started_at || run.created_at) }}</p>
+            <p class="mt-1 truncate text-[10px] text-gray-500">{{ run.model }} · {{ run.reasoning_effort }}</p>
+          </button>
+        </div>
+        <nav v-if="pageCount > 1" class="mt-3 grid grid-cols-[32px_minmax(0,1fr)_32px] items-center gap-2 border-t border-gray-100 pt-3 dark:border-dark-700" :aria-label="t('intelligenceMonitor.history')" data-testid="history-pagination">
+          <button type="button" class="history-page-button" :disabled="loading || page <= 1" :aria-label="t('pagination.previous')" :title="t('pagination.previous')" data-testid="previous-page" @click="changePage(page - 1)"><Icon name="chevronLeft" size="sm" /></button>
+          <p class="whitespace-nowrap text-center text-xs tabular-nums text-gray-400" :aria-label="t('pagination.pageOf', { page, total: pageCount })"><span class="font-semibold text-gray-700 dark:text-gray-200" aria-current="page" data-testid="page">{{ page }}</span><span class="mx-1.5">/</span>{{ pageCount }}</p>
+          <button type="button" class="history-page-button" :disabled="loading || page >= pageCount" :aria-label="t('pagination.next')" :title="t('pagination.next')" data-testid="next-page" @click="changePage(page + 1)"><Icon name="chevronRight" size="sm" /></button>
+        </nav>
+      </aside>
       <section class="min-w-0">
         <p v-if="error" role="alert" class="mb-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-500/10">{{ error }}</p>
         <div v-if="detailLoading" class="flex h-[420px] items-center justify-center"><Icon name="refresh" class="animate-spin text-primary-500" size="lg"/></div>
@@ -22,7 +39,6 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { intelligenceMonitorAPI, type IntelligencePlan, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -37,12 +53,18 @@ const runs=ref<IntelligenceRun[]>([]),total=ref(0),page=ref(1),selectedID=ref<nu
 const modes=['preview','sourceCode','response'] as const
 const view=ref<typeof modes[number]>('preview')
 const runNotes=computed(()=>intelligenceNotes(detail.value?.notes_snapshot))
+const pageCount=computed(()=>Math.max(1,Math.ceil(total.value/12)))
 const metadata=computed(()=>{
   const run=detail.value; if (!run) return []
   const multiplier=intelligenceRateLabel(run.rate_snapshot)
   return [{label:'started',value:dateTime(run.started_at || run.created_at)},{label:'finished',value:dateTime(run.finished_at)},{label:'duration',value:intelligenceDurationLabel(run,t)||'—'},{label:'model',value:run.model},{label:'reasoning',value:run.reasoning_effort},{label:'rateAtRun',value:multiplier ? `${multiplier}${run.rate_snapshot?.stale ? ` · ${t('intelligenceMonitor.rateStale')}` : ''}` : t('intelligenceMonitor.rateUnknown')},{label:'runSource',value:run.source_name || run.source_endpoint || t(`intelligenceMonitor.source.${run.source_type}`)},{label:'http',value:run.http_status || '—'}]
 })
 let listController:AbortController|undefined,detailController:AbortController|undefined,timer:ReturnType<typeof setInterval>|undefined,initialSelection:number|null=null
+async function changePage(nextPage:number){
+  if(loading.value||nextPage<1||nextPage>pageCount.value||nextPage===page.value)return
+  page.value=nextPage
+  await loadRuns()
+}
 async function loadRuns(){
   if (!props.show||!props.plan) return
   listController?.abort();const current=new AbortController();listController=current;loading.value=true;error.value=''
@@ -75,3 +97,6 @@ function download(){if(!detail.value?.html)return;const url=URL.createObjectURL(
 watch([()=>props.show,()=>props.plan?.id,()=>props.initialRunId],()=>{listController?.abort();detailController?.abort();clearInterval(timer);runs.value=[];total.value=0;detail.value=null;loading.value=false;detailLoading.value=false;error.value='';initialSelection=props.initialRunId||null;selectedID.value=initialSelection;page.value=1;view.value='preview';if(props.show){void loadRuns();timer=setInterval(()=>{if(!document.hidden&&!loading.value)void loadRuns()},5000)}},{immediate:true})
 onBeforeUnmount(()=>{listController?.abort();detailController?.abort();clearInterval(timer)})
 </script>
+<style scoped>
+.history-page-button { @apply flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-dark-600 dark:bg-dark-800 dark:text-dark-300 dark:hover:border-primary-600 dark:hover:bg-primary-500/10 dark:hover:text-primary-400; }
+</style>
