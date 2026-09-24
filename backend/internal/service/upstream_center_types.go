@@ -142,6 +142,7 @@ type UpstreamModelsInput struct {
 }
 
 type UpstreamCenterRepository interface {
+	SaveOrder(context.Context, UpstreamOrderInput) error
 	ListSuppliers(context.Context) ([]*UpstreamSupplier, error)
 	GetSupplier(context.Context, int64) (*UpstreamSupplier, error)
 	SaveSupplier(context.Context, *UpstreamSupplier) error

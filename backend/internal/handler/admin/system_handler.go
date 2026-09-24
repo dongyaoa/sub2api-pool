@@ -2,7 +2,9 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/sysutil"
+	"github.com/Wei-Shaw/sub2api/internal/poolupdate"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -62,7 +65,16 @@ func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOper
 // GetVersion returns the current version
 // GET /api/v1/admin/system/version
 func (h *SystemHandler) GetVersion(c *gin.Context) {
-	info, _ := h.updateSvc.CheckUpdate(c.Request.Context(), false)
+	if current, ok := h.updateSvc.(interface{ GetCurrentBuild() (string, string) }); ok {
+		version, revision := current.GetCurrentBuild()
+		response.Success(c, gin.H{"version": version, "revision": revision})
+		return
+	}
+	info, err := h.updateSvc.CheckUpdate(c.Request.Context(), false)
+	if err != nil || info == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Version information unavailable")
+		return
+	}
 	response.Success(c, gin.H{
 		"version": info.CurrentVersion,
 	})
@@ -83,6 +95,10 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 // PerformUpdate downloads and applies the update
 // POST /api/v1/admin/system/update
 func (h *SystemHandler) PerformUpdate(c *gin.Context) {
+	if updater, ok := h.updateSvc.(poolImageUpdateService); ok && updater.PoolUpdatesEnabled() {
+		h.startPoolImageUpdate(c, updater)
+		return
+	}
 	operationID := buildSystemOperationID(c, "update")
 	payload := gin.H{"operation_id": operationID}
 	executeAdminIdempotentJSON(c, "admin.system.update", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
@@ -125,6 +141,68 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 			"need_restart": true,
 			"operation_id": lock.OperationID(),
 		}, nil
+	})
+}
+
+type poolImageUpdateService interface {
+	PoolUpdatesEnabled() bool
+	PoolUpdateStatus(context.Context) (*poolupdate.Status, error)
+	StartPoolUpdate(context.Context, poolupdate.UpdateRequest) (*poolupdate.Job, error)
+}
+
+func (h *SystemHandler) UpdateStatus(c *gin.Context) {
+	updater, ok := h.updateSvc.(poolImageUpdateService)
+	if !ok || !updater.PoolUpdatesEnabled() {
+		response.Success(c, poolupdate.Status{Available: false})
+		return
+	}
+	status, err := updater.PoolUpdateStatus(c.Request.Context())
+	if err != nil || status == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Image update service is unavailable")
+		return
+	}
+	response.Success(c, status)
+}
+
+func (h *SystemHandler) startPoolImageUpdate(c *gin.Context, updater poolImageUpdateService) {
+	if c.Request.Body == nil {
+		response.Error(c, http.StatusBadRequest, "Confirm the version and image digest before updating")
+		return
+	}
+	var request poolupdate.UpdateRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || request.Version == "" || request.Digest == "" {
+		response.Error(c, http.StatusBadRequest, "Confirm the version and image digest before updating")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		response.Error(c, http.StatusBadRequest, "Invalid update request")
+		return
+	}
+	if poolupdate.ValidateVersion(request.Version) != nil || poolupdate.ValidateDigest(request.Digest) != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid Pool image version or digest")
+		return
+	}
+	operationID := buildSystemOperationID(c, "pool-image-update")
+	payload := gin.H{"operation_id": operationID, "version": request.Version, "digest": request.Digest}
+	executeAdminIdempotentJSON(c, "admin.system.pool-image-update", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		_, release, err := h.acquireSystemLock(ctx, operationID)
+		if err != nil {
+			return nil, err
+		}
+		succeeded := false
+		defer func() { release("", succeeded) }()
+		// The helper owns the durable task. The HTTP request only submits it;
+		// disconnects never cancel an accepted image pull/recreation.
+		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 55*time.Second)
+		defer cancel()
+		job, err := updater.StartPoolUpdate(startCtx, request)
+		if err != nil {
+			return nil, err
+		}
+		succeeded = true
+		return gin.H{"message": "Image update accepted", "need_restart": false, "job": job}, nil
 	})
 }
 

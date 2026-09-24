@@ -145,6 +145,7 @@ docs/*
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/upstream-center.md
 !docs/upstream-center-contract.md
+!docs/POOL_ONLINE_UPDATE.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

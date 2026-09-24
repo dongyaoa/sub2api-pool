@@ -12,10 +12,20 @@
           <section v-if="overview" class="grid grid-cols-2 gap-3 lg:grid-cols-4" :aria-label="t(tab === 'suppliers' ? 'upstreamCenter.finance.title' : 'upstreamCenter.tabs.monitors')">
             <div v-for="metric in tab === 'suppliers' ? supplierMetrics : monitorMetrics" :key="metric.key" class="card flex min-w-0 items-center gap-3 px-3 py-3 sm:px-4"><div class="shrink-0 rounded-lg bg-primary-50 p-2 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400"><Icon :name="metric.icon" size="md" :stroke-width="2" /></div><div class="min-w-0"><p class="text-[11px] font-medium text-gray-500 dark:text-dark-400">{{ t(metric.key) }}</p><p class="mt-0.5 truncate text-xl font-bold tabular-nums text-gray-900 dark:text-white" :class="metric.color">{{ metric.value }}</p><p v-if="metric.note" class="mt-0.5 truncate text-[10px] text-gray-400 dark:text-dark-400">{{ metric.note }}</p></div></div>
           </section>
-          <div class="flex flex-wrap items-center justify-between gap-2"><div class="relative w-full sm:max-w-[280px]"><Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input v-model="search" class="input !py-2 !pl-9 !text-xs" :aria-label="t('upstreamCenter.search')" :placeholder="t('upstreamCenter.search')" /></div><div class="flex w-full flex-wrap items-center justify-between gap-3 sm:w-auto"><div class="flex items-center gap-0.5 rounded-lg bg-gray-100 p-0.5 dark:bg-dark-800" role="group" :aria-label="t('upstreamCenter.range')"><button v-for="value in windows" :key="value" type="button" class="rounded-md px-2.5 py-1.5 text-[11px] transition-colors" :class="window === value ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-dark-700 dark:text-gray-100' : 'text-gray-500 dark:text-dark-400'" :aria-pressed="window === value" @click="window = value">{{ t(`upstreamCenter.ranges.${value}`) }}</button></div><div class="flex items-center gap-2 text-[10px] text-gray-400 dark:text-dark-400"><span class="hidden xl:inline" :title="t('upstreamCenter.refreshHint')">{{ updatedAt ? t('upstreamCenter.updated', { time: shortTime(updatedAt) }) : t('upstreamCenter.refreshHint') }}</span><button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs text-gray-500 hover:bg-gray-100 hover:text-primary-600 disabled:opacity-50 dark:text-dark-400 dark:hover:bg-dark-800" :disabled="loading" @click="reload()"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />{{ t('upstreamCenter.refresh') }}</button></div></div></div>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="relative w-full sm:max-w-[280px]"><Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input v-model="search" class="input !py-2 !pl-9 !text-xs" :aria-label="t('upstreamCenter.search')" :placeholder="t('upstreamCenter.search')" /></div>
+            <div class="flex w-full flex-wrap items-center justify-between gap-3 sm:w-auto">
+              <div class="flex items-center gap-0.5 rounded-lg bg-gray-100 p-0.5 dark:bg-dark-800" role="group" :aria-label="t('upstreamCenter.range')"><button v-for="value in windows" :key="value" type="button" class="rounded-md px-2.5 py-1.5 text-[11px] transition-colors" :class="window === value ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-dark-700 dark:text-gray-100' : 'text-gray-500 dark:text-dark-400'" :aria-pressed="window === value" @click="window = value">{{ t(`upstreamCenter.ranges.${value}`) }}</button></div>
+              <div class="flex items-center gap-2 text-[10px] text-gray-400 dark:text-dark-400">
+                <span class="hidden xl:inline" :title="t('upstreamCenter.refreshHint')">{{ updatedAt ? t('upstreamCenter.updated', { time: shortTime(updatedAt) }) : t('upstreamCenter.refreshHint') }}</span>
+                <button type="button" class="btn btn-secondary btn-sm" data-testid="upstream-order" :disabled="!canOrder" @click="openOrder()"><Icon name="menu" size="sm" class="mr-1.5" />{{ t('upstreamCenter.order.open') }}</button>
+                <button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs text-gray-500 hover:bg-gray-100 hover:text-primary-600 disabled:opacity-50 dark:text-dark-400 dark:hover:bg-dark-800" :disabled="loading" @click="reload()"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />{{ t('upstreamCenter.refresh') }}</button>
+              </div>
+            </div>
+          </div>
           <div v-if="!overview && loading" class="space-y-3"><div v-for="n in 2" :key="n" class="card grid animate-pulse gap-6 p-5 lg:grid-cols-[220px_1fr]"><div class="h-28 rounded-lg bg-gray-100 dark:bg-dark-700"></div><div class="space-y-3"><div class="h-12 rounded-lg bg-gray-100 dark:bg-dark-700"></div><div class="h-12 rounded-lg bg-gray-100 dark:bg-dark-700"></div></div></div></div>
           <template v-else-if="overview">
-            <div v-if="tab === 'suppliers' && filteredSuppliers.length" class="space-y-4"><UpstreamSupplierCard v-for="supplier in filteredSuppliers" :key="supplier.id" :supplier="supplier" :busy-ids="busyIds" :running-ids="runningIds" @edit="openSupplier" @delete="confirmSupplierDelete" @add-target="supplier => openTarget(null, supplier)" @edit-target="item => openTarget(item)" @delete-target="confirmTargetDelete" @target-details="showTargetDetails" @finance="showSupplierDetails" @run="runTarget" @toggle="toggleTarget" @sync="syncBalance" /></div>
+            <div v-if="tab === 'suppliers' && filteredSuppliers.length" class="space-y-4"><UpstreamSupplierCard v-for="supplier in filteredSuppliers" :key="supplier.id" :supplier="supplier" :busy-ids="busyIds" :running-ids="runningIds" @edit="openSupplier" @delete="confirmSupplierDelete" @add-target="supplier => openTarget(null, supplier)" @order-groups="openGroupOrder" @edit-target="item => openTarget(item)" @delete-target="confirmTargetDelete" @target-details="showTargetDetails" @finance="showSupplierDetails" @run="runTarget" @toggle="toggleTarget" @sync="syncBalance" /></div>
             <div v-else-if="tab === 'monitors' && filteredMonitors.length" class="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3"><UpstreamTargetCard v-for="target in filteredMonitors" :key="target.id" :target="target" :busy="busyIds.has(target.id)" :running="runningIds.has(target.id)" @edit="item => openTarget(item)" @delete="confirmTargetDelete" @details="showTargetDetails" @run="runTarget" @toggle="toggleTarget" /></div>
             <EmptyState v-else-if="search" class="card py-12" :title="t('upstreamCenter.noMatches')" />
             <EmptyState v-else class="card py-12" :title="t(tab === 'suppliers' ? 'upstreamCenter.emptySuppliers' : 'upstreamCenter.emptyMonitors')" :description="t(tab === 'suppliers' ? 'upstreamCenter.emptySuppliersHint' : 'upstreamCenter.emptyMonitorsHint')" :action-text="t(tab === 'suppliers' ? 'upstreamCenter.addSupplier' : 'upstreamCenter.addMonitor')" @action="tab === 'suppliers' ? openSupplier() : openTarget()"><template #icon><Icon :name="tab === 'suppliers' ? 'server' : 'chart'" size="xl" class="text-primary-500" /></template></EmptyState>
@@ -25,6 +35,7 @@
         </template>
       </div>
     </div>
+    <UpstreamOrderDialog :show="!!ordering" :scope="ordering?.scope || 'suppliers'" :supplier-id="ordering?.supplierId" :supplier-name="ordering?.supplierName" @close="ordering = null" @saved="orderSaved" />
     <UpstreamSupplierDialog :show="supplierDialog" :supplier="editingSupplier" @close="supplierDialog = false" @saved="saved" @changed="reload()" />
     <UpstreamTargetDialog :show="targetDialog" :target="editingTarget" :supplier="targetSupplier" @close="targetDialog = false" @saved="saved" />
     <UpstreamDetailDialog :show="detailDialog" :target="detailTarget" :supplier="detailSupplier" :model="detailModel" :record="detailRecord" :window="window" :busy="!!detailTarget && busyIds.has(detailTarget.id)" @close="detailDialog = false" @run="runTarget" @sync="syncBalance" @window-change="window = $event" />
@@ -44,6 +55,7 @@ import UpstreamTargetCard from '@/components/admin/upstream/UpstreamTargetCard.v
 import UpstreamSupplierDialog from '@/components/admin/upstream/UpstreamSupplierDialog.vue'
 import UpstreamTargetDialog from '@/components/admin/upstream/UpstreamTargetDialog.vue'
 import UpstreamDetailDialog from '@/components/admin/upstream/UpstreamDetailDialog.vue'
+import UpstreamOrderDialog from '@/components/admin/upstream/UpstreamOrderDialog.vue'
 import { upstreamCenterAPI, type UpstreamHistoryRecord, type UpstreamOverview, type UpstreamSupplier, type UpstreamTarget, type UpstreamWindow } from '@/api/admin/upstreamCenter'
 import { dateTime, money, shortTime, overallTargetStatus } from '@/components/admin/upstream/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -61,6 +73,13 @@ const match = (value: string) => value.toLowerCase().includes(search.value.toLow
 const matchesTarget = (target: UpstreamTarget) => match(`${target.name} ${target.endpoint} ${target.models.join(' ')}`)
 const filteredSuppliers = computed(() => overview.value?.suppliers.filter(supplier => match(`${supplier.name} ${supplier.website}`) || supplier.targets.some(matchesTarget)) || [])
 const filteredMonitors = computed(() => overview.value?.monitors.filter(matchesTarget) || [])
+const ordering = ref<{ scope: 'suppliers' | 'monitors' | 'groups'; supplierId?: number; supplierName?: string } | null>(null)
+const canOrder = computed(() => ((tab.value === 'suppliers' ? overview.value?.suppliers.length : overview.value?.monitors.length) ?? 0) > 1)
+function openOrder() {
+  if (canOrder.value && (tab.value === 'suppliers' || tab.value === 'monitors')) ordering.value = { scope: tab.value }
+}
+function openGroupOrder(supplier: UpstreamSupplier) { ordering.value = { scope: 'groups', supplierId: supplier.id, supplierName: supplier.name } }
+function orderSaved() { ordering.value = null; void reload() }
 const supplierMetrics = computed(() => {
   const summary = overview.value?.summary
   return [
@@ -83,7 +102,7 @@ let controller: AbortController | undefined
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
 async function reload(silent = false) {
-  if (silent && loading.value) return
+  if (silent && (loading.value || ordering.value)) return
   controller?.abort(); const current = new AbortController(); controller = current
   loading.value = true
   try {

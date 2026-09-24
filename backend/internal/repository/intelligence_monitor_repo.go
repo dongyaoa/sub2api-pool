@@ -35,7 +35,7 @@ func scanIntelligencePlan(row upstreamScanner) (*service.IntelligenceMonitorPlan
 	return p, intelligenceDBError(err)
 }
 func (r *intelligenceMonitorRepository) ListPlans(ctx context.Context) ([]*service.IntelligenceMonitorPlan, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT `+intelligencePlanColumns+` FROM intelligence_monitor_plans WHERE deleted_at IS NULL ORDER BY created_at DESC,id DESC`)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+intelligencePlanColumns+` FROM intelligence_monitor_plans WHERE deleted_at IS NULL ORDER BY sort_order ASC NULLS LAST,created_at DESC,id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +60,9 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = lockManualOrderMembership(ctx, tx); err != nil {
+		return err
+	}
 	if p.ID > 0 {
 		var busy bool
 		var oldKeyID *int64
@@ -87,7 +90,7 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 		// created_by is immutable and therefore is not an UPDATE argument. Keep
 		// placeholders contiguous: PostgreSQL cannot infer an unused $17 type.
 		args = append(args[:16], p.AccountID, p.ID, p.UpdatedAt)
-		err = tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_plans SET name=$1,source_type=$2,endpoint=$3,api_key_encrypted=$4,upstream_target_id=$5,group_id=$6,local_api_key_id=$7,local_key_owner_id=$8,supplier_note=$9,group_note=$10,rate_note=$11,notes=$12,api_mode=$13,enabled=$14,interval_seconds=$15,timeout_seconds=$16,account_id=$17,next_run_at=CASE WHEN $14 THEN NOW() ELSE NULL END,updated_at=clock_timestamp() WHERE id=$18 AND updated_at=$19 AND deleted_at IS NULL RETURNING updated_at,next_run_at`, args...).Scan(&p.UpdatedAt, &p.NextRunAt)
+		err = tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_plans SET name=$1,source_type=$2,endpoint=$3,api_key_encrypted=$4,upstream_target_id=$5,group_id=$6,local_api_key_id=$7,local_key_owner_id=$8,supplier_note=$9,group_note=$10,rate_note=$11,notes=$12,api_mode=$13,enabled=$14,interval_seconds=$15,timeout_seconds=$16,account_id=$17,next_run_at=CASE WHEN $14 THEN NOW() ELSE NULL END,sort_order=CASE WHEN (source_type='openai_oauth') IS DISTINCT FROM ($2::varchar='openai_oauth') THEN NULL ELSE sort_order END,updated_at=clock_timestamp() WHERE id=$18 AND updated_at=$19 AND deleted_at IS NULL RETURNING updated_at,next_run_at`, args...).Scan(&p.UpdatedAt, &p.NextRunAt)
 	}
 	if err != nil {
 		return intelligenceDBError(err)
@@ -100,6 +103,9 @@ func (r *intelligenceMonitorRepository) ArchivePlan(ctx context.Context, id int6
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = lockManualOrderMembership(ctx, tx); err != nil {
+		return err
+	}
 	var keyID *int64
 	if err = tx.QueryRowContext(ctx, `SELECT local_api_key_id FROM intelligence_monitor_plans WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id).Scan(&keyID); err != nil {
 		return intelligenceDBError(err)

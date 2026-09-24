@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAppStore } from '@/stores/app'
 import { getPublicSettings } from '@/api/auth'
+import { checkUpdates, type VersionInfo } from '@/api/admin/system'
 import type { PublicSettings } from '@/types'
 
 function createDeferred<T>() {
@@ -79,6 +80,7 @@ describe('useAppStore', () => {
     vi.useFakeTimers()
     localStorage.clear()
     vi.mocked(getPublicSettings).mockReset()
+    vi.mocked(checkUpdates).mockReset()
     // 清除 window.__APP_CONFIG__
     delete (window as any).__APP_CONFIG__
   })
@@ -319,6 +321,69 @@ describe('useAppStore', () => {
       expect(store.sidebarCollapsed).toBe(false)
       expect(store.loading).toBe(false)
       expect(store.toasts).toHaveLength(0)
+    })
+  })
+
+  describe('Pool version checks', () => {
+    const release: VersionInfo = {
+      current_version: '0.2.7-pool.4', latest_version: '0.2.7-pool.5', has_update: true,
+      build_type: 'release', update_method: 'container', update_available: true,
+      current_revision: 'a'.repeat(40), latest_revision: 'b'.repeat(40), image_digest: 'sha256:' + 'c'.repeat(64)
+    }
+
+    it('shares in-flight checks and expires the cache after five minutes', async () => {
+      const deferred = createDeferred<VersionInfo>()
+      vi.mocked(checkUpdates).mockReturnValueOnce(deferred.promise).mockResolvedValue(release)
+      const store = useAppStore()
+      const first = store.fetchVersion()
+      const second = store.fetchVersion(true)
+      expect(checkUpdates).toHaveBeenCalledTimes(1)
+      deferred.resolve(release)
+      expect(await Promise.all([first, second])).toEqual([release, release])
+      expect(store.versionInfo?.image_digest).toBe(release.image_digest)
+      await store.fetchVersion()
+      expect(checkUpdates).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(5 * 60 * 1000)
+      await store.fetchVersion()
+      expect(checkUpdates).toHaveBeenCalledTimes(2)
+    })
+
+    it('forces an immediate new check and clears stale availability on failure', async () => {
+      vi.mocked(checkUpdates).mockResolvedValueOnce(release).mockRejectedValueOnce({ status: 503 })
+      const store = useAppStore()
+      await store.fetchVersion()
+      expect(store.hasUpdate).toBe(true)
+      await store.fetchVersion(true)
+      expect(checkUpdates).toHaveBeenLastCalledWith(true)
+      expect(store.versionLoaded).toBe(false)
+      expect(store.versionCheckFailed).toBe(true)
+      expect(store.hasUpdate).toBe(false)
+      expect(store.latestVersion).toBe('')
+      expect(store.currentVersion).toBe(release.current_version)
+      expect(store.versionInfo).toBeNull()
+      expect(store.versionErrorStatus).toBe(503)
+    })
+
+    it('does not treat a registry warning as proof that the installation is current', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue({ ...release, has_update: false, warning: 'Registry unavailable' })
+      const store = useAppStore()
+      await store.fetchVersion()
+      expect(store.versionLoaded).toBe(false)
+      expect(store.versionCheckFailed).toBe(true)
+      expect(store.versionWarning).toBe('Registry unavailable')
+    })
+
+    it('does not repopulate the cache from a request invalidated by logout', async () => {
+      const deferred = createDeferred<VersionInfo>()
+      vi.mocked(checkUpdates).mockReturnValueOnce(deferred.promise)
+      const store = useAppStore()
+      const request = store.fetchVersion()
+      store.clearVersionCache()
+      deferred.resolve(release)
+      expect(await request).toBeNull()
+      expect(store.versionLoaded).toBe(false)
+      expect(store.versionInfo).toBeNull()
+      expect(store.versionLoading).toBe(false)
     })
   })
 

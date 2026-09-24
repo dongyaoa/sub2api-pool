@@ -71,6 +71,10 @@ func intelligenceMonitorTestDB(t *testing.T, legacySchema ...bool) (*sql.DB, con
 			require.NoError(t, err)
 		}
 	}
+	// This helper intentionally uses a minimal upstream stub; display order is
+	// required by current repository reads even when testing old timeout schemas.
+	_, err = db.ExecContext(ctx, `ALTER TABLE intelligence_monitor_plans ADD COLUMN IF NOT EXISTS sort_order BIGINT`)
+	require.NoError(t, err)
 	return db, ctx
 }
 

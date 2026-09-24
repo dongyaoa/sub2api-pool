@@ -119,6 +119,7 @@ type IntelligenceMonitorRunPage struct {
 	PageSize int                       `json:"page_size"`
 }
 type IntelligenceMonitorRepository interface {
+	SaveOrder(context.Context, IntelligenceOrderInput) error
 	ListPlans(context.Context) ([]*IntelligenceMonitorPlan, error)
 	GetPlan(context.Context, int64) (*IntelligenceMonitorPlan, error)
 	SavePlan(context.Context, *IntelligenceMonitorPlan) error

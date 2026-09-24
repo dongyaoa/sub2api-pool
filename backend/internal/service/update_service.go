@@ -17,9 +17,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/poolupdate"
 )
 
 var (
@@ -67,6 +69,13 @@ type UpdateService struct {
 	currentVersion         string
 	buildType              string // "source" for manual builds, "release" for CI builds
 	officialUpdatesEnabled bool
+	poolRegistry           poolReleaseRegistry
+	poolUpdater            poolUpdaterClient
+	currentRevision        string
+	poolCheckMu            sync.Mutex
+	poolRelease            *poolupdate.Release
+	poolCheckedAt          time.Time
+	poolChecking           *poolReleaseCheck
 }
 
 // NewUpdateService creates a new UpdateService
@@ -83,14 +92,20 @@ func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, versi
 
 // UpdateInfo contains update information
 type UpdateInfo struct {
-	CurrentVersion  string       `json:"current_version"`
-	LatestVersion   string       `json:"latest_version"`
-	HasUpdate       bool         `json:"has_update"`
-	UpdatesDisabled bool         `json:"updates_disabled,omitempty"`
-	ReleaseInfo     *ReleaseInfo `json:"release_info,omitempty"`
-	Cached          bool         `json:"cached"`
-	Warning         string       `json:"warning,omitempty"`
-	BuildType       string       `json:"build_type"` // "source" or "release"
+	CurrentVersion          string       `json:"current_version"`
+	LatestVersion           string       `json:"latest_version"`
+	HasUpdate               bool         `json:"has_update"`
+	UpdatesDisabled         bool         `json:"updates_disabled,omitempty"`
+	ReleaseInfo             *ReleaseInfo `json:"release_info,omitempty"`
+	Cached                  bool         `json:"cached"`
+	Warning                 string       `json:"warning,omitempty"`
+	BuildType               string       `json:"build_type"` // "source" or "release"
+	UpdateMethod            string       `json:"update_method,omitempty"`
+	UpdateAvailable         bool         `json:"update_available"`
+	UpdateUnavailableReason string       `json:"update_unavailable_reason,omitempty"`
+	CurrentRevision         string       `json:"current_revision,omitempty"`
+	LatestRevision          string       `json:"latest_revision,omitempty"`
+	ImageDigest             string       `json:"image_digest,omitempty"`
 }
 
 // ReleaseInfo contains GitHub release details
@@ -136,6 +151,9 @@ type GitHubAsset struct {
 
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	if s.poolRegistry != nil {
+		return s.checkPoolUpdate(ctx, force), nil
+	}
 	// Skip both Redis and GitHub so previously cached official releases cannot
 	// restore the update prompt, including when a client forces a refresh.
 	if !s.officialUpdatesEnabled {
@@ -301,6 +319,9 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 
 // Rollback restores the previous version
 func (s *UpdateService) Rollback() error {
+	if !s.officialUpdatesEnabled {
+		return ErrOfficialUpdatesDisabled
+	}
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)

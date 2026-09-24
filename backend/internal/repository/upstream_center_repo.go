@@ -34,7 +34,7 @@ func upstreamPersistenceError(err error) error {
 }
 
 func (r *upstreamCenterRepository) ListSuppliers(ctx context.Context) ([]*service.UpstreamSupplier, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,name,website,notes,created_at,updated_at FROM upstream_suppliers WHERE deleted_at IS NULL ORDER BY id`)
+	rows, err := r.db.QueryContext(ctx, `SELECT id,name,website,notes,created_at,updated_at FROM upstream_suppliers WHERE deleted_at IS NULL ORDER BY sort_order ASC NULLS LAST,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,18 @@ func (r *upstreamCenterRepository) GetSupplier(ctx context.Context, id int64) (*
 }
 func (r *upstreamCenterRepository) SaveSupplier(ctx context.Context, s *service.UpstreamSupplier) error {
 	if s.ID == 0 {
-		return r.db.QueryRowContext(ctx, `INSERT INTO upstream_suppliers(name,website,notes) VALUES($1,$2,$3) RETURNING id,created_at,updated_at`, s.Name, s.Website, s.Notes).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
+		tx, err := r.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err = lockManualOrderMembership(ctx, tx); err != nil {
+			return err
+		}
+		if err = tx.QueryRowContext(ctx, `INSERT INTO upstream_suppliers(name,website,notes) VALUES($1,$2,$3) RETURNING id,created_at,updated_at`, s.Name, s.Website, s.Notes).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	return upstreamPersistenceError(r.db.QueryRowContext(ctx, `UPDATE upstream_suppliers SET name=$2,website=$3,notes=$4,updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING updated_at`, s.ID, s.Name, s.Website, s.Notes).Scan(&s.UpdatedAt))
 }
@@ -66,6 +77,9 @@ func (r *upstreamCenterRepository) ArchiveSupplier(ctx context.Context, id int64
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = lockManualOrderMembership(ctx, tx); err != nil {
+		return err
+	}
 	// Match SaveTarget's supplier -> target lock order. The supplier lock also
 	// prevents a new target from appearing after the busy-check snapshot.
 	var found int64
@@ -123,7 +137,7 @@ func scanUpstreamTarget(row upstreamScanner) (*service.UpstreamTarget, error) {
 	return t, nil
 }
 func (r *upstreamCenterRepository) ListTargets(ctx context.Context) ([]*service.UpstreamTarget, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT `+upstreamTargetColumns+` FROM upstream_targets WHERE deleted_at IS NULL ORDER BY id`)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+upstreamTargetColumns+` FROM upstream_targets WHERE deleted_at IS NULL ORDER BY sort_order ASC NULLS LAST,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +201,9 @@ func (r *upstreamCenterRepository) SaveTarget(ctx context.Context, t *service.Up
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = lockManualOrderMembership(ctx, tx); err != nil {
+		return err
+	}
 	supplierName := ""
 	if t.SupplierID != nil {
 		if err = tx.QueryRowContext(ctx, `SELECT name FROM upstream_suppliers WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, *t.SupplierID).Scan(&supplierName); err != nil {
@@ -217,7 +234,7 @@ func (r *upstreamCenterRepository) SaveTarget(ctx context.Context, t *service.Up
 		args = append(args, t.ID, t.UpdatedAt)
 		// A new financial identity has no cached balance or billing observation.
 		// Queue its first sync immediately, retaining the cadence for cosmetic edits.
-		err = tx.QueryRowContext(ctx, `UPDATE upstream_targets SET supplier_id=$1,name=$2,provider=$3,api_mode=$4,endpoint=$5,api_key_encrypted=$6,models=$7::jsonb,enabled=$8,interval_seconds=$9,timeout_seconds=$10,degraded_threshold_ms=$11,wallet_ref=$12,notes=$13,api_key_fingerprint=$14,next_check_at=CASE WHEN $8 THEN NOW() ELSE NULL END,balance_next_sync_at=CASE WHEN supplier_id IS DISTINCT FROM $1::bigint OR provider IS DISTINCT FROM $3::varchar OR endpoint IS DISTINCT FROM $5::varchar OR api_key_encrypted IS DISTINCT FROM $6::text OR wallet_ref IS DISTINCT FROM $12::varchar THEN NOW() ELSE balance_next_sync_at END,lease_until=NULL,check_token='',updated_at=clock_timestamp() WHERE id=$15 AND updated_at=$16 AND deleted_at IS NULL AND (lease_until IS NULL OR lease_until < NOW()) RETURNING updated_at,next_check_at`, args...).Scan(&t.UpdatedAt, &t.NextCheckAt)
+		err = tx.QueryRowContext(ctx, `UPDATE upstream_targets SET supplier_id=$1,name=$2,provider=$3,api_mode=$4,endpoint=$5,api_key_encrypted=$6,models=$7::jsonb,enabled=$8,interval_seconds=$9,timeout_seconds=$10,degraded_threshold_ms=$11,wallet_ref=$12,notes=$13,api_key_fingerprint=$14,next_check_at=CASE WHEN $8 THEN NOW() ELSE NULL END,balance_next_sync_at=CASE WHEN supplier_id IS DISTINCT FROM $1::bigint OR provider IS DISTINCT FROM $3::varchar OR endpoint IS DISTINCT FROM $5::varchar OR api_key_encrypted IS DISTINCT FROM $6::text OR wallet_ref IS DISTINCT FROM $12::varchar THEN NOW() ELSE balance_next_sync_at END,sort_order=CASE WHEN supplier_id IS DISTINCT FROM $1::bigint THEN NULL ELSE sort_order END,lease_until=NULL,check_token='',updated_at=clock_timestamp() WHERE id=$15 AND updated_at=$16 AND deleted_at IS NULL AND (lease_until IS NULL OR lease_until < NOW()) RETURNING updated_at,next_check_at`, args...).Scan(&t.UpdatedAt, &t.NextCheckAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return service.ErrUpstreamBusy
 		}
@@ -248,6 +265,9 @@ func (r *upstreamCenterRepository) ArchiveTarget(ctx context.Context, id int64) 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = lockManualOrderMembership(ctx, tx); err != nil {
+		return err
+	}
 	var found int64
 	err = tx.QueryRowContext(ctx, `UPDATE upstream_targets SET deleted_at=NOW(),enabled=FALSE,next_check_at=NULL,lease_until=NULL,check_token='',updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL AND (lease_until IS NULL OR lease_until < NOW()) RETURNING id`, id).Scan(&found)
 	if errors.Is(err, sql.ErrNoRows) {

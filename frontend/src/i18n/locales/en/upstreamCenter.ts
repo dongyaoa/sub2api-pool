@@ -1,5 +1,15 @@
 export default {
   upstreamCenter: {
+    order: {
+      open: 'Reorder', groups: 'Reorder groups',
+      titles: { suppliers: 'Reorder upstreams', monitors: 'Reorder monitors', groups: 'Reorder key groups', intelligence: 'Reorder intelligence monitors', oauth: 'Reorder OAuth monitors' },
+      groupTitle: '{name} · Group order', description: 'Drag the handle or use the arrow buttons to change the order, then save.',
+      newItemsHint: 'This is the complete list, independent of search and filters. New items appear after items already ordered.',
+      allItems: 'All {count} items', firstOnTop: 'Top to bottom', drag: 'Drag to reorder', moveUp: 'Move up', moveDown: 'Move down',
+      empty: 'No items to reorder', reload: 'Reload list', save: 'Save order', saving: 'Saving…', saved: 'Order saved',
+      loadError: 'Unable to load the complete list. Reload it before reordering.', saveError: 'Unable to save the order. Try again.',
+      stale: 'The list has changed. Reload the latest list before reordering.', supplierMissing: 'This upstream was deleted or is unavailable. Close this dialog and refresh the list.',
+    },
     visitWebsite: 'Visit website', websiteUnavailable: 'No valid website URL available',
     billing: { rate: 'Rate', effective: 'Current effective multiplier', group: 'Group multiplier', user: 'User-specific multiplier', base: 'Key base multiplier', unavailable: 'Upstream has not provided a multiplier', stale: 'Sync failed or data is stale; showing the last known multiplier', modelIssuesShort: '{count} models need attention', upstreamTodayShort: 'Upstream today', revenueTodayShort: 'Charges today', profitTodayShort: 'Est. margin today', scope: 'Token billing multiplier, synced automatically from the upstream.', updated: 'Multiplier updated' },
     import: { title: 'Import API key accounts', hint: 'Select existing accounts to create a key group for each. URLs and credentials are read by the server. You can also create an upstream without importing accounts.', selected: '{count} selected', loading: 'Loading…', groups: 'Key groups to import', modelHint: 'Defaults to gpt-5.6-sol every 30 seconds. Models and intervals are editable; separate up to 8 models with commas.', done: 'Imported', retryHint: 'The upstream and successful groups are saved. Fix the failed items and continue without creating duplicate upstreams or groups.', retry: 'Continue import', save: 'Add & import accounts', partial: 'Some accounts could not be imported. Review their errors, make corrections and retry.', chooseExisting: 'Several upstreams match this name and URL. Choose the upstream to continue importing into.', choosePlaceholder: 'Choose an existing upstream' },

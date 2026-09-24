@@ -15,6 +15,7 @@ func TestIntelligenceRepositoryArchiveDisablesDedicatedKeyTransactionally(t *tes
 	defer func() { _ = db.Close() }()
 	repo := &intelligenceMonitorRepository{db: db}
 	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock\(251,0\)`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT local_api_key_id FROM intelligence_monitor_plans .*FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"local_api_key_id"}).AddRow(22))
 	mock.ExpectQuery(`SELECT EXISTS.*intelligence_monitor_runs`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"busy"}).AddRow(false))
 	mock.ExpectExec(`UPDATE api_keys SET status='disabled'`).WithArgs(int64(22)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -30,6 +31,7 @@ func TestIntelligenceRepositoryArchivePreservesRunningGeneration(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	repo := &intelligenceMonitorRepository{db: db}
 	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock\(251,0\)`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT local_api_key_id FROM intelligence_monitor_plans .*FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"local_api_key_id"}).AddRow(22))
 	mock.ExpectQuery(`SELECT EXISTS.*intelligence_monitor_runs`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"busy"}).AddRow(true))
 	mock.ExpectRollback()

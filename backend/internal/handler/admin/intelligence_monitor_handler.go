@@ -23,6 +23,17 @@ func (h *IntelligenceMonitorHandler) ListPlans(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"items": items})
 }
+func (h *IntelligenceMonitorHandler) SaveOrder(c *gin.Context) {
+	var in service.IntelligenceOrderInput
+	if c.ShouldBindJSON(&in) != nil {
+		response.ErrorFrom(c, service.ErrManualOrderInvalid)
+		return
+	}
+	if response.ErrorFrom(c, h.svc.SaveOrder(c.Request.Context(), in)) {
+		return
+	}
+	response.Success(c, nil)
+}
 func (h *IntelligenceMonitorHandler) CreatePlan(c *gin.Context) { h.save(c, 0) }
 func (h *IntelligenceMonitorHandler) UpdatePlan(c *gin.Context) {
 	if id, ok := parseIntelligenceID(c); ok {

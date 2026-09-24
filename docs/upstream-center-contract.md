@@ -9,6 +9,7 @@
 统一前缀 /api/v1/admin/upstream-center，使用现有 response.Success 包装。
 
 - GET /overview?window=24h|7d|30d 返回 {suppliers: Supplier[], monitors: Target[], summary: FinanceSummary}
+- PUT /order 请求 `{scope:'suppliers'|'monitors'|'groups',supplier_id?:number,ids:number[]}`，按 ids 顺序保存完整范围的展示排序，成功返回 `data:null`。仅 groups 要求 supplier_id 为正整数；其他范围禁止传入。
 - POST /suppliers，PUT /suppliers/:id，DELETE /suppliers/:id。请求 {name, website, notes}；删除软归档，停止其目标调度，保留账目和历史。
 - POST /targets，PUT /targets/:id，DELETE /targets/:id。创建/更新用 TargetInput；更新为字段可选，api_key 为空保持不变。删除软归档并关闭账号绑定。
 - POST /targets/:id/run，返回 HistoryRecord[]；允许手动检测暂停目标，但不恢复定时任务。
@@ -55,7 +56,13 @@ FinanceRow: {id:number,created_at:string,target_id:number,target_name:string,sup
 
 共用管理员前缀 `/api/v1/admin/intelligence-monitors`，计划 `source_type` 支持 `upstream`、`local_group`、`external`、`openai_oauth`。前端把 `openai_oauth` 单独放在 OAuth Tab，其余三类放在智商监控 Tab。
 
+`PUT /plans/order` 请求 `{scope:'intelligence'|'oauth',ids:number[]}`，成功返回 `data:null`。intelligence 包含所有非 openai_oauth 的未归档计划，oauth 仅包含未归档的 openai_oauth 计划；两个范围独立排序。
+
 固定模型 `gpt-6-astra`、思考强度 `high`、提示词 `创建一个 HTML，内容是用 SVG 绘制一个鹈鹕骑自行车的 2D 动画。你不需要任何测试。`。新计划 `enabled=false`，手动执行只排队一次任务，不隐式打开定时。
+
+`upstream` 与 `external` 的生成请求设为 `stream:true`，Accept 支持 SSE 和 JSON；继续使用计划保存的 api_mode，不继承可用性监控的模型或自动切换协议。服务端有界读取 SSE 并在终态立即关闭接收，支持 Responses/Chat Completions、完整 JSON 回退及错误事件，失败或未完成不能作为成功作品。总响应限制 4 MiB，包含流事件开销。`local_group` 和 `openai_oauth` 保留原来的非流式内部执行策略与已配置期限。失败不自动重试生成。
+
+非 2xx 仅读取有界错误体，error 可附带合法 JSON 中脱敏后的 message/type/code 以及安全格式的请求 ID；SSE 错误同样处理。纯文本、HTML 错误页、任意嵌套响应和凭据不得写入记录。该改动不需要数据库迁移，不改变既有历史错误内容。
 
 `interval_seconds` 支持 30–86400 整数秒，默认 3600；`timeout_seconds` 接受 180–900 整数秒，新建默认 900。等待表单按 5 / 10 / 15 分钟点选，编辑非预设的合法旧值时保留原选项；检测间隔使用点选预设和自定义秒数输入，其他选择使用站内无搜索的原生下拉。迁移 249 仅放宽间隔 CHECK；迁移 250 扩大等待时长 CHECK、修改数据库默认值，并将原有 180–300 秒计划提升为 900 秒，不修改开关、下次执行时间及任何已提交运行快照。调度间隔从上一次执行完成后计算，同一计划禁止重叠运行。
 
@@ -68,6 +75,14 @@ OAuth 计划提交 `account_id` 选择站内已有 OpenAI OAuth 账号，接口�
 预览使用清理后的无脚本沙箱 iframe。紧凑预览固定逻辑宽度 960，逻辑高度按预览区域比例计算且至少为 600；详情预览保持固定 960×600，两者均等比缩放并居中。尺寸变化和同一记录轮询不会重建 iframe。成功作品右下角常驻耗时角标，优先使用有限非负的 `duration_ms`，缺失时以 `finished_at - started_at` 回退，不包含 `created_at` 到执行开始的排队时间；不足一分钟以秒显示，达到一分钟以分秒显示，无有效耗时则不显示角标。历史详情使用相同格式。查看入口仅在悬停/聚焦时显示，并位于角标上方。排队及绘制中显示本地鹈鹕骑行线稿、描线和状态点动画，不表示上游结果或实际完成进度；减少动态效果设置会停止动画。查看源码与下载使用保留记录的原始 HTML。上游直连、外部地址和 OAuth 智商监控没有单独计入厂家经营费用；保留条数或作品成功都不代表真实付费线路已验收。
 
 ## 后端分工与 DB 约定
+
+### 展示排序
+
+迁移 `251_upstream_manual_order.sql` 为 upstream_suppliers、upstream_targets、intelligence_monitor_plans 添加可空 BIGINT 字段 sort_order。读取按 `sort_order ASC NULLS LAST` 排列；厂家及目标保留 id 升序作为后备，计划保留 created_at、id 降序作为后备。旧数据不回填，新建条目以及跨展示范围移动的条目位置为 NULL，排在已排序项之后。
+
+两类排序接口仅管理员可用。ids 必须显式提供、为唯一正整数数组；空范围可传 []，省略或 null 不合法。payload 错误返回 HTTP 400 / `MANUAL_ORDER_INVALID`；范围内有遗漏、外来或已归档 ID，以及所属厂家不存在时返回 HTTP 409 / `MANUAL_ORDER_CONFLICT`，不部分保存。前端弹窗独立加载完整范围，不使用页面搜索结果作为提交列表；冲突后保留草稿并要求重新加载。
+
+排序事务持有成员范围共享锁、范围级排序锁和相关行锁；新增、归档及范围迁移先取得成员范围排他锁，防止完整集合校验期间产生新增幻行。只更新 sort_order，不更新 updated_at、调度时间、运行快照、启用状态或账目。每个厂家分组是独立范围，智商和 OAuth 列表也是独立范围；历史检测记录与作品仍按原时间规则排列。
 
 核心 agent 拥有：service/upstream_center*.go、repository/upstream_center_repo.go、handler/admin/upstream_center_handler.go、242_upstream_center.sql。
 财务 agent 拥有：service/upstream_finance*.go、repository/upstream_finance_repo.go、243_upstream_finance.sql；FinanceSummary/BalanceSnapshot/FinanceRow 相关 Go DTO 类型亦由财务定义（UpstreamFinanceSummary / UpstreamBalanceSnapshot / UpstreamFinanceRow）。

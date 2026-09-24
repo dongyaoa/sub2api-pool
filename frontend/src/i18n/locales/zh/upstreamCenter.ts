@@ -1,5 +1,15 @@
 export default {
   upstreamCenter: {
+    order: {
+      open: '手动排序', groups: '分组排序',
+      titles: { suppliers: '上游排序', monitors: '监控排序', groups: 'Key 分组排序', intelligence: '智商监控排序', oauth: 'OAuth 监控排序' },
+      groupTitle: '{name} · 分组排序', description: '拖动左侧手柄，或使用上下按钮调整顺序，保存后生效。',
+      newItemsHint: '这里展示完整列表，不受搜索和筛选影响。新增项目将排在已排序项目之后。',
+      allItems: '全部 {count} 项', firstOnTop: '从上到下排列', drag: '拖动调整顺序', moveUp: '上移', moveDown: '下移',
+      empty: '暂无可排序的项目', reload: '重新加载列表', save: '保存排序', saving: '保存中…', saved: '排序已保存',
+      loadError: '无法读取完整列表，请重新加载后再排序。', saveError: '排序保存失败，请重试。',
+      stale: '列表已发生变化，请重新加载最新列表后调整排序。', supplierMissing: '这家上游已删除或暂不可用，请关闭弹窗并刷新列表。',
+    },
     visitWebsite: '访问网站', websiteUnavailable: '未提供有效的网站地址',
     billing: { rate: '倍率', effective: '当前有效倍率', group: '分组倍率', user: '用户专属倍率', base: 'Key 基础倍率', unavailable: '上游未提供倍率', stale: '同步失败或数据过期，展示最近倍率', modelIssuesShort: '{count} 个模型异常', upstreamTodayShort: '上游今日', revenueTodayShort: '用户今日消费', profitTodayShort: '今日预估毛利', scope: '倍率适用于 Token 计费，来自上游自动同步。', updated: '倍率更新时间' },
     import: { title: '从账号管理导入 API Key', hint: '直接选择已有账号，每个账号生成一个 Key 分组；地址和密钥由服务端读取。也可以不选账号，先添加上游。', selected: '已选择 {count} 个', loading: '加载中…', groups: '将导入的 Key 分组', modelHint: '默认使用 gpt-5.6-sol，每 30 秒检测一次。模型和间隔均可修改；多个模型用逗号分隔，最多 8 个。', done: '已导入', retryHint: '上游已创建，已成功的分组将保留。修改失败项后可继续导入，不会重复创建上游或成功分组。', retry: '继续导入', save: '添加并导入账号', partial: '部分账号导入失败，请查看各分组的原因，修改后重试。', chooseExisting: '检测到多个同名同网址上游，请明确选择要继续导入的上游。', choosePlaceholder: '选择已有上游' },

@@ -131,7 +131,8 @@ func TestIntelligenceFixedPromptAndReasoningRequest(t *testing.T) {
 				var body map[string]any
 				require.NoError(t, json.NewDecoder(request.Body).Decode(&body))
 				require.Equal(t, "gpt-6-astra", body["model"])
-				require.Equal(t, false, body["stream"])
+				require.Equal(t, true, body["stream"])
+				require.Contains(t, request.Header.Get("Accept"), "text/event-stream")
 				expected := "创建一个 HTML，内容是用 SVG 绘制一个鹈鹕骑自行车的 2D 动画。你不需要任何测试。"
 				response := `{"output_text":"<!doctype html><html><body>test-secret<svg></svg></body></html>","status":"completed"}`
 				if mode == MonitorAPIModeResponses {

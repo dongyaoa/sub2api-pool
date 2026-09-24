@@ -15,11 +15,36 @@ jobs:
       - name: Check deployment scripts
         run: |
           /bin/bash -n deploy/apple-container.sh
+          /bin/bash -n deploy/install-pool-updater.sh
+          /bin/bash -n deploy/tests/pool-updater-smoke.sh
+          PYTHONDONTWRITEBYTECODE=1 python3 deploy/tests/pool-updater-config-test.py
           /bin/bash deploy/tests/apple-container-test.sh
           /bin/sh deploy/tests/docker-compose-security-test.sh
           /bin/sh deploy/tests/docker-compose-gateway-env-test.sh
           /bin/sh deploy/tests/docker-runtime-resources-test.sh
           /bin/sh deploy/test-caddyfile-cache.sh
+
+  pool-updater:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Test and build host updater
+        working-directory: backend
+        run: |
+          go test ./internal/poolupdate
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/pool-updater" ./cmd/pool-updater
+      - name: Build isolated runtime fixture
+        run: docker build --pull -f deploy/tests/pool-updater-fixture.Dockerfile -t pool-updater-fixture:ci .
+      - name: Verify installer configuration and permissions on Linux
+        run: sudo env PYTHONDONTWRITEBYTECODE=1 python3 deploy/tests/pool-updater-config-test.py
+      - name: Verify real Docker bootstrap and restoration
+        run: sudo /bin/bash deploy/tests/pool-updater-smoke.sh "$RUNNER_TEMP/pool-updater" pool-updater-fixture:ci
 
   test:
     runs-on: ubuntu-latest

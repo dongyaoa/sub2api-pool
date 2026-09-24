@@ -44,6 +44,7 @@ func TestUpstreamArchiveRejectsInFlightSupplierProbe(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	repo := &upstreamCenterRepository{db: db}
 	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock\(251,0\)`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT id FROM upstream_suppliers .* FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(3))
 	mock.ExpectQuery(`SELECT lease_until > NOW\(\).*FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"busy"}).AddRow(true))
 	mock.ExpectRollback()

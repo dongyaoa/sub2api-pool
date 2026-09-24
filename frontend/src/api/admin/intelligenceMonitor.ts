@@ -6,6 +6,7 @@ export const PELICAN_PROMPT = '创建一个 HTML，内容是用 SVG 绘制一个
 export type IntelligenceSource = 'external' | 'upstream' | 'local_group' | 'openai_oauth'
 export type IntelligenceRunStatus = 'pending' | 'running' | 'succeeded' | 'failed'
 export type IntelligenceRate = Record<string, unknown> | null
+export interface IntelligenceOrderInput { scope: 'intelligence' | 'oauth'; ids: number[] }
 
 export interface IntelligencePlanInput {
   name: string
@@ -71,6 +72,9 @@ export interface IntelligenceRunPage {
 }
 const base = '/admin/intelligence-monitors'
 export const intelligenceMonitorAPI = {
+  async reorder(input: IntelligenceOrderInput): Promise<void> {
+    await apiClient.put(`${base}/plans/order`, input)
+  },
   async plans(signal?: AbortSignal): Promise<{ items: IntelligencePlan[] }> {
     return (await apiClient.get(`${base}/plans`, { signal })).data
   },

@@ -3,6 +3,9 @@ import { apiClient } from '../client'
 export type UpstreamWindow = '24h' | '7d' | '30d'
 export type UpstreamStatus = 'operational' | 'degraded' | 'failed' | 'error' | 'unknown'
 export type UpstreamProvider = 'openai' | 'anthropic' | 'gemini'
+export type UpstreamOrderInput =
+  | { scope: 'suppliers' | 'monitors'; ids: number[] }
+  | { scope: 'groups'; supplier_id: number; ids: number[] }
 
 export interface UpstreamHistoryRecord {
   id: number
@@ -150,6 +153,9 @@ export interface UpstreamPageQuery { page?: number; page_size?: number; from?: s
 const base = '/admin/upstream-center'
 
 export const upstreamCenterAPI = {
+  async reorder(input: UpstreamOrderInput): Promise<void> {
+    await apiClient.put(`${base}/order`, input)
+  },
   async overview(window: UpstreamWindow = '24h', signal?: AbortSignal): Promise<UpstreamOverview> {
     return (await apiClient.get<UpstreamOverview>(`${base}/overview`, { params: { window }, signal })).data
   },

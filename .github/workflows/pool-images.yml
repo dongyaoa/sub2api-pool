@@ -91,6 +91,25 @@ jobs:
           cache-from: type=gha,scope=pool-main-amd64
           cache-to: type=gha,mode=max,scope=pool-main-amd64
 
+      - name: Verify host updater packaging and real Docker recovery
+        env:
+          POOL_IMAGE: ${{ steps.release.outputs.image }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          /bin/bash -n deploy/install-pool-updater.sh
+          PYTHONDONTWRITEBYTECODE=1 python3 deploy/tests/pool-updater-config-test.py
+          extract=$(docker create --network none "$POOL_IMAGE:$RELEASE_VERSION")
+          trap 'docker rm "$extract" >/dev/null 2>&1 || true' EXIT
+          docker cp "$extract:/app/pool-updater" "$RUNNER_TEMP/pool-updater"
+          docker cp "$extract:/app/pool-updater-install" "$RUNNER_TEMP/pool-updater-install"
+          test -s "$RUNNER_TEMP/pool-updater-install/install-pool-updater.sh"
+          test -s "$RUNNER_TEMP/pool-updater-install/pool-updater-config.py"
+          test -s "$RUNNER_TEMP/pool-updater-install/pool-updater-compose.py"
+          test -s "$RUNNER_TEMP/pool-updater-install/pool-updater.service"
+          sudo /bin/bash deploy/tests/pool-updater-smoke.sh "$RUNNER_TEMP/pool-updater" "$POOL_IMAGE:$RELEASE_VERSION"
+
       - name: Verify image metadata and pool runtime
         env:
           POOL_IMAGE: ${{ steps.release.outputs.image }}

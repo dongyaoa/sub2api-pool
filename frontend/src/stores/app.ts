@@ -43,6 +43,13 @@ export const useAppStore = defineStore('app', () => {
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
+  const versionInfo = ref<VersionInfo | null>(null)
+  const versionCheckFailed = ref(false)
+  const versionErrorStatus = ref(0)
+  const versionWarning = ref('')
+  const versionLastChecked = ref(0)
+  let versionRequest: Promise<VersionInfo | null> | null = null
+  let versionRequestGeneration = 0
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -240,48 +247,67 @@ export const useAppStore = defineStore('app', () => {
    * Fetch version info (uses cache unless force=true)
    * @param force - Force refresh from API
    */
-  async function fetchVersion(force = false): Promise<VersionInfo | null> {
-    // Return cached data if available and not forcing refresh
-    if (versionLoaded.value && !force) {
-      return {
-        current_version: currentVersion.value,
-        latest_version: latestVersion.value,
-        has_update: hasUpdate.value,
-        build_type: buildType.value,
-        release_info: releaseInfo.value || undefined,
-        cached: true
-      }
+  function fetchVersion(force = false): Promise<VersionInfo | null> {
+    if (versionRequest) return versionRequest
+    if (versionLoaded.value && versionInfo.value && !force && Date.now() - versionLastChecked.value < 5 * 60 * 1000) {
+      return Promise.resolve(versionInfo.value)
     }
-
-    // Prevent duplicate requests
-    if (versionLoading.value) {
-      return null
-    }
-
+    const generation = versionRequestGeneration
     versionLoading.value = true
-    try {
-      const data = await checkUpdatesAPI(force)
-      currentVersion.value = data.current_version
-      latestVersion.value = data.latest_version
-      hasUpdate.value = data.has_update
-      buildType.value = data.build_type || 'source'
-      releaseInfo.value = data.release_info || null
-      versionLoaded.value = true
-      return data
-    } catch (error) {
-      console.error('Failed to fetch version:', error)
-      return null
-    } finally {
-      versionLoading.value = false
-    }
+    versionRequest = (async () => {
+      try {
+        const data = await checkUpdatesAPI(force)
+        if (generation !== versionRequestGeneration) return null
+        currentVersion.value = data.current_version
+        latestVersion.value = data.latest_version
+        hasUpdate.value = data.has_update
+        buildType.value = data.build_type || 'source'
+        releaseInfo.value = data.release_info || null
+        versionInfo.value = data
+        versionWarning.value = data.warning || ''
+        versionCheckFailed.value = !!data.warning || !data.latest_version
+        versionErrorStatus.value = 0
+        versionLoaded.value = !versionCheckFailed.value
+        versionLastChecked.value = Date.now()
+        return data
+      } catch (error) {
+        if (generation !== versionRequestGeneration) return null
+        const failure = error as { status?: number; response?: { status?: number } }
+        versionErrorStatus.value = failure.status || failure.response?.status || 0
+        versionLoaded.value = false
+        versionCheckFailed.value = true
+        versionWarning.value = ''
+        versionInfo.value = null
+        latestVersion.value = ''
+        hasUpdate.value = false
+        releaseInfo.value = null
+        return null
+      } finally {
+        if (generation === versionRequestGeneration) {
+          versionLoading.value = false
+          versionRequest = null
+        }
+      }
+    })()
+    return versionRequest
   }
 
   /**
    * Clear version cache (e.g., after update)
    */
   function clearVersionCache(): void {
+    versionRequestGeneration += 1
+    versionRequest = null
     versionLoaded.value = false
+    versionLoading.value = false
     hasUpdate.value = false
+    latestVersion.value = ''
+    versionInfo.value = null
+    releaseInfo.value = null
+    versionWarning.value = ''
+    versionCheckFailed.value = false
+    versionErrorStatus.value = 0
+    versionLastChecked.value = 0
   }
 
   // ==================== Public Settings Management ====================
@@ -460,6 +486,11 @@ export const useAppStore = defineStore('app', () => {
     hasUpdate,
     buildType,
     releaseInfo,
+    versionInfo,
+    versionCheckFailed,
+    versionErrorStatus,
+    versionWarning,
+    versionLastChecked,
 
     // Computed
     hasActiveToasts,

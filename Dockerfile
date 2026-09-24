@@ -97,6 +97,13 @@ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
     -o /app/sub2api \
     ./cmd/server
 
+# The optional host updater is extracted once by the installation script. The
+# application container itself never receives the Docker daemon socket.
+RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
+    --mount=type=cache,id=sub2api-gobuild,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    -trimpath -ldflags="-s -w" -o /app/pool-updater ./cmd/pool-updater
+
 # -----------------------------------------------------------------------------
 # Stage 3: PostgreSQL Client (version-matched with docker-compose)
 # -----------------------------------------------------------------------------
@@ -141,6 +148,8 @@ WORKDIR /app
 
 # Copy binary/resources with ownership to avoid extra full-layer chown copy
 COPY --from=backend-builder --chown=sub2api:sub2api /app/sub2api /app/sub2api
+COPY --from=backend-builder /app/pool-updater /app/pool-updater
+COPY deploy/install-pool-updater.sh deploy/pool-updater-config.py deploy/pool-updater-compose.py deploy/pool-updater.service /app/pool-updater-install/
 COPY --from=backend-builder --chown=sub2api:sub2api /app/backend/resources /app/resources
 
 # Create data directory

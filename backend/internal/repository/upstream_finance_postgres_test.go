@@ -42,7 +42,9 @@ CREATE TABLE usage_logs (id BIGSERIAL PRIMARY KEY, created_at TIMESTAMPTZ NOT NU
 		_, err = db.ExecContext(ctx, string(migration))
 		require.NoError(t, err, name)
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO upstream_suppliers(id,name) VALUES(1,'First supplier'),(2,'Second supplier');
+	_, err = db.ExecContext(ctx, `ALTER TABLE upstream_suppliers ADD COLUMN sort_order BIGINT;
+ALTER TABLE upstream_targets ADD COLUMN sort_order BIGINT;
+INSERT INTO upstream_suppliers(id,name) VALUES(1,'First supplier'),(2,'Second supplier');
 INSERT INTO upstream_targets(id,supplier_id,name,provider,endpoint,api_key_encrypted,api_key_fingerprint) VALUES
 (1,1,'Old key','openai','https://example.com','cipher1','fingerprint1'),
 (2,2,'New key','openai','https://example.org','cipher2','fingerprint2'),
@@ -389,7 +391,9 @@ INSERT INTO upstream_monitor_history(target_id,target_name,model,status,latency_
 		insert(nil, "Leased independent billing", &future, nil)
 		insert(&archivedSupplier, "Archived supplier billing", nil, nil)
 		insert(nil, "Archived independent billing", nil, &now)
-		firstPoll := time.Now().UTC()
+		// PostgreSQL timestamps have microsecond precision. Keep the poll time
+		// at that precision before asserting a one-microsecond due boundary.
+		firstPoll := time.Now().UTC().Truncate(time.Microsecond)
 		ids, err := repo.DueBalanceTargetIDs(ctx, firstPoll, 32)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []int64{independent, group}, ids)

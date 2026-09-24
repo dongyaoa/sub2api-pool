@@ -30,6 +30,18 @@ func (h *UpstreamCenterHandler) Overview(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *UpstreamCenterHandler) SaveOrder(c *gin.Context) {
+	var in service.UpstreamOrderInput
+	if c.ShouldBindJSON(&in) != nil {
+		response.ErrorFrom(c, service.ErrManualOrderInvalid)
+		return
+	}
+	if response.ErrorFrom(c, h.svc.SaveOrder(c.Request.Context(), in)) {
+		return
+	}
+	response.Success(c, nil)
+}
+
 type upstreamSupplierRequest struct {
 	Name    *string `json:"name"`
 	Website *string `json:"website"`

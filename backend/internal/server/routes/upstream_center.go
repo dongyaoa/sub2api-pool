@@ -15,6 +15,7 @@ func registerUpstreamCenterRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	center := admin.Group("/upstream-center")
 	api := h.Admin.UpstreamCenter
 	center.GET("/overview", api.Overview)
+	center.PUT("/order", api.SaveOrder)
 	center.POST("/suppliers", api.CreateSupplier)
 	center.PUT("/suppliers/:id", api.UpdateSupplier)
 	center.DELETE("/suppliers/:id", api.DeleteSupplier)
