@@ -10,7 +10,7 @@ afterEach(() => {
   }
 })
 
-function setup(autoplay: boolean, body = '<main><svg></svg><canvas></canvas></main>') {
+function setup(autoplay: boolean, body = '<main><svg></svg><canvas></canvas></main>', fit: 'contain' | 'cover' = 'contain') {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>${body}</body></html>`, { runScripts: 'outside-only', pretendToBeVisual: true })
   openDocuments.push(dom)
   const window = dom.window
@@ -65,8 +65,9 @@ function setup(autoplay: boolean, body = '<main><svg></svg><canvas></canvas></ma
     clock = end
   }
   const playback = (playing: unknown, source: unknown = controller) => window.dispatchEvent(new window.MessageEvent('message', { data: { type: 'intelligence-preview-playback', playing }, source }))
-  window.eval(intelligencePreviewRuntime(autoplay))
-  return { window, controller, frame, advance, playback, paused, unpaused, observers, frames, timers, animations }
+  const viewport = (width: unknown, height: unknown, source: unknown = controller) => window.dispatchEvent(new window.MessageEvent('message', { data: { type: 'intelligence-preview-viewport', width, height }, source }))
+  window.eval(intelligencePreviewRuntime(autoplay, fit))
+  return { window, controller, frame, advance, playback, viewport, paused, unpaused, observers, frames, timers, animations }
 }
 
 describe('intelligence preview runtime', () => {
@@ -180,6 +181,46 @@ describe('intelligence preview runtime', () => {
     const scale = 0.8
     expect(document.documentElement.style.transform).toBe(`translate(96px, 60px) scale(${scale})`)
     expect(document.documentElement.style.transform).not.toMatch(/NaN|Infinity/)
+  })
+
+  it.each([[174, 188, 1040], [320, 144, 1040], [174, 144, 600]])('covers a %s×%s card with a 960×%s artwork without added bars', (cardWidth, cardHeight, contentHeight) => {
+    const { window, frame, viewport } = setup(false, '<header>Title</header><svg></svg>', 'cover')
+    const { document } = window
+    Object.defineProperties(document.documentElement, { scrollWidth: { value: 960 }, scrollHeight: { value: contentHeight } })
+    Object.defineProperties(document.body, { scrollWidth: { value: 960 }, scrollHeight: { value: contentHeight } })
+    const outerScale = Math.max(cardWidth / 960, cardHeight / 600)
+    const visibleWidth = Math.min(960, cardWidth / outerScale)
+    const visibleHeight = Math.min(600, cardHeight / outerScale)
+    viewport(visibleWidth, visibleHeight)
+    frame()
+    const innerScale = Math.max(visibleWidth / 960, visibleHeight / contentHeight)
+    expect(document.documentElement.style.transform).toBe(`translate(${(960 - 960 * innerScale) / 2}px, ${(600 - contentHeight * innerScale) / 2}px) scale(${innerScale})`)
+    expect(960 * innerScale * outerScale).toBeGreaterThanOrEqual(cardWidth - 0.0001)
+    expect(contentHeight * innerScale * outerScale).toBeGreaterThanOrEqual(cardHeight - 0.0001)
+    expect(document.documentElement.style.height).toBe('')
+  })
+
+  it('ignores invalid or unrelated cover viewport messages', () => {
+    const { window, frame, viewport } = setup(false, '<svg></svg>', 'cover')
+    Object.defineProperty(window.document.body, 'scrollHeight', { value: 1040 })
+    viewport(560, 600)
+    frame()
+    const initial = window.document.documentElement.style.transform
+    viewport(960, 600, {})
+    for (const [width, height] of [[NaN, 600], [960, Infinity], [0, 600], [-1, 600], [961, 600], [960, 601], ['960', 600]]) viewport(width, height)
+    frame()
+    expect(window.document.documentElement.style.transform).toBe(initial)
+  })
+
+  it('keeps enlarged artwork complete even when sent a thumbnail viewport', () => {
+    const { window, frame, viewport } = setup(true, '<svg></svg>')
+    Object.defineProperty(window.document.body, 'scrollHeight', { value: 1040 })
+    frame()
+    const initial = window.document.documentElement.style.transform
+    viewport(960, 300)
+    frame()
+    expect(window.document.documentElement.style.transform).toBe(initial)
+    expect(initial).toContain(`scale(${600 / 1040})`)
   })
 
   it('refits document changes without observing animation attribute changes', async () => {

@@ -1,12 +1,15 @@
 /**
  * Runs inside the generated artwork's opaque-origin iframe. The containing
  * iframe supplies the security boundary; these hooks only control playback and
- * fit the complete document into the fixed 960 × 600 artwork viewport.
+ * fit the document into the fixed 960 × 600 artwork viewport. Thumbnails cover
+ * their visible card area; detail views contain the complete document.
  */
-export function intelligencePreviewRuntime(autoplay: boolean): string {
+export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | 'cover' = 'contain'): string {
   return `(() => {
   'use strict';
   const WIDTH = 960, HEIGHT = 600, MAX_EXTENT = 8192;
+  const cover = ${JSON.stringify(fit === 'cover')};
+  let visibleWidth = WIDTH, visibleHeight = HEIGHT;
   const nativeFrame = window.requestAnimationFrame.bind(window);
   const nativeCancelFrame = window.cancelAnimationFrame.bind(window);
   const nativeTimeout = window.setTimeout.bind(window);
@@ -132,9 +135,17 @@ export function intelligencePreviewRuntime(autoplay: boolean): string {
     applyAnimationState();
   }
   window.addEventListener('message', event => {
-    if (disposed || event.source !== window.parent || !event.data ||
-        event.data.type !== 'intelligence-preview-playback' ||
-        typeof event.data.playing !== 'boolean') return;
+    if (disposed || event.source !== window.parent || !event.data) return;
+    if (event.data.type === 'intelligence-preview-viewport') {
+      const { width, height } = event.data;
+      if (!cover || !Number.isFinite(width) || !Number.isFinite(height) ||
+          width <= 0 || height <= 0 || width > WIDTH || height > HEIGHT) return;
+      if (width !== visibleWidth || height !== visibleHeight) {
+        visibleWidth = width; visibleHeight = height; scheduleFit();
+      }
+      return;
+    }
+    if (event.data.type !== 'intelligence-preview-playback' || typeof event.data.playing !== 'boolean') return;
     playing = event.data.playing;
     reconcilePlayback();
     scheduleFit();
@@ -168,7 +179,9 @@ export function intelligencePreviewRuntime(autoplay: boolean): string {
     }
     const width = Math.min(MAX_EXTENT, Math.max(WIDTH, right - left));
     const height = Math.min(MAX_EXTENT, Math.max(HEIGHT, bottom - top));
-    const scale = Math.min(1, WIDTH / width, HEIGHT / height);
+    const scale = cover
+      ? Math.max(visibleWidth / width, visibleHeight / height)
+      : Math.min(1, WIDTH / width, HEIGHT / height);
     const x = (WIDTH - width * scale) / 2 - left * scale;
     const y = (HEIGHT - height * scale) / 2 - top * scale;
     root.style.setProperty('transform', 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')', 'important');

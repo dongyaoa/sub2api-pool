@@ -1,6 +1,6 @@
 <template>
   <div ref="container" class="relative isolate overflow-hidden bg-slate-50 dark:bg-dark-900" :class="large ? 'aspect-[16/10]' : 'min-h-[144px] flex-1'" :aria-busy="active || loading" @mouseenter="hovered = true" @mouseleave="hovered = false" @focusin="focused = true" @focusout="focused = false">
-    <iframe v-if="preview && !active" ref="frame" :key="`${run?.id}-${replay}`" :srcdoc="preview" sandbox="allow-scripts" credentialless referrerpolicy="no-referrer" scrolling="no" :title="t('intelligenceMonitor.preview')" class="absolute origin-top-left border-0 bg-white" :style="canvasStyle" :class="!large && 'pointer-events-none'" @load="syncPlayback" />
+    <iframe v-if="preview && !active" ref="frame" :key="`${run?.id}-${replay}`" :srcdoc="preview" sandbox="allow-scripts" credentialless referrerpolicy="no-referrer" scrolling="no" :title="t('intelligenceMonitor.preview')" class="absolute origin-top-left border-0 bg-white" :style="canvasStyle" :class="!large && 'pointer-events-none'" @load="syncPreview" />
     <PelicanLoadingScene v-else-if="active" :label="t(`intelligenceMonitor.status.${run?.status}`)" :queued="run?.status === 'pending'" />
     <div v-else-if="loading" class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6" role="status">
       <div class="preview-skeleton relative h-10 w-16 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-dark-600 dark:bg-dark-800" aria-hidden="true"><div class="absolute bottom-2 left-2 right-2 h-1 rounded bg-slate-100 dark:bg-dark-600" /><div class="absolute left-2 top-2 h-2 w-2 rounded-full bg-slate-200 dark:bg-dark-600" /></div>
@@ -33,10 +33,16 @@ const playing = computed(() => pageVisible.value && (props.large || hovered.valu
 const canvasWidth = 960
 const canvasHeight = 600
 const viewport = ref({ width: 0, height: 0 })
+const canvasScale = computed(() => {
+  const { width, height } = viewport.value
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return 0
+  const fit = props.large ? Math.min : Math.max
+  return fit(width / canvasWidth, height / canvasHeight)
+})
 const canvasStyle = computed(() => {
-  // Use the same logical viewport in both modes. The isolated document fits its
-  // full content inside this canvas, so changing card size never changes layout.
-  const scale = Math.max(0, Math.min(viewport.value.width / canvasWidth, viewport.value.height / canvasHeight))
+  // Thumbnails fill the card; the detail view contains the complete artwork.
+  // Keep the logical viewport fixed so resizing never restarts or reflows it.
+  const scale = canvasScale.value
   return {
     width: `${canvasWidth}px`, height: `${canvasHeight}px`, transform: `scale(${scale})`,
     left: `${(viewport.value.width - canvasWidth * scale) / 2}px`,
@@ -44,13 +50,26 @@ const canvasStyle = computed(() => {
   }
 })
 const active = computed(() => Boolean(props.run && ['pending', 'running'].includes(props.run.status)))
-const prepared = computed(() => html.value ? intelligencePreviewContent(html.value, { autoplay: props.large }) : null)
+const prepared = computed(() => html.value ? intelligencePreviewContent(html.value, { autoplay: props.large, fit: props.large ? 'contain' : 'cover' }) : null)
 const preview = computed(() => prepared.value?.document || '')
 function syncPlayback() {
   frame.value?.contentWindow?.postMessage({ type: 'intelligence-preview-playback', playing: playing.value }, '*')
 }
+function syncViewport() {
+  const scale = canvasScale.value
+  if (props.large || scale <= 0) return
+  // This is the visible slice of the fixed canvas after the card's cover scale.
+  // Fit the document to that slice, avoiding a second layer of letterboxing.
+  frame.value?.contentWindow?.postMessage({
+    type: 'intelligence-preview-viewport',
+    width: Math.min(canvasWidth, viewport.value.width / scale),
+    height: Math.min(canvasHeight, viewport.value.height / scale)
+  }, '*')
+}
+function syncPreview() { syncViewport(); syncPlayback() }
 function updatePageVisibility() { pageVisible.value = !document.hidden }
 watch(playing, syncPlayback)
+watch(viewport, syncViewport)
 let controller: AbortController | undefined, observer: IntersectionObserver | undefined, resizeObserver: ResizeObserver | undefined
 function measureViewport() {
   if (!container.value) return

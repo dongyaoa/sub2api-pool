@@ -14,7 +14,7 @@ const LOCAL_SVG_REFERENCES = new Set(['use', 'textpath', 'mpath', 'pattern', 'li
 const ANIMATION_TAGS = new Set(['animate', 'animatemotion', 'animatetransform', 'set'])
 const ACTIVE_ATTRIBUTES = /^(?:on|href$|xlink:href$|src$|srcset$|action$|formaction$|target$)/i
 
-export function intelligencePreviewContent(html: string, options: { autoplay?: boolean } = {}): { document: string; scriptsDisabled: boolean } {
+export function intelligencePreviewContent(html: string, options: { autoplay?: boolean; fit?: 'contain' | 'cover' } = {}): { document: string; scriptsDisabled: boolean } {
   const nonce = document.querySelector<HTMLScriptElement>('script[nonce]')?.nonce || ''
   // Template content is inert even during parsing. Never insert remote markup
   // into the administrator's live document or let a parser load remote assets.
@@ -70,7 +70,7 @@ export function intelligencePreviewContent(html: string, options: { autoplay?: b
   doc.head.replaceChildren(csp)
   const runtime = doc.createElement('script')
   if (nonce) runtime.setAttribute('nonce', nonce)
-  runtime.textContent = intelligencePreviewRuntime(options.autoplay ?? false)
+  runtime.textContent = intelligencePreviewRuntime(options.autoplay ?? false, options.fit ?? 'contain')
   doc.head.append(runtime)
   const style = doc.createElement('style')
   style.textContent = 'html{color-scheme:light}body{margin:0}*{box-sizing:border-box}'
@@ -110,10 +110,18 @@ export function intelligencePreviewContent(html: string, options: { autoplay?: b
   relay.textContent = `(() => {
     const frame = document.querySelector('iframe');
     let playing = ${options.autoplay ? 'true' : 'false'};
-    const sync = () => frame.contentWindow?.postMessage({type:'intelligence-preview-playback',playing}, '*');
+    let viewport = null;
+    const sync = () => {
+      if (viewport) frame.contentWindow?.postMessage(viewport, '*');
+      frame.contentWindow?.postMessage({type:'intelligence-preview-playback',playing}, '*');
+    };
     window.addEventListener('message', event => {
       if (event.source === parent && event.data?.type === 'intelligence-preview-playback' && typeof event.data.playing === 'boolean') {
         playing = event.data.playing; sync();
+      } else if (event.source === parent && event.data?.type === 'intelligence-preview-viewport') {
+        const {width, height} = event.data;
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || width > 960 || height > 600) return;
+        viewport = {type:'intelligence-preview-viewport',width,height}; sync();
       } else if (event.source === frame.contentWindow && event.data?.type === 'intelligence-preview-ready') sync();
     });
     frame.addEventListener('load', sync);

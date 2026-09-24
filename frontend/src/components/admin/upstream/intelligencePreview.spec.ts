@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { JSDOM } from 'jsdom'
 import { intelligenceMonitorAPI, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
 import { intelligencePreviewContent, intelligencePreviewDocument } from './intelligencePreview'
@@ -104,7 +105,7 @@ describe('intelligence preview isolation', () => {
     expect(disconnect).toHaveBeenCalledOnce()
   })
 
-  it('uses the same logical canvas for tall thumbnails and detail without restarting the iframe', async () => {
+  it('covers thumbnails edge to edge at different sizes without restarting the iframe', async () => {
     let resize: ResizeObserverCallback | undefined
     vi.stubGlobal('IntersectionObserver', undefined)
     vi.stubGlobal('ResizeObserver', class {
@@ -113,29 +114,39 @@ describe('intelligence preview isolation', () => {
       disconnect() {}
     })
     const run = { id: 2, status: 'succeeded', html: '<svg viewBox="0 0 960 600"><circle cx="480" cy="300" r="20"/></svg>' } as IntelligenceRun
-    const wrapper = mount(IntelligenceArtifactPreview, { props: { run }, global: { stubs: { Icon: true } } })
+    const wrapper = mount(IntelligenceArtifactPreview, { attachTo: document.body, props: { run }, global: { stubs: { Icon: true } } })
     await flushPromises()
     const frame = wrapper.get('iframe').element as HTMLIFrameElement
+    const postMessage = vi.spyOn(frame.contentWindow!, 'postMessage')
+    const originalDocument = frame.srcdoc
     const resizeTo = async (width: number, height: number) => {
       resize?.([{ target: wrapper.element, contentRect: { width, height } } as unknown as ResizeObserverEntry], {} as ResizeObserver)
       await flushPromises()
     }
-    for (const height of [144, 164, 188]) {
-      await resizeTo(174, height)
+    for (const [width, height] of [[174, 144], [174, 164], [174, 188], [320, 144]]) {
+      await resizeTo(width, height)
       const scale = Number(frame.style.transform.match(/scale\((.+)\)/)?.[1])
       expect(parseFloat(frame.style.width)).toBe(960)
-      expect(scale).toBeCloseTo(174 / 960)
+      expect(scale).toBeCloseTo(Math.max(width / 960, height / 600))
       expect(parseFloat(frame.style.height)).toBe(600)
+      expect(960 * scale).toBeGreaterThanOrEqual(width)
+      expect(600 * scale).toBeGreaterThanOrEqual(height)
       expect(parseFloat(frame.style.top)).toBeCloseTo((height - 600 * scale) / 2)
-      expect(parseFloat(frame.style.left)).toBeCloseTo(0)
+      expect(parseFloat(frame.style.left)).toBeCloseTo((width - 960 * scale) / 2)
+      expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-viewport', width: Math.min(960, width / scale), height: Math.min(600, height / scale) }, '*')
       expect(wrapper.get('iframe').element).toBe(frame)
+      expect(frame.srcdoc).toBe(originalDocument)
     }
     await wrapper.setProps({ run: { ...run, duration_ms: 4500 } })
     expect(wrapper.get('iframe').element).toBe(frame)
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
+    postMessage.mockClear()
     await resizeTo(0, 0)
     expect(frame.style.height).toBe('600px')
     expect(frame.style.transform).toBe('scale(0)')
+    await resizeTo(0, 144)
+    expect(frame.style.transform).toBe('scale(0)')
+    expect(postMessage).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -185,5 +196,30 @@ describe('intelligence preview isolation', () => {
     expect(wrapper.get('iframe').element).not.toBe(originalFrame)
     expect(wrapper.get('iframe').attributes('srcdoc')).toContain('Run 12')
     wrapper.unmount()
+  })
+
+  it('relays only valid parent viewport messages and resends them when the inner artwork is ready', () => {
+    const content = intelligencePreviewContent('<svg></svg>', { fit: 'cover' })
+    const dom = new JSDOM(content.document, { runScripts: 'outside-only' })
+    try {
+      const shell = dom.window
+      const parent = {}
+      Object.defineProperty(shell, 'parent', { value: parent, configurable: true })
+      const child = shell.document.querySelector('iframe')!.contentWindow!
+      const postMessage = vi.spyOn(child, 'postMessage').mockImplementation(() => undefined)
+      shell.eval(shell.document.body.querySelector('script')!.textContent!)
+      const send = (data: unknown, source: unknown = parent) => shell.dispatchEvent(new shell.MessageEvent('message', { data, source }))
+      const viewport = { type: 'intelligence-preview-viewport', width: 560, height: 600 }
+      send(viewport)
+      expect(postMessage).toHaveBeenCalledWith(viewport, '*')
+      postMessage.mockClear()
+      send({ type: 'intelligence-preview-ready' }, child)
+      expect(postMessage.mock.calls).toEqual([[viewport, '*'], [{ type: 'intelligence-preview-playback', playing: false }, '*']])
+      postMessage.mockClear()
+      send(viewport, {})
+      for (const width of [NaN, Infinity, -1, 0, 961, '560']) send({ ...viewport, width })
+      send({ ...viewport, height: 601 })
+      expect(postMessage).not.toHaveBeenCalled()
+    } finally { dom.window.close() }
   })
 })
