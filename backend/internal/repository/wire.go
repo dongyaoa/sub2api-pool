@@ -81,7 +81,6 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementReadRepository,
 	NewUsageLogRepository,
 	NewUsageBillingRepository,
-	NewBatchImageRepository,
 	NewIdempotencyRepository,
 	NewUsageCleanupRepository,
 	NewDashboardAggregationRepository,
@@ -100,6 +99,9 @@ var ProviderSet = wire.NewSet(
 	NewPluginKVStore,
 	NewChannelRepository,
 	NewChannelMonitorRepository,
+	NewUpstreamCenterRepository,
+	NewUpstreamFinanceRepository,
+	NewIntelligenceMonitorRepository,
 	NewChannelMonitorAPIKeyGroupResolver,
 	NewChannelMonitorV2Repository,
 	NewChannelMonitorRequestTemplateRepository,
@@ -127,10 +129,7 @@ var ProviderSet = wire.NewSet(
 	NewRedeemCache,
 	NewUpdateCache,
 	NewGeminiTokenCache,
-	NewImageTaskStore,
 	ProvideVideoTaskStore,
-	NewBatchImageQueue,
-	NewBatchImageDownloadLimiter,
 	NewLeaderLockCache,
 	ProvideSchedulerCache,
 	NewSchedulerOutboxRepository,
@@ -150,7 +149,7 @@ var ProviderSet = wire.NewSet(
 	NewPgDumper,
 	NewS3BackupStoreFactory,
 
-	// Image storage (async image task result offload)
+	// Object storage for video gateway results
 	ProvideImageStorageFactory,
 
 	// HTTP service ports (DI Strategy A: return interface directly)
@@ -188,7 +187,7 @@ func ProvideEnt(cfg *config.Config) (*ent.Client, error) {
 
 // ProvideImageStorageFactory 提供按需构造对象存储客户端的工厂。
 //
-// 这里返回工厂而不是实例：异步生图的开关与凭证可以在后台随时改动，客户端必须能在
+// 这里返回工厂而不是实例：视频对象存储的开关与凭证可以在后台随时改动，客户端必须能在
 // 设置保存后重建，而不是在启动时定死一份。
 func ProvideImageStorageFactory() service.ImageStorageFactory {
 	return func(ctx context.Context, cfg *config.ImageStorageConfig) (service.ImageStorage, error) {

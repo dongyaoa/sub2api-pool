@@ -261,7 +261,7 @@ func TestImageStorageSettingsFallBackToConfigFile(t *testing.T) {
 	svc, _, built := newImageStorageFixture(t, config.ImageStorageConfig{
 		Enabled: true, Endpoint: "https://acct.r2.cloudflarestorage.com", Region: "auto",
 		Bucket: "yaml-bucket", AccessKeyID: "yaml-ak", SecretAccessKey: "yaml-sk",
-		Prefix: "images/", MaxDownloadByte: 1024,
+		Prefix: "images/",
 	})
 
 	_, enabled := svc.resolve()

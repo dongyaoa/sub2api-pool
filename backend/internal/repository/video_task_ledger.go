@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -14,20 +13,6 @@ import (
 
 type videoTaskScanner interface {
 	Scan(dest ...any) error
-}
-
-const videoTaskAdminUsageLogJoin = `
-		LEFT JOIN LATERAL (
-			SELECT id, actual_cost
-			FROM usage_logs
-			WHERE request_id IN (v.request_id, 'grok-video:' || v.request_id)
-			  AND api_key_id = v.api_key_id
-			ORDER BY created_at DESC
-			LIMIT 1
-		) ul ON TRUE `
-
-func (s *videoTaskStore) Persistent() bool {
-	return s != nil && s.db != nil
 }
 
 func (s *videoTaskStore) saveDurable(ctx context.Context, task *service.VideoTaskRecord) error {
@@ -110,41 +95,6 @@ func (s *videoTaskStore) getDurable(ctx context.Context, id string) (*service.Vi
 	return record, err
 }
 
-func (s *videoTaskStore) listDurable(ctx context.Context, owner service.VideoTaskOwner, limit int) ([]*service.VideoTaskRecord, error) {
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 50 {
-		limit = 50
-	}
-	rows, err := s.db.QueryContext(ctx, durableVideoTaskSelect+`
-		WHERE user_id = $1 AND api_key_id = $2 AND hidden_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $3`, owner.UserID, owner.APIKeyID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	records := make([]*service.VideoTaskRecord, 0, limit)
-	for rows.Next() {
-		record, scanErr := scanDurableVideoTask(rows)
-		if scanErr != nil {
-			return nil, scanErr
-		}
-		records = append(records, record)
-	}
-	return records, rows.Err()
-}
-
-func (s *videoTaskStore) hideDurable(ctx context.Context, owner service.VideoTaskOwner) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE grok_video_generation_tasks
-		SET hidden_at = NOW(), updated_at = NOW()
-		WHERE user_id = $1 AND api_key_id = $2 AND hidden_at IS NULL
-	`, owner.UserID, owner.APIKeyID)
-	return err
-}
-
 const durableVideoTaskSelect = `
 	SELECT
 		request_id, user_id, api_key_id, COALESCE(group_id, 0), account_id,
@@ -190,171 +140,6 @@ func scanDurableVideoTask(scanner videoTaskScanner) (*service.VideoTaskRecord, e
 	return &record, nil
 }
 
-func (s *videoTaskStore) AdminList(ctx context.Context, query service.VideoTaskAdminQuery) (*service.VideoTaskAdminResult, error) {
-	if !s.Persistent() {
-		return nil, service.ErrVideoTaskUnavailable
-	}
-	if query.Page <= 0 {
-		query.Page = 1
-	}
-	if query.PageSize <= 0 {
-		query.PageSize = 20
-	}
-	if query.PageSize > 100 {
-		query.PageSize = 100
-	}
-
-	where, args := buildVideoTaskAdminWhere(query)
-	join := `
-		FROM grok_video_generation_tasks v
-		LEFT JOIN users u ON u.id = v.user_id
-		LEFT JOIN api_keys k ON k.id = v.api_key_id
-		LEFT JOIN groups g ON g.id = v.group_id
-		LEFT JOIN accounts a ON a.id = v.account_id` + videoTaskAdminUsageLogJoin
-
-	var total int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) `+join+where, args...).Scan(&total); err != nil {
-		return nil, err
-	}
-
-	listArgs := append([]any{}, args...)
-	limitPos := len(listArgs) + 1
-	listArgs = append(listArgs, query.PageSize)
-	offsetPos := len(listArgs) + 1
-	listArgs = append(listArgs, (query.Page-1)*query.PageSize)
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT
-			v.request_id, v.user_id, COALESCE(u.email, ''), v.api_key_id, COALESCE(k.name, ''),
-			COALESCE(v.group_id, 0), COALESCE(g.name, ''), v.account_id, COALESCE(a.name, ''),
-			v.operation, v.model, COALESCE(v.upstream_model, ''), v.prompt,
-			COALESCE(v.resolution, ''), COALESCE(v.aspect_ratio, ''), v.duration_seconds,
-			v.status,
-			CASE
-				WHEN v.video_url IS NOT NULL AND v.video_url <> '' AND v.browser_playable THEN 'delivered'
-				WHEN v.status = 'failed' THEN 'failed'
-				WHEN v.status = 'completed' THEN 'awaiting_storage'
-				ELSE 'processing'
-			END,
-			v.billing_status, COALESCE(v.http_status, 0), v.task_error,
-			COALESCE(v.last_upstream_error, ''), COALESCE(v.delivery_error, ''), COALESCE(v.billing_error, ''),
-			COALESCE(v.video_url, ''), COALESCE(v.content_type, ''), v.byte_size, v.browser_playable,
-			COALESCE(ul.actual_cost, 0), COALESCE(ul.id, 0),
-			v.created_at, v.last_checked_at, v.completed_at, v.delivered_at, v.billed_at
-		`+join+where+fmt.Sprintf(` ORDER BY v.created_at DESC LIMIT $%d OFFSET $%d`, limitPos, offsetPos), listArgs...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	items := make([]*service.VideoTaskAdminItem, 0, query.PageSize)
-	for rows.Next() {
-		item, scanErr := scanVideoTaskAdminItem(rows)
-		if scanErr != nil {
-			return nil, scanErr
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	summary := service.VideoTaskAdminSummary{}
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*),
-			COUNT(*) FILTER (WHERE v.status = 'processing'),
-			COUNT(*) FILTER (WHERE v.video_url IS NOT NULL AND v.video_url <> '' AND v.browser_playable),
-			COUNT(*) FILTER (WHERE v.status = 'failed'),
-			COUNT(*) FILTER (WHERE v.billing_status = 'charged' AND (v.video_url IS NULL OR v.video_url = '' OR NOT v.browser_playable)),
-			COALESCE(SUM(CASE WHEN v.billing_status = 'charged' THEN COALESCE(ul.actual_cost, 0) ELSE 0 END), 0)
-		`+join+where, args...).Scan(
-		&summary.Total, &summary.Processing, &summary.Delivered, &summary.Failed,
-		&summary.ChargedWithoutOutput, &summary.TotalCharged,
-	); err != nil {
-		return nil, err
-	}
-
-	return &service.VideoTaskAdminResult{Items: items, Total: total, Summary: summary}, nil
-}
-
-func buildVideoTaskAdminWhere(query service.VideoTaskAdminQuery) (string, []any) {
-	conditions := make([]string, 0, 8)
-	args := make([]any, 0, 8)
-	addValue := func(condition string, value any) {
-		args = append(args, value)
-		conditions = append(conditions, fmt.Sprintf(condition, len(args)))
-	}
-	if search := strings.TrimSpace(query.Search); search != "" {
-		args = append(args, "%"+search+"%")
-		position := len(args)
-		conditions = append(conditions, fmt.Sprintf(
-			`(v.request_id ILIKE $%d OR COALESCE(u.email, '') ILIKE $%d OR CAST(v.user_id AS TEXT) ILIKE $%d OR v.prompt ILIKE $%d)`,
-			position, position, position, position,
-		))
-	}
-	if status := strings.TrimSpace(query.Status); status != "" {
-		addValue(`v.status = $%d`, status)
-	}
-	if status := strings.TrimSpace(query.BillingStatus); status != "" {
-		addValue(`v.billing_status = $%d`, status)
-	}
-	if model := strings.TrimSpace(query.Model); model != "" {
-		addValue(`v.model = $%d`, model)
-	}
-	if query.AccountID > 0 {
-		addValue(`v.account_id = $%d`, query.AccountID)
-	}
-	if query.StartTime != nil {
-		addValue(`v.created_at >= $%d`, query.StartTime.UTC())
-	}
-	if query.EndTime != nil {
-		addValue(`v.created_at < $%d`, query.EndTime.UTC())
-	}
-	switch strings.TrimSpace(query.DeliveryStatus) {
-	case "delivered":
-		conditions = append(conditions, `(v.video_url IS NOT NULL AND v.video_url <> '' AND v.browser_playable)`)
-	case "failed":
-		conditions = append(conditions, `v.status = 'failed'`)
-	case "awaiting_storage":
-		conditions = append(conditions, `v.status = 'completed' AND (v.video_url IS NULL OR v.video_url = '' OR NOT v.browser_playable)`)
-	case "processing":
-		conditions = append(conditions, `v.status = 'processing'`)
-	case "charged_without_output":
-		conditions = append(conditions, `v.billing_status = 'charged' AND (v.video_url IS NULL OR v.video_url = '' OR NOT v.browser_playable)`)
-	}
-	if len(conditions) == 0 {
-		return "", args
-	}
-	return " WHERE " + strings.Join(conditions, " AND "), args
-}
-
-func scanVideoTaskAdminItem(scanner videoTaskScanner) (*service.VideoTaskAdminItem, error) {
-	item := &service.VideoTaskAdminItem{}
-	var taskError []byte
-	var lastCheckedAt, completedAt, deliveredAt, billedAt sql.NullTime
-	err := scanner.Scan(
-		&item.RequestID, &item.UserID, &item.UserEmail, &item.APIKeyID, &item.APIKeyName,
-		&item.GroupID, &item.GroupName, &item.AccountID, &item.AccountName,
-		&item.Operation, &item.Model, &item.UpstreamModel, &item.Prompt,
-		&item.Resolution, &item.AspectRatio, &item.DurationSeconds,
-		&item.Status, &item.DeliveryStatus, &item.BillingStatus, &item.HTTPStatus, &taskError,
-		&item.LastUpstreamError, &item.DeliveryError, &item.BillingError,
-		&item.VideoURL, &item.ContentType, &item.ByteSize, &item.BrowserPlayable,
-		&item.ActualCost, &item.UsageLogID,
-		&item.CreatedAt, &lastCheckedAt, &completedAt, &deliveredAt, &billedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if len(taskError) > 0 {
-		item.TaskError = append(json.RawMessage(nil), taskError...)
-	}
-	item.LastCheckedAt = nullTimePtr(lastCheckedAt)
-	item.CompletedAt = nullTimePtr(completedAt)
-	item.DeliveredAt = nullTimePtr(deliveredAt)
-	item.BilledAt = nullTimePtr(billedAt)
-	return item, nil
-}
-
 func nullableString(value string) any {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -396,13 +181,5 @@ func nullUnixPtr(value sql.NullInt64) *int64 {
 		return nil
 	}
 	result := value.Int64
-	return &result
-}
-
-func nullTimePtr(value sql.NullTime) *time.Time {
-	if !value.Valid {
-		return nil
-	}
-	result := value.Time.UTC()
 	return &result
 }

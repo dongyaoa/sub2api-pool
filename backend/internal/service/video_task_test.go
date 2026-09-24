@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"sort"
 	"testing"
 	"time"
 
@@ -37,29 +36,6 @@ func (s *memoryVideoTaskStore) Get(_ context.Context, id string) (*VideoTaskReco
 	return &copied, nil
 }
 
-func (s *memoryVideoTaskStore) List(_ context.Context, owner VideoTaskOwner, limit int) ([]*VideoTaskRecord, error) {
-	tasks := make([]*VideoTaskRecord, 0)
-	for _, task := range s.tasks {
-		if task.UserID == owner.UserID && task.APIKeyID == owner.APIKeyID {
-			tasks = append(tasks, task)
-		}
-	}
-	sort.Slice(tasks, func(i, j int) bool { return tasks[i].CreatedAt > tasks[j].CreatedAt })
-	if len(tasks) > limit {
-		tasks = tasks[:limit]
-	}
-	return tasks, nil
-}
-
-func (s *memoryVideoTaskStore) Clear(_ context.Context, owner VideoTaskOwner) error {
-	for id, task := range s.tasks {
-		if task.UserID == owner.UserID && task.APIKeyID == owner.APIKeyID {
-			delete(s.tasks, id)
-		}
-	}
-	return nil
-}
-
 type recordingVideoStorage struct {
 	key         string
 	contentType string
@@ -73,7 +49,7 @@ func (s *recordingVideoStorage) Save(_ context.Context, key, contentType string,
 	return "https://cdn.example/" + key, nil
 }
 
-func TestVideoTaskServicePersistsOwnershipStatusAndHistory(t *testing.T) {
+func TestVideoTaskServicePersistsOwnershipAndStatus(t *testing.T) {
 	store := newMemoryVideoTaskStore()
 	svc := NewVideoTaskService(store, nil)
 	svc.ttl = 48 * time.Hour
@@ -92,23 +68,17 @@ func TestVideoTaskServicePersistsOwnershipStatusAndHistory(t *testing.T) {
 
 	err = svc.UpdateStatus(context.Background(), owner, "task-1", 200, []byte(`{"status":"completed"}`))
 	require.NoError(t, err)
-	tasks, err := svc.List(context.Background(), owner, 10)
+	record, err = svc.GetRecord(context.Background(), owner, "task-1")
 	require.NoError(t, err)
-	require.Len(t, tasks, 1)
-	require.Equal(t, VideoTaskStatusCompleted, tasks[0].Status)
-	require.Equal(t, "3:2", tasks[0].Metadata.AspectRatio)
-	require.Equal(t, 2, svc.RetentionDays())
-
-	require.NoError(t, svc.Clear(context.Background(), owner))
-	tasks, err = svc.List(context.Background(), owner, 10)
-	require.NoError(t, err)
-	require.Empty(t, tasks)
+	require.Equal(t, VideoTaskStatusCompleted, record.Status)
+	require.Equal(t, "3:2", record.Metadata.AspectRatio)
+	require.WithinDuration(t, time.Now().Add(48*time.Hour), time.Unix(record.ExpiresAt, 0), time.Second)
 }
 
 func TestVideoTaskServiceStoresMP4UsingExistingObjectStoragePrefix(t *testing.T) {
 	store := newMemoryVideoTaskStore()
 	storage := &recordingVideoStorage{}
-	uploader := NewImageResultUploader(storage, "images/", 0, nil)
+	uploader := NewImageResultUploader(storage, "images/")
 	svc := NewVideoTaskService(store, func() (*ImageResultUploader, bool) { return uploader, true })
 	owner := VideoTaskOwner{UserID: 1, APIKeyID: 2}
 	require.NoError(t, svc.RecordSubmission(

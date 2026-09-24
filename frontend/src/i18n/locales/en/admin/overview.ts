@@ -71,10 +71,8 @@ export default {
       viewUserAccounts: 'View and manage user accounts',
       manageAccounts: 'Manage Accounts',
       configureAiAccounts: 'Configure AI platform accounts',
-      batchImage: 'Batch Image',
-      batchImageDesc: 'Submit jobs and copy agent instructions',
       groupPricing: 'Group Pricing',
-      groupPricingDesc: 'Configure batch discount and hold ratio',
+      groupPricingDesc: 'Configure group pricing and multipliers',
       systemSettings: 'System Settings',
       configureSystem: 'Configure system settings',
       failedToLoad: 'Failed to load dashboard statistics'
@@ -103,9 +101,9 @@ export default {
         saved: 'S3 configuration saved'
       },
       imageStorage: {
-        title: 'Async image object storage',
-        description: 'Enables the asynchronous image endpoints and offloads generated images to object storage, keeping only short links in Redis. Shares the S3 client with backups and takes effect on save — no restart needed.',
-        enabled: 'Enable async image tasks',
+        title: 'Video object storage',
+        description: 'Stores generated videos in object storage for links returned by the video API. Shares the S3 client with backups and takes effect on save without a restart.',
+        enabled: 'Enable video object storage',
         reuseBackupS3: 'Reuse the backup S3 configuration above (different bucket/prefix only)',
         bucket: 'Bucket',
         bucketInherited: 'Leave empty to use the backup bucket',
@@ -113,9 +111,9 @@ export default {
         publicBaseUrl: 'Public base URL',
         publicBaseUrlPlaceholder: 'Leave empty to return presigned links',
         presignExpiryHours: 'Presigned link TTL (hours, max 168)',
-        historyRetentionDays: 'Creation history retention (days)',
+        historyRetentionDays: 'Video task retention (days)',
         historyRetentionHint: 'Defaults to 7 days. Configure an R2 lifecycle rule separately to delete objects after the same period.',
-        saved: 'Async image object storage saved'
+        saved: 'Video object storage saved'
       },
       schedule: {
         title: 'Scheduled Backup',
@@ -675,7 +673,6 @@ export default {
       typeBalance: 'Balance (Redeem)',
       typeAffiliateBalance: 'Balance (Affiliate Transfer)',
       typeAdminBalance: 'Balance (Admin)',
-      typeCheckinBalance: 'Balance (Daily Check-in)',
       typeConcurrency: 'Concurrency (Redeem)',
       typeAdminConcurrency: 'Concurrency (Admin)',
       typeSubscription: 'Subscription',
@@ -1012,14 +1009,8 @@ export default {
         title: 'Image Generation Pricing',
         description: 'Configure image generation access and base prices. Grok is priced per model with the same 1K / 2K rate; other platforms are priced by resolution. Leave empty to use defaults.',
         allowImageGeneration: 'Allow image generation for this group',
-        allowBatchImageGeneration: 'Allow batch image generation for this group',
         independentMultiplier: 'Use independent image multiplier',
         imageMultiplier: 'Image multiplier',
-        batchDiscountMultiplier: 'Batch image discount',
-        batchHoldMultiplier: 'Batch hold price ratio',
-        batchSectionHint: 'Batch image settings only apply to batch jobs: settlement applies the batch discount, and the upfront hold is normal image price × batch hold price ratio. Reference images also create upstream input-token usage, so a batch image discount above 0.5 is recommended.',
-        batchDisabledHint: 'Enable image generation for this group before enabling batch image generation.',
-        batchGeminiOnlyHint: 'Batch image generation is currently available only for Gemini groups.',
         modeHint: 'By default, image billing uses image price × current effective group multiplier. Independent mode uses image price × image multiplier.',
         finalPricePreview: 'Final per-image price preview',
         notConfigured: 'Not configured'

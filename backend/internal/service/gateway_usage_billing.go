@@ -532,9 +532,14 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	return context.WithoutCancel(ctx), func() {}
 }
 
+type boundUpstreamLifecycleContextKey struct{}
+
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.Background(), func() {}
+	}
+	if bound, _ := ctx.Value(boundUpstreamLifecycleContextKey{}).(bool); bound {
+		return ctx, func() {}
 	}
 	return context.WithoutCancel(ctx), func() {}
 }
@@ -1032,7 +1037,7 @@ func (s *GatewayService) calculateImageCost(
 			return cost
 		}
 	}
-	// Gemini image models are priced per model in the model plaza/channel
+	// Gemini image models are priced per model in the channel
 	// configuration. Their legacy group image_price_* fields are flat and
 	// cannot distinguish Nano Banana model variants, so the model pricing must
 	// take precedence when a channel price is available.
@@ -1083,7 +1088,7 @@ func (s *GatewayService) calculateImageCost(
 }
 
 // calculateTokenCost 计算 Token 计费：路径选择（分组/渠道定价 → 内置定价）
-// 统一交给 BillingService.CalculateTokenCostForRequest，与模型广场的阶梯表查询同源。
+// 统一交给 BillingService.CalculateTokenCostForRequest，与阶梯表查询同源。
 func (s *GatewayService) calculateTokenCost(
 	ctx context.Context,
 	result *ForwardResult,

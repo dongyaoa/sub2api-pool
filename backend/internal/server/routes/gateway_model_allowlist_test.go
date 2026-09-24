@@ -24,7 +24,6 @@ func newGatewayRoutesTestRouterWithGroup(group *service.Group) *gin.Engine {
 		&handler.Handlers{
 			Gateway:       &handler.GatewayHandler{},
 			OpenAIGateway: &handler.OpenAIGatewayHandler{},
-			AsyncImage:    handler.NewAsyncImageHandler(nil, nil),
 		},
 		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
 			groupID := int64(1)
@@ -200,7 +199,6 @@ func TestGatewayRoutesGroupModelAllowlistModelFreeRoutesUnaffected(t *testing.T)
 	for _, path := range []string{
 		"/v1/videos/generations/req-1",
 		"/v1/videos/req-1/content",
-		"/v1/images/tasks/task-1",
 		"/v1/custom-voices",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)

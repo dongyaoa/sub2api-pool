@@ -142,6 +142,11 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 		return nil, nil, err
 	}
 
+	if err := ensureRetiredBatchImageJobsDrained(migrationCtx, drv.DB()); err != nil {
+		_ = drv.Close()
+		return nil, nil, err
+	}
+
 	// 创建 Ent 客户端，绑定到已配置的数据库驱动。
 	client := ent.NewClient(ent.Driver(drv))
 

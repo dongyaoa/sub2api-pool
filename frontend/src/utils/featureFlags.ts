@@ -109,11 +109,6 @@ export const FeatureFlags = {
     mode: 'opt-out',
     label: 'Subscription',
   }),
-  modelPlaza: defineFlag({
-    key: 'model_plaza_enabled',
-    mode: 'opt-in',
-    label: 'Model Plaza',
-  }),
   pluginManagement: defineFlag({
     key: 'plugin_management_enabled',
     mode: 'opt-in',

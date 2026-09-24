@@ -12,6 +12,8 @@ import (
 
 var ErrUpstreamResponseBodyTooLarge = errors.New("upstream response body too large")
 
+type upstreamResponseReadLimitContextKey struct{}
+
 // defaultUpstreamResponseReadMaxBytes 源自 config.DefaultUpstreamResponseReadMaxBytes，
 // 仅在 cfg 为 nil 时作为兜底（测试或极端场景）。
 const defaultUpstreamResponseReadMaxBytes = config.DefaultUpstreamResponseReadMaxBytes
@@ -48,6 +50,11 @@ type TooLargeWriter func(c *gin.Context)
 // 超限时自动记录 ops error 并调用 onTooLarge 向客户端写错误。
 func ReadUpstreamResponseBody(reader io.Reader, cfg *config.Config, c *gin.Context, onTooLarge TooLargeWriter) ([]byte, error) {
 	maxBytes := resolveUpstreamResponseReadLimit(cfg)
+	if c != nil && c.Request != nil {
+		if limit, _ := c.Request.Context().Value(upstreamResponseReadLimitContextKey{}).(int64); limit > 0 && limit < maxBytes {
+			maxBytes = limit
+		}
+	}
 	body, err := readUpstreamResponseBodyLimited(reader, maxBytes)
 	if err != nil {
 		if errors.Is(err, ErrUpstreamResponseBodyTooLarge) {

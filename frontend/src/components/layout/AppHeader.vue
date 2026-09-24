@@ -23,16 +23,6 @@
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
       <div class="flex min-w-0 items-center gap-1 sm:gap-3">
-        <router-link
-          v-if="user"
-          to="/checkin"
-          class="flex items-center gap-2 rounded-xl bg-amber-100 px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
-          :aria-label="t('nav.checkin')"
-          :title="t('nav.checkin')"
-        >
-          <Icon name="gift" size="sm" />
-          <span class="hidden md:inline">{{ t('nav.checkin') }}</span>
-        </router-link>
         <!-- Customer support and group chat -->
         <button
           v-if="user"
@@ -60,17 +50,6 @@
           <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
         </a>
 
-        <!-- Model Plaza Entry (icon only below sm) -->
-        <router-link
-          v-if="user && modelPlazaEnabled"
-          :to="{ path: '/model-plaza', query: { embedded: '1' } }"
-          :title="t('nav.modelPlaza')"
-          :aria-label="t('nav.modelPlaza')"
-          class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
-        >
-          <Icon name="grid" size="sm" />
-          <span class="hidden sm:inline">{{ t('nav.modelPlaza') }}</span>
-        </router-link>
 
         <!-- Language Switcher -->
         <LocaleSwitcher />
@@ -408,7 +387,6 @@ const supportContact = {
   groupQr: 'https://pan.qzyun.net/f/Pvv6s3/QQ20260709-112108.jpg',
 } as const
 const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
-const modelPlazaEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.modelPlaza))
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const availableBalance = computed(() => Number(user.value?.balance || 0))
 const frozenBalance = computed(() => Number(user.value?.frozen_balance || 0))

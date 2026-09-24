@@ -75,90 +75,6 @@ type VideoTaskRecord struct {
 	BilledAt              *int64            `json:"billed_at,omitempty"`
 }
 
-type VideoTask struct {
-	ID               string            `json:"id"`
-	RequestID        string            `json:"request_id"`
-	Object           string            `json:"object"`
-	Status           string            `json:"status"`
-	HTTPStatus       int               `json:"http_status,omitempty"`
-	Error            json.RawMessage   `json:"error,omitempty"`
-	CreatedAt        int64             `json:"created_at"`
-	CompletedAt      *int64            `json:"completed_at,omitempty"`
-	ExpiresAt        int64             `json:"expires_at"`
-	Metadata         VideoTaskMetadata `json:"metadata,omitempty"`
-	ContentAvailable bool              `json:"content_available"`
-	ContentType      string            `json:"content_type,omitempty"`
-	ByteSize         int64             `json:"byte_size,omitempty"`
-	BrowserPlayable  bool              `json:"browser_playable"`
-	BillingStatus    string            `json:"billing_status,omitempty"`
-}
-
-type VideoTaskAdminQuery struct {
-	Page           int
-	PageSize       int
-	Search         string
-	Status         string
-	BillingStatus  string
-	DeliveryStatus string
-	Model          string
-	AccountID      int64
-	StartTime      *time.Time
-	EndTime        *time.Time
-}
-
-type VideoTaskAdminItem struct {
-	RequestID         string          `json:"request_id"`
-	UserID            int64           `json:"user_id"`
-	UserEmail         string          `json:"user_email"`
-	APIKeyID          int64           `json:"api_key_id"`
-	APIKeyName        string          `json:"api_key_name"`
-	GroupID           int64           `json:"group_id,omitempty"`
-	GroupName         string          `json:"group_name,omitempty"`
-	AccountID         int64           `json:"account_id"`
-	AccountName       string          `json:"account_name,omitempty"`
-	Operation         string          `json:"operation"`
-	Model             string          `json:"model"`
-	UpstreamModel     string          `json:"upstream_model,omitempty"`
-	Prompt            string          `json:"prompt"`
-	Resolution        string          `json:"resolution,omitempty"`
-	AspectRatio       string          `json:"aspect_ratio,omitempty"`
-	DurationSeconds   int             `json:"duration_seconds"`
-	Status            string          `json:"status"`
-	DeliveryStatus    string          `json:"delivery_status"`
-	BillingStatus     string          `json:"billing_status"`
-	HTTPStatus        int             `json:"http_status,omitempty"`
-	TaskError         json.RawMessage `json:"task_error,omitempty"`
-	LastUpstreamError string          `json:"last_upstream_error,omitempty"`
-	DeliveryError     string          `json:"delivery_error,omitempty"`
-	BillingError      string          `json:"billing_error,omitempty"`
-	VideoURL          string          `json:"video_url,omitempty"`
-	ContentType       string          `json:"content_type,omitempty"`
-	ByteSize          int64           `json:"byte_size,omitempty"`
-	BrowserPlayable   bool            `json:"browser_playable"`
-	ActualCost        float64         `json:"actual_cost"`
-	UsageLogID        int64           `json:"usage_log_id,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
-	LastCheckedAt     *time.Time      `json:"last_checked_at,omitempty"`
-	CompletedAt       *time.Time      `json:"completed_at,omitempty"`
-	DeliveredAt       *time.Time      `json:"delivered_at,omitempty"`
-	BilledAt          *time.Time      `json:"billed_at,omitempty"`
-}
-
-type VideoTaskAdminSummary struct {
-	Total                int64   `json:"total"`
-	Processing           int64   `json:"processing"`
-	Delivered            int64   `json:"delivered"`
-	Failed               int64   `json:"failed"`
-	ChargedWithoutOutput int64   `json:"charged_without_output"`
-	TotalCharged         float64 `json:"total_charged"`
-}
-
-type VideoTaskAdminResult struct {
-	Items   []*VideoTaskAdminItem `json:"items"`
-	Total   int64                 `json:"total"`
-	Summary VideoTaskAdminSummary `json:"summary"`
-}
-
 type VideoTaskOwner struct {
 	UserID   int64
 	APIKeyID int64
@@ -171,13 +87,6 @@ func (r *VideoTaskRecord) NeedsBrowserPlaybackUpgrade() bool {
 type VideoTaskStore interface {
 	Save(ctx context.Context, task *VideoTaskRecord, ttl time.Duration) error
 	Get(ctx context.Context, id string) (*VideoTaskRecord, error)
-	List(ctx context.Context, owner VideoTaskOwner, limit int) ([]*VideoTaskRecord, error)
-	Clear(ctx context.Context, owner VideoTaskOwner) error
-}
-
-type VideoTaskAdminStore interface {
-	AdminList(ctx context.Context, query VideoTaskAdminQuery) (*VideoTaskAdminResult, error)
-	Persistent() bool
 }
 
 type VideoTaskService struct {
@@ -214,11 +123,6 @@ func (s *VideoTaskService) taskTTL() time.Duration {
 		return defaultVideoTaskTTL
 	}
 	return s.ttl
-}
-
-func (s *VideoTaskService) RetentionDays() int {
-	ttl := s.taskTTL()
-	return max(1, int((ttl+24*time.Hour-1)/(24*time.Hour)))
 }
 
 func (s *VideoTaskService) RecordSubmission(
@@ -283,39 +187,6 @@ func (s *VideoTaskService) GetRecord(ctx context.Context, owner VideoTaskOwner, 
 		return nil, ErrVideoTaskNotFound
 	}
 	return record, nil
-}
-
-func (s *VideoTaskService) List(ctx context.Context, owner VideoTaskOwner, limit int) ([]*VideoTask, error) {
-	if s == nil || s.store == nil {
-		return nil, ErrVideoTaskUnavailable
-	}
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 50 {
-		limit = 50
-	}
-	records, err := s.store.List(ctx, owner, limit)
-	if err != nil {
-		return nil, ErrVideoTaskUnavailable.WithCause(err)
-	}
-	tasks := make([]*VideoTask, 0, len(records))
-	for _, record := range records {
-		if record != nil && record.UserID == owner.UserID && record.APIKeyID == owner.APIKeyID {
-			tasks = append(tasks, videoTaskToPublic(record))
-		}
-	}
-	return tasks, nil
-}
-
-func (s *VideoTaskService) Clear(ctx context.Context, owner VideoTaskOwner) error {
-	if s == nil || s.store == nil {
-		return ErrVideoTaskUnavailable
-	}
-	if err := s.store.Clear(ctx, owner); err != nil {
-		return ErrVideoTaskUnavailable.WithCause(err)
-	}
-	return nil
 }
 
 func (s *VideoTaskService) UpdateStatus(ctx context.Context, owner VideoTaskOwner, id string, statusCode int, body []byte) error {
@@ -467,25 +338,6 @@ func (s *VideoTaskService) OpenStoredContent(ctx context.Context, record *VideoT
 	return resp, nil
 }
 
-func (s *VideoTaskService) AdminList(ctx context.Context, query VideoTaskAdminQuery) (*VideoTaskAdminResult, error) {
-	if s == nil || s.store == nil {
-		return nil, ErrVideoTaskUnavailable
-	}
-	store, ok := s.store.(VideoTaskAdminStore)
-	if !ok || store == nil || !store.Persistent() {
-		return nil, ErrVideoTaskUnavailable
-	}
-	return store.AdminList(ctx, query)
-}
-
-func (s *VideoTaskService) PersistentHistory() bool {
-	if s == nil || s.store == nil {
-		return false
-	}
-	store, ok := s.store.(VideoTaskAdminStore)
-	return ok && store != nil && store.Persistent()
-}
-
 func (s *VideoTaskService) save(ctx context.Context, record *VideoTaskRecord, now time.Time) error {
 	ttl := s.taskTTL()
 	record.ExpiresAt = now.Add(ttl).Unix()
@@ -493,26 +345,6 @@ func (s *VideoTaskService) save(ctx context.Context, record *VideoTaskRecord, no
 		return ErrVideoTaskUnavailable.WithCause(err)
 	}
 	return nil
-}
-
-func videoTaskToPublic(record *VideoTaskRecord) *VideoTask {
-	return &VideoTask{
-		ID:               record.ID,
-		RequestID:        record.ID,
-		Object:           "video.generation.task",
-		Status:           record.Status,
-		HTTPStatus:       record.HTTPStatus,
-		Error:            record.Error,
-		CreatedAt:        record.CreatedAt,
-		CompletedAt:      record.CompletedAt,
-		ExpiresAt:        record.ExpiresAt,
-		Metadata:         record.Metadata,
-		ContentAvailable: strings.TrimSpace(record.VideoURL) != "",
-		ContentType:      record.ContentType,
-		ByteSize:         record.ByteSize,
-		BrowserPlayable:  !record.NeedsBrowserPlaybackUpgrade(),
-		BillingStatus:    record.BillingStatus,
-	}
 }
 
 func videoTaskState(body []byte) (string, json.RawMessage) {

@@ -11,6 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestWithDefaultMaxReasoningEffortMultiplier_Fable51(t *testing.T) {
+	base := &ChannelModelPricing{BillingMode: BillingModeToken}
+	got := withDefaultMaxReasoningEffortMultiplier(base, "claude-fable-5-1")
+	require.NotSame(t, base, got)
+	require.NotNil(t, got.MaxReasoningEffortMultiplier)
+	require.Equal(t, 3.0, *got.MaxReasoningEffortMultiplier)
+	require.Nil(t, base.MaxReasoningEffortMultiplier)
+
+	configured := 1.25
+	custom := &ChannelModelPricing{MaxReasoningEffortMultiplier: &configured}
+	require.Same(t, custom, withDefaultMaxReasoningEffortMultiplier(custom, "claude-fable-5-1"))
+}
+
 // stubGroupRepoForAvailable 是 ListAvailable 测试用的 GroupRepository stub，
 // 仅实现 ListActive；其他方法对本测试无关，返回零值即可。
 // listActiveErr 非 nil 时，ListActive 返回该错误用于错误传播测试。

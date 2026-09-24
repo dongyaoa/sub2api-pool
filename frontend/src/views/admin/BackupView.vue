@@ -448,7 +448,7 @@ const s3SecretConfigured = ref(false)
 const savingS3 = ref(false)
 const testingS3 = ref(false)
 
-// Async image object storage. Shares the S3 client with backups, so the default is
+// Video object storage. Shares the S3 client with backups, so the default is
 // to reuse the credentials configured above and only differ by prefix.
 const imageStorageForm = ref<ImageStorageConfig>({
   enabled: false,
@@ -458,7 +458,6 @@ const imageStorageForm = ref<ImageStorageConfig>({
   public_base_url: '',
   presign_expiry_hours: 168,
   history_retention_days: 7,
-  max_download_bytes: 33554432,
   endpoint: '',
   region: 'auto',
   access_key_id: '',

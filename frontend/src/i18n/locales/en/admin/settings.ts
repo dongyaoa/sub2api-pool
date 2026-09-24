@@ -60,16 +60,6 @@ export default {
             subscriptionOnly: 'The purchase page only offers subscription plans and the sidebar entry reads "Subscription"; balance top-up orders are rejected. Redeem codes, affiliate payouts and other balance credits are unaffected.',
           },
         },
-        modelPlaza: {
-          title: 'Model Plaza',
-          description: 'A public page showcasing available models and pricing by group. Disabled by default.',
-          enabled: 'Enable Model Plaza',
-          enabledHint: 'When enabled, an entry appears in the header and the page is reachable at /model-plaza.',
-          requireAuth: 'Require sign-in to access',
-          requireAuthHint: 'When on, anonymous visitors are redirected to the login page; when off, the page is public and anonymous visitors only see non-exclusive groups.',
-          priceDescription: 'Pricing notes (Markdown)',
-          priceDescriptionHint: 'Rendered at the top of the plaza page. Use it for billing rules, exchange rates, promotions, etc.',
-        },
         pluginManagement: {
           title: 'Plugin Management',
           description: 'Controls whether the plugin management entry appears in the admin sidebar. This switch does not control plugin runtime state.',

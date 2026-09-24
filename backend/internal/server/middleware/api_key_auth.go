@@ -28,9 +28,9 @@ func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionS
 //   - 鉴权（Authentication）：验证 Key 有效性、用户状态、IP 限制 —— 始终执行
 //   - 计费执行（Billing Enforcement）：过期/配额/订阅/余额检查 —— skipBilling 时整块跳过
 //
-// /v1/usage、/v1/sub2api/billing 端点与异步生图任务查询只需鉴权，不需要计费执行。
+// /v1/usage、/v1/sub2api/billing 端点与视频任务查询只需鉴权，不需要计费执行。
 // usage 允许过期/配额耗尽的 Key 查询自身用量，billing 用于读取当前 Key 的倍率配置，
-// 异步生图查询允许已耗尽额度的 Key 拉取自身任务结果。
+// 视频任务查询允许已耗尽额度的 Key 拉取自身任务结果。
 func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
@@ -333,26 +333,11 @@ func isOpenAICompatibleAPIKeyRequest(c *gin.Context) bool {
 	return false
 }
 
-func isAsyncImageTaskRead(method, path string) bool {
-	if method != http.MethodGet {
-		return false
-	}
-	return path == "/v1/images/tasks" ||
-		path == "/images/tasks" ||
-		strings.HasPrefix(path, "/v1/images/tasks/") ||
-		strings.HasPrefix(path, "/images/tasks/")
-}
-
 func isAsyncMediaTaskRead(method, path string) bool {
-	if isAsyncImageTaskRead(method, path) {
-		return true
-	}
 	if method != http.MethodGet {
 		return false
 	}
-	return path == "/v1/videos/tasks" ||
-		path == "/videos/tasks" ||
-		strings.HasPrefix(path, "/v1/videos/") ||
+	return strings.HasPrefix(path, "/v1/videos/") ||
 		strings.HasPrefix(path, "/videos/")
 }
 

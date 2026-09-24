@@ -46,6 +46,10 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
 
+		// Private supplier management and independent active probes.
+		registerUpstreamCenterRoutes(admin, h)
+		registerIntelligenceMonitorRoutes(admin, h)
+
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 
@@ -69,7 +73,6 @@ func RegisterAdminRoutes(
 
 		// 卡密管理
 		registerRedeemCodeRoutes(admin, h)
-		registerCheckinRoutes(admin, h)
 
 		// 优惠码管理
 		registerPromoCodeRoutes(admin, h)
@@ -545,18 +548,6 @@ func registerRedeemCodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-func registerCheckinRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	checkin := admin.Group("/checkin")
-	{
-		checkin.GET("/summary", h.Admin.Checkin.Summary)
-		checkin.GET("/daily", h.Admin.Checkin.Daily)
-		checkin.GET("/users", h.Admin.Checkin.Users)
-		checkin.GET("/records", h.Admin.Checkin.Records)
-		checkin.GET("/config", h.Admin.Checkin.GetConfig)
-		checkin.PUT("/config", h.Admin.Checkin.UpdateConfig)
-	}
-}
-
 func registerPromoCodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	promoCodes := admin.Group("/promo-codes")
 	{
@@ -647,7 +638,7 @@ func registerBackupRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 		backup.PUT("/s3-config", gin.HandlerFunc(stepUpAuth), h.Admin.Backup.UpdateS3Config)
 		backup.POST("/s3-config/test", h.Admin.Backup.TestS3Connection)
 
-		// 异步生图对象存储配置（与备份共用 S3 客户端，可直接复用备份凭证）
+		// 视频媒体对象存储配置（与备份共用 S3 客户端，可直接复用备份凭证）
 		backup.GET("/image-storage", h.Admin.Backup.GetImageStorageConfig)
 		// 同 S3 配置：改写对象存储目标可将生成内容导向外部账号——要求 step-up 2FA
 		backup.PUT("/image-storage", gin.HandlerFunc(stepUpAuth), h.Admin.Backup.UpdateImageStorageConfig)
@@ -710,7 +701,6 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		usage.GET("", h.Admin.Usage.List)
 		usage.GET("/stats", h.Admin.Usage.Stats)
-		usage.GET("/video-generations", h.Admin.Usage.ListVideoGenerations)
 		usage.GET("/search-users", h.Admin.Usage.SearchUsers)
 		usage.GET("/search-api-keys", h.Admin.Usage.SearchAPIKeys)
 		usage.GET("/cleanup-tasks", h.Admin.Usage.ListCleanupTasks)

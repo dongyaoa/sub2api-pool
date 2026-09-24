@@ -146,6 +146,10 @@ type CheckResult struct {
 	PingLatencyMs *int
 	Message       string
 	CheckedAt     time.Time
+	// HTTPStatus and Usage retain probe audit and cost inputs. Usage is nil when
+	// the upstream did not return a complete, trustworthy token usage object.
+	HTTPStatus *int
+	Usage      *UsageTokens
 	// Quota 配额模式附带快照（quota 模式唯一数据；quota_probe 挂在主模型行）。
 	Quota *domain.MonitorQuotaSnapshot
 }

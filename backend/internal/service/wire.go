@@ -96,16 +96,6 @@ func ProvideOAuthRefreshAPI(accountRepo AccountRepository, tokenCache GeminiToke
 	return NewOAuthRefreshAPI(accountRepo, tokenCache)
 }
 
-func ProvideBatchImageModelPricingResolver(resolver *ModelPricingResolver) *BatchImageModelPricingResolver {
-	return &BatchImageModelPricingResolver{Resolver: resolver}
-}
-
-func ProvideBatchImageCleanupService(repo BatchImageRepository, accountRepo AccountRepository, cfg *config.Config) *BatchImageCleanupService {
-	svc := NewBatchImageCleanupService(repo, accountRepo, cfg)
-	svc.Start()
-	return svc
-}
-
 // ProvideOpenAIOAuthService creates OpenAIOAuthService with privacy/account enrichment support.
 func ProvideOpenAIOAuthService(
 	proxyRepo ProxyRepository,
@@ -674,7 +664,7 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 	return apiKeyService
 }
 
-// ProvideImageStorageSettingService 构造异步生图对象存储的后台设置服务。
+// ProvideImageStorageSettingService 构造视频媒体对象存储的后台设置服务。
 //
 // config.yaml 里的 image_storage 作为回落：后台从未保存过设置时沿用它，
 // 使升级前已通过配置文件开启该功能的部署不被打断。
@@ -692,15 +682,6 @@ func ProvideImageStorageSettingService(
 			zap.Strings("missing_keys", cfg.ImageStorage.MissingCredentialKeys()))
 	}
 	return NewImageStorageSettingService(settingRepo, encryptor, backup, factory, cfg.ImageStorage)
-}
-
-// ProvideImageTaskService 构造异步图片任务服务。
-//
-// 对象存储是异步图片任务的启用前提：仅当开关打开且凭证齐全时功能才可用，否则整体禁用
-// （handler 返回 404，不创建任务、不写 Redis），从而避免大 base64 结果撑爆 Redis。
-// 启用状态由 settings 服务在运行时解析，因此后台改开关后无需重启即可生效。
-func ProvideImageTaskService(store ImageTaskStore, settings *ImageStorageSettingService) *ImageTaskService {
-	return NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout).WithTTLResolver(settings.HistoryTTL)
 }
 
 func ProvideVideoTaskService(store VideoTaskStore, settings *ImageStorageSettingService) *VideoTaskService {
@@ -853,7 +834,6 @@ var ProviderSet = wire.NewSet(
 	NewAccountService,
 	NewProxyService,
 	NewRedeemService,
-	NewCheckinService,
 	NewPromoService,
 	NewUsageService,
 	NewDashboardService,
@@ -865,13 +845,7 @@ var ProviderSet = wire.NewSet(
 	NewGatewayService,
 	ProvideOpenAIGatewayService,
 	ProvideImageStorageSettingService,
-	ProvideImageTaskService,
 	ProvideVideoTaskService,
-	ProvideBatchImageModelPricingResolver,
-	NewBatchImagePublicService,
-	NewBatchImageDownloadService,
-	ProvideBatchImageCleanupService,
-	ProvideBatchImageWorkerRuntime,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
 	NewOAuthService,
 	ProvideOpenAIOAuthService,
@@ -956,7 +930,6 @@ var ProviderSet = wire.NewSet(
 	NewChannelService,
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
-	NewModelPlazaService,
 	NewContentModerationService,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
@@ -964,6 +937,9 @@ var ProviderSet = wire.NewSet(
 	ProvidePaymentOrderExpiryService,
 	ProvideBalanceNotifyService,
 	ProvideChannelMonitorService,
+	ProvideUpstreamCenterService,
+	NewUpstreamFinanceService,
+	ProvideIntelligenceMonitorService,
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorQuotaFetcher,
 	ProvideChannelMonitorV2Service,
@@ -1003,6 +979,27 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB) *PaymentOrderExpiryService {
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
 	svc.SetLeaderLock(lockCache, db)
+	svc.Start()
+	return svc
+}
+
+// ProvideUpstreamCenterService starts administrator-only probes independently
+// of the existing channel-monitor display mode.
+func ProvideUpstreamCenterService(
+	repo UpstreamCenterRepository,
+	encryptor SecretEncryptor,
+	accountRepo AccountRepository,
+	finance *UpstreamFinanceService,
+) *UpstreamCenterService {
+	svc := NewUpstreamCenterService(repo, encryptor, accountRepo, finance)
+	svc.Start()
+	return svc
+}
+
+// ProvideChannelMonitorService 创建渠道监控服务（CRUD + RunCheck + 用户视图聚合）。
+func ProvideIntelligenceMonitorService(repo IntelligenceMonitorRepository, encryptor SecretEncryptor, upstreamRepo UpstreamCenterRepository, groups GroupRepository, apiKeys *APIKeyService, finance *UpstreamFinanceService, cfg *config.Config, accounts AccountRepository, gateway *OpenAIGatewayService, concurrency *ConcurrencyService) *IntelligenceMonitorService {
+	svc := NewIntelligenceMonitorService(repo, encryptor, upstreamRepo, groups, apiKeys, finance, cfg)
+	svc.ConfigureOpenAIOAuth(accounts, gateway, concurrency)
 	svc.Start()
 	return svc
 }

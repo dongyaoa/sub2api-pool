@@ -42,24 +42,6 @@ describe('AppSidebar scroll position persistence', () => {
   })
 })
 
-describe('AppSidebar image studio access', () => {
-  it('shows the image studio entry without key or simple-mode restrictions', () => {
-    const item = componentSource.match(/\{ path: '\/image-studio'[^}]+\}/)?.[0]
-
-    expect(item).toBeDefined()
-    expect(item).not.toContain('featureFlag')
-    expect(item).not.toContain('hideInSimpleMode')
-  })
-})
-
-describe('AppSidebar check-in entries', () => {
-  it('keeps user and admin check-in pages in the sidebar declarations', () => {
-    expect(componentSource).toContain("path: '/checkin'")
-    expect(componentSource).toContain("path: '/admin/checkin'")
-    expect(componentSource).toContain("t('nav.checkinConsole')")
-  })
-})
-
 describe('AppSidebar collapsible groups', () => {
   it('lets the user collapse a group even while a child route is active', () => {
     // The expand state must come from the user's override first, falling back

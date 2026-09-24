@@ -205,10 +205,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// Subscription feature (default enabled; opt-out)
 		SettingKeySubscriptionEnabled: "true",
 
-		// Model plaza feature (default disabled; opt-in, public unless require_auth)
-		SettingKeyModelPlazaEnabled:       "false",
-		SettingKeyModelPlazaRequireAuth:   "false",
-		SettingKeyModelPlazaDescription:   "",
 		SettingKeyPluginManagementEnabled: "false",
 
 		// Affiliate (邀请返利) feature (default disabled; opt-in)
@@ -827,10 +823,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// Subscription feature (default: enabled; only an explicit false disables)
 	result.SubscriptionEnabled = !isFalseSettingValue(settings[SettingKeySubscriptionEnabled])
 
-	// Model plaza feature (default: disabled; strict true)
-	result.ModelPlazaEnabled = settings[SettingKeyModelPlazaEnabled] == "true"
-	result.ModelPlazaRequireAuth = settings[SettingKeyModelPlazaRequireAuth] == "true"
-	result.ModelPlazaDescription = settings[SettingKeyModelPlazaDescription]
 	result.PluginManagementEnabled = settings[SettingKeyPluginManagementEnabled] == "true"
 
 	// Affiliate (邀请返利) feature (default: disabled; strict true)

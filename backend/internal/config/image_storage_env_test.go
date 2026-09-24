@@ -9,14 +9,14 @@ import (
 )
 
 // TestLoadImageStorageFromEnv guards against a viper trap that silently disabled
-// asynchronous image tasks for every environment-variable-only deployment.
+// video result storage for every environment-variable-only deployment.
 //
 // viper only decodes keys returned by AllKeys(), which unions SetDefault keys,
 // config-file keys and explicit BindEnv keys. AutomaticEnv can override a key
 // that is already in that list, but it never introduces a new one. Credentials
 // such as image_storage.bucket therefore need an (empty) default registered, or
 // IMAGE_STORAGE_BUCKET is dropped on the floor and Active() stays false while
-// image_storage.enabled reads true — the endpoints 404 with no useful signal.
+// image_storage.enabled reads true, leaving video result storage unavailable.
 func TestLoadImageStorageFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("IMAGE_STORAGE_ENABLED", "true")
@@ -37,5 +37,5 @@ func TestLoadImageStorageFromEnv(t *testing.T) {
 	require.Equal(t, "https://cdn.example.com", cfg.ImageStorage.PublicBaseURL)
 
 	require.True(t, cfg.ImageStorage.IsConfigured())
-	require.True(t, cfg.ImageStorage.Active(), "async image tasks must be active when every credential is supplied via env")
+	require.True(t, cfg.ImageStorage.Active(), "video result storage must be active when every credential is supplied via env")
 }

@@ -12,10 +12,13 @@ import (
 )
 
 type updateServiceCacheStub struct {
-	data string
+	data     string
+	getCalls int
+	setCalls int
 }
 
 func (s *updateServiceCacheStub) GetUpdateInfo(context.Context) (string, error) {
+	s.getCalls++
 	if s.data == "" {
 		return "", errors.New("cache miss")
 	}
@@ -23,6 +26,7 @@ func (s *updateServiceCacheStub) GetUpdateInfo(context.Context) (string, error) 
 }
 
 func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, data string, _ time.Duration) error {
+	s.setCalls++
 	s.data = data
 	return nil
 }
@@ -84,7 +88,7 @@ func (s *updateServiceGitHubClientStub) FetchChecksumFile(context.Context, strin
 }
 
 func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
-	svc := NewUpdateService(
+	svc := newOfficialUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{
 			release: &GitHubRelease{
@@ -104,7 +108,7 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 }
 
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
-	return NewUpdateService(
+	return newOfficialUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentReleases: releases},
 		current,
@@ -166,7 +170,7 @@ func TestUpdateServiceListRollbackVersionsEmptyWhenNoneOlder(t *testing.T) {
 }
 
 func TestUpdateServiceListRollbackVersionsPropagatesFetchError(t *testing.T) {
-	svc := NewUpdateService(
+	svc := newOfficialUpdateTestService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentErr: errors.New("github unavailable")},
 		"0.1.147",
@@ -218,4 +222,50 @@ func TestUpdateServiceRollbackToVersionAcceptsVPrefix(t *testing.T) {
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrRollbackVersionNotAllowed)
 	require.Contains(t, err.Error(), "no compatible release found")
+}
+
+// Keep the retained upstream update implementation covered without enabling it
+// in the pool application.
+func newOfficialUpdateTestService(cache UpdateCache, githubClient GitHubReleaseClient, version, buildType string) *UpdateService {
+	svc := NewUpdateService(cache, githubClient, version, buildType)
+	svc.officialUpdatesEnabled = true
+	return svc
+}
+
+func TestPoolUpdateCheckSkipsOfficialReleaseAndStaleCache(t *testing.T) {
+	for _, buildType := range []string{"source", "release"} {
+		t.Run(buildType, func(t *testing.T) {
+			cache := &updateServiceCacheStub{
+				data: `{"current_version":"0.2.7-pool.2","latest_version":"0.2.8","has_update":true,"release_info":{"name":"v0.2.8"}}`,
+			}
+			// A nil client also ensures any accidental GitHub access fails the test.
+			svc := NewUpdateService(cache, nil, "0.2.7-pool.2", buildType)
+			for _, force := range []bool{false, true} {
+				info, err := svc.CheckUpdate(context.Background(), force)
+				require.NoError(t, err)
+				require.Equal(t, "0.2.7-pool.2", info.CurrentVersion)
+				require.Equal(t, info.CurrentVersion, info.LatestVersion)
+				require.Equal(t, buildType, info.BuildType)
+				require.True(t, info.UpdatesDisabled)
+				require.False(t, info.HasUpdate)
+				require.False(t, info.Cached)
+				require.Nil(t, info.ReleaseInfo)
+				require.Empty(t, info.Warning)
+			}
+			require.Zero(t, cache.getCalls)
+			require.Zero(t, cache.setCalls)
+		})
+	}
+}
+
+func TestPoolOfficialUpdateAndRemoteRollbackDisabled(t *testing.T) {
+	// No cache or network client is needed for any disabled operation.
+	svc := NewUpdateService(nil, nil, "0.2.7-pool.2", "release")
+	ctx := context.Background()
+	require.ErrorIs(t, svc.PerformUpdate(ctx), ErrOfficialUpdatesDisabled)
+	versions, err := svc.ListRollbackVersions(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, versions)
+	require.Empty(t, versions)
+	require.ErrorIs(t, svc.RollbackToVersion(ctx, "0.2.6"), ErrOfficialUpdatesDisabled)
 }

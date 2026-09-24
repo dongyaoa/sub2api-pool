@@ -25,7 +25,6 @@ type UsageHandler struct {
 	apiKeyService  *service.APIKeyService
 	adminService   service.AdminService
 	cleanupService *service.UsageCleanupService
-	videoTasks     *service.VideoTaskService
 }
 
 // NewUsageHandler creates a new admin usage handler
@@ -41,19 +40,6 @@ func NewUsageHandler(
 		adminService:   adminService,
 		cleanupService: cleanupService,
 	}
-}
-
-// ProvideUsageHandler wires optional durable video reconciliation into admin usage.
-func ProvideUsageHandler(
-	usageService *service.UsageService,
-	apiKeyService *service.APIKeyService,
-	adminService service.AdminService,
-	cleanupService *service.UsageCleanupService,
-	videoTasks *service.VideoTaskService,
-) *UsageHandler {
-	h := NewUsageHandler(usageService, apiKeyService, adminService, cleanupService)
-	h.videoTasks = videoTasks
-	return h
 }
 
 // CreateUsageCleanupTaskRequest represents cleanup task creation request
@@ -400,69 +386,6 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	}
 
 	response.Success(c, stats)
-}
-
-// ListVideoGenerations returns the durable Grok video delivery and billing ledger.
-// GET /api/v1/admin/usage/video-generations
-func (h *UsageHandler) ListVideoGenerations(c *gin.Context) {
-	if h == nil || h.videoTasks == nil || !h.videoTasks.PersistentHistory() {
-		response.Error(c, http.StatusServiceUnavailable, "Video generation ledger unavailable")
-		return
-	}
-	page, pageSize := response.ParsePagination(c)
-	query := service.VideoTaskAdminQuery{
-		Page:           page,
-		PageSize:       pageSize,
-		Search:         strings.TrimSpace(c.Query("search")),
-		Status:         strings.TrimSpace(c.Query("status")),
-		BillingStatus:  strings.TrimSpace(c.Query("billing_status")),
-		DeliveryStatus: strings.TrimSpace(c.Query("delivery_status")),
-		Model:          strings.TrimSpace(c.Query("model")),
-	}
-	if raw := strings.TrimSpace(c.Query("account_id")); raw != "" {
-		accountID, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || accountID <= 0 {
-			response.BadRequest(c, "Invalid account_id")
-			return
-		}
-		query.AccountID = accountID
-	}
-	var err error
-	if raw := strings.TrimSpace(c.Query("start_time")); raw != "" {
-		query.StartTime, err = parseVideoGenerationTime(raw)
-		if err != nil {
-			response.BadRequest(c, "Invalid start_time, use RFC3339")
-			return
-		}
-	}
-	if raw := strings.TrimSpace(c.Query("end_time")); raw != "" {
-		query.EndTime, err = parseVideoGenerationTime(raw)
-		if err != nil {
-			response.BadRequest(c, "Invalid end_time, use RFC3339")
-			return
-		}
-	}
-	result, err := h.videoTasks.AdminList(c.Request.Context(), query)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, gin.H{
-		"items":     result.Items,
-		"total":     result.Total,
-		"page":      page,
-		"page_size": pageSize,
-		"summary":   result.Summary,
-	})
-}
-
-func parseVideoGenerationTime(value string) (*time.Time, error) {
-	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
-	if err != nil {
-		return nil, err
-	}
-	parsed = parsed.UTC()
-	return &parsed, nil
 }
 
 // SearchUsers handles searching users by email keyword

@@ -735,10 +735,6 @@ export interface SystemSettings {
   // Subscription feature switch (user sidebar "My Subscriptions" entry)
   subscription_enabled: boolean;
 
-  // Model Plaza feature switches + description
-  model_plaza_enabled: boolean;
-  model_plaza_require_auth: boolean;
-  model_plaza_description: string;
   plugin_management_enabled: boolean;
 
   // Affiliate (邀请返利) feature switch
@@ -1042,10 +1038,6 @@ export interface UpdateSettingsRequest {
   // Subscription feature switch
   subscription_enabled?: boolean;
 
-  // Model Plaza feature switches + description
-  model_plaza_enabled?: boolean;
-  model_plaza_require_auth?: boolean;
-  model_plaza_description?: string;
   plugin_management_enabled?: boolean;
 
   // Affiliate (邀请返利) feature switch

@@ -118,7 +118,6 @@ func (s *ChannelService) ListAvailable(ctx context.Context) ([]AvailableChannel,
 //  2. Pricing 非 nil 但所有价格字段为空（admin UI 建了条目但没填价格）
 //
 // 当 pricingService 为 nil（测试场景），跳过价格回落，但仍补充内置模型倍率。
-// 可用渠道与模型广场共用。
 func fillGlobalPricingFallback(pricingService *PricingService, models []SupportedModel) {
 	for i := range models {
 		if pricingService != nil && pricingNeedsFallback(models[i].Pricing) {
@@ -128,6 +127,19 @@ func fillGlobalPricingFallback(pricingService *PricingService, models []Supporte
 		}
 		models[i].Pricing = withDefaultMaxReasoningEffortMultiplier(models[i].Pricing, models[i].Name)
 	}
+}
+
+func withDefaultMaxReasoningEffortMultiplier(pricing *ChannelModelPricing, model string) *ChannelModelPricing {
+	if pricing == nil || pricing.MaxReasoningEffortMultiplier != nil {
+		return pricing
+	}
+	multiplier := defaultMaxReasoningEffortMultiplier(model)
+	if multiplier == nil {
+		return pricing
+	}
+	cloned := pricing.Clone()
+	cloned.MaxReasoningEffortMultiplier = multiplier
+	return &cloned
 }
 
 // pricingNeedsFallback 判定一个 ChannelModelPricing 是否需要走全局回落。

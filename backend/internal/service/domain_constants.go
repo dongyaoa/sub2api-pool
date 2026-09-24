@@ -177,6 +177,8 @@ const (
 	RedeemTypeSubscription     = domain.RedeemTypeSubscription
 	RedeemTypeInvitation       = domain.RedeemTypeInvitation
 	RedeemTypeAffiliateBalance = "affiliate_balance"
+	// Retained to exclude historical rewards from redeem-code management.
+	RedeemTypeCheckinBalance = "checkin_balance"
 )
 
 // PromoCode status constants
@@ -544,20 +546,6 @@ const (
 	// management are unaffected. Together with BALANCE_PAYMENT_DISABLED it forms the
 	// admin "site billing mode" selector. Defaults to true (opt-out feature).
 	SettingKeySubscriptionEnabled = "subscription_enabled"
-
-	// SettingKeyModelPlazaEnabled is a DB-backed soft switch for the Model Plaza page
-	// (public group/model pricing showcase). When false: the plaza endpoint returns 404
-	// and the header entry is hidden. Defaults to false (opt-in feature).
-	SettingKeyModelPlazaEnabled = "model_plaza_enabled"
-
-	// SettingKeyModelPlazaRequireAuth controls whether the Model Plaza page requires a
-	// logged-in user. When false the page is public and anonymous visitors see only
-	// non-exclusive groups.
-	SettingKeyModelPlazaRequireAuth = "model_plaza_require_auth"
-
-	// SettingKeyModelPlazaDescription stores the Markdown blurb rendered at the top of
-	// the Model Plaza page (global pricing notes, exchange rate, promotions, ...).
-	SettingKeyModelPlazaDescription = "model_plaza_description"
 
 	// SettingKeyPluginManagementEnabled controls sidebar visibility only; it does
 	// not stop or otherwise change already loaded plugin runtimes.

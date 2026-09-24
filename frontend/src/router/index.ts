@@ -193,16 +193,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Legal Document'
     }
   },
-  {
-    path: '/model-plaza',
-    name: 'ModelPlaza',
-    component: () => import('@/views/ModelPlazaView.vue'),
-    meta: {
-      requiresAuth: false,
-      title: 'Model Plaza',
-      titleKey: 'modelPlaza.title'
-    }
-  },
 
   // ==================== User Routes ====================
   {
@@ -234,41 +224,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/batch-image',
-    name: 'BatchImageGuide',
-    alias: '/docs/batch-image',
-    component: () => import('@/views/user/BatchImageGuideView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Batch Image Guide',
-      titleKey: 'batchImageGuide.title',
-      descriptionKey: 'batchImageGuide.description'
-    }
-  },
-  {
-    path: '/image-studio',
-    name: 'ImageStudio',
-    component: () => import('@/features/image-studio/ImageStudioView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Image Studio',
-      titleKey: 'imageStudio.title'
-    }
-  },
-  {
-    path: '/video-studio',
-    name: 'VideoStudio',
-    component: () => import('@/features/video-studio/VideoStudioView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Video Studio',
-      titleKey: 'videoStudio.title'
-    }
-  },
-  {
     path: '/usage',
     name: 'Usage',
     component: () => import('@/views/user/UsageView.vue'),
@@ -293,17 +248,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/checkin',
-    name: 'Checkin',
-    component: () => import('@/views/user/CheckinView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Daily Check-in',
-      titleKey: 'checkin.title'
-    }
-  },
-  {
     path: '/affiliate',
     name: 'Affiliate',
     component: () => import('@/views/user/AffiliateView.vue'),
@@ -313,17 +257,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Affiliate',
       titleKey: 'affiliate.title',
       descriptionKey: 'affiliate.description'
-    }
-  },
-  {
-    path: '/model-square',
-    name: 'ModelSquare',
-    component: () => import('@/views/user/ModelSquareView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: '模型广场',
-      titleKey: 'modelSquare.title'
     }
   },
   {
@@ -576,6 +509,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/upstreams',
+    name: 'AdminUpstreamCenter',
+    component: () => import('@/views/admin/UpstreamCenterView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Upstream Center',
+      titleKey: 'upstreamCenter.title'
+    }
+  },
+  {
     path: '/admin/accounts',
     name: 'AdminAccounts',
     component: () => import('@/views/admin/AccountsView.vue'),
@@ -633,17 +577,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Redeem Code Management',
       titleKey: 'admin.redeem.title',
       descriptionKey: 'admin.redeem.description'
-    }
-  },
-  {
-    path: '/admin/checkin',
-    name: 'AdminCheckinConsole',
-    component: () => import('@/views/admin/CheckinConsoleView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Check-in Console',
-      titleKey: 'adminCheckin.title'
     }
   },
   {
@@ -706,18 +639,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Usage Records',
       titleKey: 'admin.usage.title',
       descriptionKey: 'admin.usage.description'
-    }
-  },
-  {
-    path: '/admin/video-generations',
-    name: 'AdminVideoGenerations',
-    component: () => import('@/views/admin/VideoGenerationsView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Video Reconciliation',
-      titleKey: 'admin.videoGenerations.title',
-      descriptionKey: 'admin.videoGenerations.description'
     }
   },
   {
@@ -914,37 +835,6 @@ router.beforeEach(async (to, _from, next) => {
       // Admin users go to admin dashboard, regular users go to user dashboard
       next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
       return
-    }
-    // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
-    if (to.path === '/model-plaza') {
-      if (!appStore.publicSettingsLoaded) {
-        try {
-          await appStore.fetchPublicSettings()
-        } catch (error) {
-          console.warn('Failed to load public settings in route guard', error)
-        }
-      }
-      const plazaSettings = appStore.cachedPublicSettings
-      // 仅在设置成功加载且明确为 false 时拦截(瞬时加载失败视为未知,由后端 404 兜底)
-      if (appStore.publicSettingsLoaded && plazaSettings?.model_plaza_enabled === false) {
-        next(
-          authStore.isAuthenticated
-            ? authStore.isAdmin
-              ? '/admin/dashboard'
-              : '/dashboard'
-            : '/home'
-        )
-        return
-      }
-      if (plazaSettings?.model_plaza_require_auth === true && !authStore.isAuthenticated) {
-        next({ path: '/login', query: { redirect: to.fullPath } })
-        return
-      }
-      // Backend mode:登录的非管理员也不可见(匿名由下方公共拦截处理,广场不在白名单)
-      if (appStore.backendModeEnabled && authStore.isAuthenticated && !authStore.isAdmin) {
-        next('/login')
-        return
-      }
     }
     // Backend mode: block public pages for unauthenticated users (except login, key-usage, setup)
     if (appStore.backendModeEnabled && !authStore.isAuthenticated) {

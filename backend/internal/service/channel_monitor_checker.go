@@ -27,20 +27,35 @@ var monitorPingHTTPClient = newSSRFSafeHTTPClient(monitorPingTimeout)
 // newSSRFSafeHTTPClient 返回一个使用 safeDialContext 的 http.Client。
 // 仅供监控模块对外发起请求使用——所有目标都应是公网 endpoint。
 func newSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
-	tr := &http.Transport{
+	return newSSRFSafeHTTPClientWithHeaderTimeout(timeout, monitorResponseHeaderTimeout)
+}
+
+func newMonitorHTTPTransport(headerTimeout time.Duration) *http.Transport {
+	return &http.Transport{
 		DialContext:           safeDialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          16,
 		IdleConnTimeout:       monitorIdleConnTimeout,
 		TLSHandshakeTimeout:   monitorTLSHandshakeTimeout,
-		ResponseHeaderTimeout: monitorResponseHeaderTimeout,
+		ResponseHeaderTimeout: headerTimeout,
 	}
-	return &http.Client{Timeout: timeout, Transport: servertiming.WrapRoundTripper(tr)}
+}
+
+func newSSRFSafeHTTPClientWithHeaderTimeout(timeout, headerTimeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout, Transport: servertiming.WrapRoundTripper(newMonitorHTTPTransport(headerTimeout)),
+		// Never forward a stored credential to a redirect destination (including
+		// non-standard x-api-key headers which Go otherwise copies verbatim).
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
 }
 
 // CheckOptions 承载一次检测的自定义入参。
 // 所有字段都是可选（零值即等价于"用默认行为"）。
 type CheckOptions struct {
+	// HTTPClient is an internal transport override, never user-configurable.
+	// Nil retains the original channel monitor's response-header deadline.
+	HTTPClient *http.Client
 	// APIMode 仅对 OpenAI provider 生效；空串等同 chat_completions。
 	APIMode string
 	// ExtraHeaders 用户自定义 HTTP 头（merge 到 adapter 默认 headers，用户优先）。
@@ -71,6 +86,10 @@ func runCheckForModel(ctx context.Context, provider, endpoint, apiKey, model str
 	latency := time.Since(start)
 	latencyMs := int(latency / time.Millisecond)
 	res.LatencyMs = &latencyMs
+	if statusCode != 0 {
+		res.HTTPStatus = &statusCode
+	}
+	res.Usage = parseUpstreamMonitorUsage(provider, rawBody)
 
 	if err != nil {
 		res.Status = MonitorStatusError
@@ -298,7 +317,11 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	}
 	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
 	full := joinURL(endpoint, adapter.buildPath(model))
-	respBytes, status, err := postRawJSON(ctx, full, body, headers)
+	client := monitorHTTPClient
+	if opts != nil && opts.HTTPClient != nil {
+		client = opts.HTTPClient
+	}
+	respBytes, status, err := postRawJSONWithClient(ctx, client, full, body, headers)
 	if err != nil {
 		return "", "", status, err
 	}
@@ -403,7 +426,7 @@ func mergeHeaders(base map[string]string, opts *CheckOptions) map[string]string 
 //     bodyMergeKeyDenyList[provider] 的 key 会被静默丢弃，避免破坏 challenge / model 路由
 //   - replace: 直接 marshal BodyOverride 作为完整 body
 //
-// 任何 mode 返回的 []byte 都已经是合法 JSON，可直接送入 postRawJSON。
+// 任何 mode 返回的 []byte 都已经是合法 JSON，可直接送入 postRawJSONWithClient。
 func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt string, opts *CheckOptions) ([]byte, error) {
 	mode := bodyOverrideMode(opts)
 
@@ -530,9 +553,9 @@ func hasNonEmptyBodyValue(v any) bool {
 	}
 }
 
-// postRawJSON 发送 POST + 已序列化好的 JSON 字节，限制响应体大小，返回响应字节、HTTP status、错误。
+// postRawJSONWithClient 发送 POST + 已序列化好的 JSON 字节，限制响应体大小，返回响应字节、HTTP status、错误。
 // adapter 自行 marshal 是为了精确控制字段顺序与类型，所以这里直接收 []byte 而不是 any。
-func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers map[string]string) ([]byte, int, error) {
+func postRawJSONWithClient(ctx context.Context, client *http.Client, fullURL string, payload []byte, headers map[string]string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, 0, fmt.Errorf("build request: %w", err)
@@ -543,7 +566,7 @@ func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers ma
 		req.Header.Set(k, v)
 	}
 
-	resp, err := monitorHTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("do request: %w", err)
 	}

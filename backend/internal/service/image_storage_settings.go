@@ -21,17 +21,17 @@ const (
 	maxImageStoragePresignExpiryHours = 168
 )
 
-// ErrImageStorageIncomplete 表示开关已打开但凭证不全，无法启用异步生图。
+// ErrImageStorageIncomplete 表示开关已打开但凭证不全，无法启用视频对象存储。
 var ErrImageStorageIncomplete = errors.New("image storage is enabled but bucket/access_key_id/secret_access_key are incomplete")
 
 // ImageStorageFactory 由 repository 层提供，把配置变成一个可用的对象存储实现。
 // 与 BackupObjectStoreFactory 同样的注入方式，避免 service 反向依赖 repository。
 type ImageStorageFactory func(ctx context.Context, cfg *config.ImageStorageConfig) (ImageStorage, error)
 
-// ImageStorageSettings 是后台可编辑的异步生图对象存储配置。
+// ImageStorageSettings 是后台可编辑的视频对象存储配置。
 //
 // ReuseBackupS3 为真时不保存自己的凭证，直接借用数据库备份已配置的 S3 端点与密钥，
-// 只用自己的 Bucket/Prefix 区分对象；这样"数据走 backups/、图片走 images/"无需重复配置。
+// 只用自己的 Bucket/Prefix 区分对象；这样"数据走 backups/、视频走 images/videos/"无需重复配置。
 type ImageStorageSettings struct {
 	Enabled       bool `json:"enabled"`
 	ReuseBackupS3 bool `json:"reuse_backup_s3"`
@@ -41,7 +41,6 @@ type ImageStorageSettings struct {
 	PublicBaseURL        string `json:"public_base_url"`
 	PresignExpiry        int    `json:"presign_expiry_hours"`
 	HistoryRetentionDays int    `json:"history_retention_days"`
-	MaxDownloadBytes     int64  `json:"max_download_bytes"`
 
 	// 以下仅在 ReuseBackupS3 为假时使用
 	Endpoint        string `json:"endpoint"`
@@ -87,7 +86,7 @@ func NewImageStorageSettingService(
 	}
 }
 
-// Resolver 返回可注入 ImageTaskService 的解析函数。
+// Resolver 返回可注入 VideoTaskService 的对象存储解析函数。
 func (s *ImageStorageSettingService) Resolver() ImageStorageResolver {
 	return func() (*ImageResultUploader, bool) {
 		return s.resolve()
@@ -110,24 +109,24 @@ func (s *ImageStorageSettingService) resolve() (*ImageResultUploader, bool) {
 
 	cfg, err := s.effectiveConfig(ctx)
 	if err != nil {
-		logger.L().Warn("image_storage.settings_load_failed; async image tasks stay disabled", zap.Error(err))
+		logger.L().Warn("image_storage.settings_load_failed; video result storage stays disabled", zap.Error(err))
 		return nil, false
 	}
 	if !cfg.Enabled {
 		return nil, false
 	}
 	if !cfg.IsConfigured() {
-		logger.L().Warn("image_storage is enabled but not fully configured; async image tasks are disabled",
+		logger.L().Warn("image_storage is enabled but not fully configured; video result storage is disabled",
 			zap.Strings("missing_keys", cfg.MissingCredentialKeys()))
 		return nil, false
 	}
 
 	storage, err := s.factory(ctx, cfg)
 	if err != nil {
-		logger.L().Error("image_storage.client_build_failed; async image tasks stay disabled", zap.Error(err))
+		logger.L().Error("image_storage.client_build_failed; video result storage stays disabled", zap.Error(err))
 		return nil, false
 	}
-	s.uploader = NewImageResultUploader(storage, cfg.Prefix, cfg.MaxDownloadByte, nil)
+	s.uploader = NewImageResultUploader(storage, cfg.Prefix)
 	s.enabled = true
 	return s.uploader, true
 }
@@ -232,7 +231,7 @@ func (s *ImageStorageSettingService) TestConnection(ctx context.Context, in Imag
 	return nil
 }
 
-// effectiveConfig 把后台设置（或 config.yaml 回落）解析成运行时配置。
+// HistoryTTL 返回视频任务的 Redis 缓存保留时间。
 func (s *ImageStorageSettingService) HistoryTTL() time.Duration {
 	cfg, err := s.effectiveConfig(context.Background())
 	if err != nil || cfg == nil || cfg.HistoryRetentionDays <= 0 {
@@ -241,6 +240,7 @@ func (s *ImageStorageSettingService) HistoryTTL() time.Duration {
 	return time.Duration(cfg.HistoryRetentionDays) * 24 * time.Hour
 }
 
+// effectiveConfig 把后台设置（或 config.yaml 回落）解析成运行时配置。
 func (s *ImageStorageSettingService) effectiveConfig(ctx context.Context) (*config.ImageStorageConfig, error) {
 	settings, err := s.load(ctx)
 	if err != nil {
@@ -265,7 +265,6 @@ func (s *ImageStorageSettingService) toImageStorageConfig(ctx context.Context, i
 		PublicBaseURL:        in.PublicBaseURL,
 		PresignExpiry:        in.PresignExpiry,
 		HistoryRetentionDays: in.HistoryRetentionDays,
-		MaxDownloadByte:      in.MaxDownloadBytes,
 		Endpoint:             in.Endpoint,
 		Region:               in.Region,
 		AccessKeyID:          in.AccessKeyID,
@@ -333,7 +332,6 @@ func settingsFromConfig(cfg config.ImageStorageConfig) *ImageStorageSettings {
 		PublicBaseURL:        cfg.PublicBaseURL,
 		PresignExpiry:        cfg.PresignExpiry,
 		HistoryRetentionDays: cfg.HistoryRetentionDays,
-		MaxDownloadBytes:     cfg.MaxDownloadByte,
 		Endpoint:             cfg.Endpoint,
 		Region:               cfg.Region,
 		AccessKeyID:          cfg.AccessKeyID,
@@ -350,7 +348,6 @@ func normalizeImageStorageConfig(cfg *config.ImageStorageConfig) {
 	cfg.PublicBaseURL = settings.PublicBaseURL
 	cfg.PresignExpiry = settings.PresignExpiry
 	cfg.HistoryRetentionDays = settings.HistoryRetentionDays
-	cfg.MaxDownloadByte = settings.MaxDownloadBytes
 }
 
 func normalizeImageStorageSettings(in *ImageStorageSettings) {
@@ -386,8 +383,5 @@ func normalizeImageStorageSettings(in *ImageStorageSettings) {
 	}
 	if in.PresignExpiry > maxImageStoragePresignExpiryHours {
 		in.PresignExpiry = maxImageStoragePresignExpiryHours
-	}
-	if in.MaxDownloadBytes <= 0 {
-		in.MaxDownloadBytes = defaultImageMaxDownloadBytes
 	}
 }

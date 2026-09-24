@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,9 +13,7 @@ import (
 )
 
 const (
-	videoTaskKeyPrefix        = "video_task:"
-	videoTaskHistoryKeyPrefix = "video_task_history:"
-	maxVideoTaskHistoryItems  = 100
+	videoTaskKeyPrefix = "video_task:"
 )
 
 type videoTaskStore struct {
@@ -53,13 +50,7 @@ func (s *videoTaskStore) Save(ctx context.Context, task *service.VideoTaskRecord
 		}
 		return err
 	}
-	historyKey := videoTaskHistoryKey(service.VideoTaskOwner{UserID: task.UserID, APIKeyID: task.APIKeyID})
-	pipe := s.rdb.TxPipeline()
-	pipe.Set(ctx, videoTaskKey(task.ID), data, ttl)
-	pipe.ZAdd(ctx, historyKey, redis.Z{Score: float64(task.CreatedAt), Member: task.ID})
-	pipe.ZRemRangeByRank(ctx, historyKey, 0, -(maxVideoTaskHistoryItems + 1))
-	pipe.Expire(ctx, historyKey, ttl)
-	_, err = pipe.Exec(ctx)
+	err = s.rdb.Set(ctx, videoTaskKey(task.ID), data, ttl).Err()
 	if durableSaved {
 		return nil
 	}
@@ -90,98 +81,6 @@ func (s *videoTaskStore) Get(ctx context.Context, id string) (*service.VideoTask
 	return &task, nil
 }
 
-func (s *videoTaskStore) List(ctx context.Context, owner service.VideoTaskOwner, limit int) ([]*service.VideoTaskRecord, error) {
-	if s.db != nil {
-		return s.listDurable(ctx, owner, limit)
-	}
-	if s.rdb == nil {
-		return nil, errors.New("video task storage is unavailable")
-	}
-	if limit <= 0 {
-		limit = 10
-	}
-	fetchLimit := int64(min(limit*3, maxVideoTaskHistoryItems))
-	historyKey := videoTaskHistoryKey(owner)
-	ids, err := s.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
-		Key:   historyKey,
-		Start: "0",
-		Stop:  strconv.FormatInt(fetchLimit-1, 10),
-		Rev:   true,
-	}).Result()
-	if err != nil || len(ids) == 0 {
-		return nil, err
-	}
-	keys := make([]string, len(ids))
-	for index, id := range ids {
-		keys[index] = videoTaskKey(id)
-	}
-	values, err := s.rdb.MGet(ctx, keys...).Result()
-	if err != nil {
-		return nil, err
-	}
-	tasks := make([]*service.VideoTaskRecord, 0, limit)
-	staleIDs := make([]any, 0)
-	for index, value := range values {
-		raw, ok := value.(string)
-		if !ok || strings.TrimSpace(raw) == "" {
-			staleIDs = append(staleIDs, ids[index])
-			continue
-		}
-		var task service.VideoTaskRecord
-		if json.Unmarshal([]byte(raw), &task) != nil {
-			staleIDs = append(staleIDs, ids[index])
-			continue
-		}
-		if task.UserID == owner.UserID && task.APIKeyID == owner.APIKeyID {
-			tasks = append(tasks, &task)
-		}
-		if len(tasks) >= limit {
-			break
-		}
-	}
-	if len(staleIDs) > 0 {
-		_ = s.rdb.ZRem(ctx, historyKey, staleIDs...).Err()
-	}
-	return tasks, nil
-}
-
-func (s *videoTaskStore) Clear(ctx context.Context, owner service.VideoTaskOwner) error {
-	durableHidden := false
-	if s.db != nil {
-		if err := s.hideDurable(ctx, owner); err != nil {
-			return err
-		}
-		durableHidden = true
-	}
-	if s.rdb == nil {
-		if durableHidden {
-			return nil
-		}
-		return errors.New("video task storage is unavailable")
-	}
-	historyKey := videoTaskHistoryKey(owner)
-	ids, err := s.rdb.ZRange(ctx, historyKey, 0, -1).Result()
-	if err != nil {
-		if durableHidden {
-			return nil
-		}
-		return err
-	}
-	keys := []string{historyKey}
-	for _, id := range ids {
-		keys = append(keys, videoTaskKey(id))
-	}
-	err = s.rdb.Del(ctx, keys...).Err()
-	if durableHidden {
-		return nil
-	}
-	return err
-}
-
 func videoTaskKey(id string) string {
 	return videoTaskKeyPrefix + strings.TrimSpace(id)
-}
-
-func videoTaskHistoryKey(owner service.VideoTaskOwner) string {
-	return videoTaskHistoryKeyPrefix + strconv.FormatInt(owner.UserID, 10) + ":" + strconv.FormatInt(owner.APIKeyID, 10)
 }

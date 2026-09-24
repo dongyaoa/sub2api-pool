@@ -1,72 +1,14 @@
 package handler
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
-	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
-
-func (h *OpenAIGatewayHandler) GrokVideoTasks(c *gin.Context) {
-	owner, ok := grokVideoTaskOwner(c)
-	if !ok || h == nil || h.videoTasks == nil {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Video task history is unavailable")
-		return
-	}
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
-	tasks, err := h.videoTasks.List(c.Request.Context(), owner, limit)
-	if err != nil {
-		grokVideoTaskError(c, err)
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, gin.H{
-		"object":             "list",
-		"data":               tasks,
-		"retention_days":     h.videoTasks.RetentionDays(),
-		"persistent_history": h.videoTasks.PersistentHistory(),
-	})
-}
-
-func (h *OpenAIGatewayHandler) ClearGrokVideoTasks(c *gin.Context) {
-	owner, ok := grokVideoTaskOwner(c)
-	if !ok || h == nil || h.videoTasks == nil {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Video task history is unavailable")
-		return
-	}
-	if err := h.videoTasks.Clear(c.Request.Context(), owner); err != nil {
-		grokVideoTaskError(c, err)
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	c.Status(http.StatusNoContent)
-}
-
-func grokVideoTaskOwner(c *gin.Context) (service.VideoTaskOwner, bool) {
-	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
-	if !ok || apiKey == nil || apiKey.UserID <= 0 || apiKey.ID <= 0 {
-		return service.VideoTaskOwner{}, false
-	}
-	return service.VideoTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID}, true
-}
-
-func grokVideoTaskError(c *gin.Context, err error) {
-	status := http.StatusInternalServerError
-	errType := "api_error"
-	message := "Video task history is unavailable"
-	if errors.Is(err, service.ErrVideoTaskNotFound) {
-		status = http.StatusNotFound
-		errType = "not_found_error"
-		message = "Video request not found"
-	}
-	c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
-}
 
 func (h *OpenAIGatewayHandler) serveStoredGrokVideoContent(
 	c *gin.Context,

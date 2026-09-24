@@ -1,7 +1,7 @@
 <template>
   <div class="relative">
     <!-- Admin: Full version badge with dropdown -->
-    <template v-if="isAdmin">
+    <template v-if="isAdmin && officialUpdatesEnabled">
       <button
         @click="toggleDropdown"
         class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors"
@@ -630,9 +630,9 @@
       </transition>
     </template>
 
-    <!-- Non-admin: Simple static version text -->
-    <span v-else-if="version" class="text-xs text-gray-500 dark:text-dark-400">
-      v{{ version }}
+    <!-- Show the local version when official updates are disabled or for non-admins. -->
+    <span v-else-if="currentVersion" class="text-xs text-gray-500 dark:text-dark-400">
+      v{{ currentVersion }}
     </span>
   </div>
 </template>
@@ -651,6 +651,8 @@ import {
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
 
+// This pool fork is maintained separately; keep official update checks and controls disabled.
+const officialUpdatesEnabled = false
 const GITHUB_REPO = 'Wei-Shaw/sub2api'
 // Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
 const DOCKER_IMAGE = 'weishaw/sub2api'
@@ -910,7 +912,7 @@ function handleClickOutside(event: MouseEvent) {
 }
 
 onMounted(() => {
-  if (isAdmin.value) {
+  if (isAdmin.value && officialUpdatesEnabled) {
     // Use cached version if available, otherwise fetch
     appStore.fetchVersion(false)
   }

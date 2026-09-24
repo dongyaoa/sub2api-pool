@@ -218,11 +218,7 @@ type SystemSettings struct {
 	// to form the admin-facing "site billing mode" selector.
 	SubscriptionEnabled bool `json:"subscription_enabled"`
 
-	// Model Plaza feature (public group/model pricing showcase)
-	ModelPlazaEnabled       bool   `json:"model_plaza_enabled"`
-	ModelPlazaRequireAuth   bool   `json:"model_plaza_require_auth"`
-	ModelPlazaDescription   string `json:"model_plaza_description"`
-	PluginManagementEnabled bool   `json:"plugin_management_enabled"`
+	PluginManagementEnabled bool `json:"plugin_management_enabled"`
 
 	// Claude Code version check
 	MinClaudeCodeVersion string
@@ -405,9 +401,6 @@ type PublicSettings struct {
 	// Subscription feature switch (see SystemSettings.SubscriptionEnabled)
 	SubscriptionEnabled bool `json:"subscription_enabled"`
 
-	// Model Plaza feature (public group/model pricing showcase)
-	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`
-	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`
 
 	// Affiliate (邀请返利) feature toggle

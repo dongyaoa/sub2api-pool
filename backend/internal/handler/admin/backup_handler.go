@@ -206,10 +206,10 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 	response.Accepted(c, record)
 }
 
-// ─── 异步生图对象存储配置 ───
+// ─── 视频对象存储配置 ───
 //
 // 与备份共用一套 S3 客户端构造，因此放在同一个页面下：勾选"复用备份 S3"即可直接
-// 借用备份已配置的端点与密钥，只用不同的前缀区分对象（备份走 backups/，图片走 images/）。
+// 借用备份已配置的端点与密钥，只用不同的前缀区分对象（备份走 backups/，视频走 images/videos/）。
 
 func (h *BackupHandler) GetImageStorageConfig(c *gin.Context) {
 	ctx := c.Request.Context()

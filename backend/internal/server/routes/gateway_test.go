@@ -37,7 +37,6 @@ func newGatewayRoutesTestRouterWithConfig(cfg *config.Config, platform ...string
 		&handler.Handlers{
 			Gateway:       &handler.GatewayHandler{},
 			OpenAIGateway: &handler.OpenAIGatewayHandler{},
-			AsyncImage:    handler.NewAsyncImageHandler(nil, nil),
 		},
 		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
 			groupID := int64(1)
@@ -124,7 +123,7 @@ func TestGatewayRoutesOpenAIImagesPathsAreRegistered(t *testing.T) {
 	}
 }
 
-func TestGatewayRoutesAsyncImagesPathsAreRegistered(t *testing.T) {
+func TestGatewayRoutesRemovedImageStudioPathsAreNotRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
 	registered := make(map[string]bool)
 	for _, route := range router.Routes() {
@@ -144,8 +143,18 @@ func TestGatewayRoutesAsyncImagesPathsAreRegistered(t *testing.T) {
 		"DELETE /images/tasks",
 		"GET /images/tasks/:task_id",
 		"DELETE /images/tasks/:task_id",
+		"POST /v1/images/batches",
+		"GET /v1/images/batches",
+		"GET /v1/images/batches/models",
+		"GET /v1/images/batches/:id",
+		"GET /v1/images/batches/:id/items",
+		"GET /v1/images/batches/:id/items/:custom_id/content",
+		"GET /v1/images/batches/:id/download",
+		"POST /v1/images/batches/:id/cancel",
+		"DELETE /v1/images/batches/:id",
+		"DELETE /v1/images/batches/:id/outputs",
 	} {
-		require.True(t, registered[route], "%s should be registered", route)
+		require.False(t, registered[route], "%s should be removed", route)
 	}
 }
 
@@ -202,7 +211,7 @@ func TestGatewayRoutesGrokImagesAndVideosPathsAreRegistered(t *testing.T) {
 	}
 }
 
-func TestGatewayRoutesVideoTaskHistoryPathsAreRegistered(t *testing.T) {
+func TestGatewayRoutesRemovedVideoHistoryPathsAreNotRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter(service.PlatformGrok)
 	registered := make(map[string]bool)
 	for _, route := range router.Routes() {
@@ -215,7 +224,7 @@ func TestGatewayRoutesVideoTaskHistoryPathsAreRegistered(t *testing.T) {
 		"GET /videos/tasks",
 		"DELETE /videos/tasks",
 	} {
-		require.True(t, registered[route], "%s should be registered", route)
+		require.False(t, registered[route], "%s should be removed", route)
 	}
 }
 

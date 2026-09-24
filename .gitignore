@@ -143,6 +143,8 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/upstream-center.md
+!docs/upstream-center-contract.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

@@ -71,10 +71,8 @@ export default {
       viewUserAccounts: '查看和管理用户账户',
       manageAccounts: '管理账号',
       configureAiAccounts: '配置 AI 平台账号',
-      batchImage: '批量生图',
-      batchImageDesc: '提交任务、复制 Agent 调用说明',
       groupPricing: '分组定价',
-      groupPricingDesc: '设置批量折扣和冻结比例',
+      groupPricingDesc: '配置分组计费与倍率',
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败'
@@ -103,9 +101,9 @@ export default {
         saved: 'S3 配置已保存'
       },
       imageStorage: {
-        title: '异步生图对象存储',
-        description: '开启后，异步生图接口可用，生成结果转存到对象存储，只把短链接写入 Redis。与备份共用同一套 S3 客户端，保存后立即生效，无需重启。',
-        enabled: '启用异步生图',
+        title: '视频对象存储',
+        description: '将视频生成结果转存到对象存储，供视频 API 返回链接。与备份共用同一套 S3 客户端，保存后立即生效，无需重启。',
+        enabled: '启用视频对象存储',
         reuseBackupS3: '复用上方备份的 S3 配置（只用不同的存储桶/前缀）',
         bucket: '存储桶',
         bucketInherited: '留空则沿用备份存储桶',
@@ -115,7 +113,7 @@ export default {
         presignExpiryHours: '预签名链接有效期（小时，最高 168）',
         historyRetentionDays: '生成记录保留天数',
         historyRetentionHint: '默认 7 天；R2 对象删除需另行配置同期限的生命周期规则。',
-        saved: '异步生图对象存储配置已保存'
+        saved: '视频对象存储配置已保存'
       },
       schedule: {
         title: '定时备份',
@@ -676,7 +674,6 @@ export default {
       typeBalance: '余额（兑换码）',
       typeAffiliateBalance: '余额（返利转入）',
       typeAdminBalance: '余额（管理员调整）',
-      typeCheckinBalance: '余额（每日签到）',
       typeConcurrency: '并发（兑换码）',
       typeAdminConcurrency: '并发（管理员调整）',
       typeSubscription: '订阅',
@@ -1009,14 +1006,8 @@ export default {
         title: '图片生成计费',
         description: '配置图片生成能力和基础单价；Grok 按模型计价且 1K / 2K 同价，其他平台按分辨率计价。留空则使用默认价格。',
         allowImageGeneration: '允许当前分组生图',
-        allowBatchImageGeneration: '允许当前分组批量生图',
         independentMultiplier: '生图倍率独立',
         imageMultiplier: '生图独立倍率',
-        batchDiscountMultiplier: '批量生图折扣倍率',
-        batchHoldMultiplier: '批量冻结价格比例',
-        batchSectionHint: '批量生图仅影响批量任务：结算价格会叠加批量折扣倍率，提交时冻结金额按普通生图原价 × 批量冻结价格比例计算。参考图也会产生上游输入 token 消耗，建议批量生图折扣倍率设置大于 0.5。',
-        batchDisabledHint: '请先开启当前分组生图，才能开启批量生图。',
-        batchGeminiOnlyHint: '批量生图当前仅支持 Gemini 分组。',
         modeHint: '默认关闭独立倍率时，图片费用 = 图片价格 × 当前分组有效倍率；开启独立倍率后，图片费用 = 图片价格 × 生图独立倍率。',
         finalPricePreview: '最终单张价格预览',
         notConfigured: '未配置'
