@@ -12,8 +12,8 @@
         <div v-else-if="sourceAccount" class="mt-3"><span class="inline-flex items-center gap-2 rounded-lg bg-primary-50 px-2 py-1 text-xs text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">{{ sourceAccount.name }}<button type="button" :aria-label="`${t('upstreamCenter.remove')} ${sourceAccount.name}`" @click="clearSourceAccount"><Icon name="x" size="xs" /></button></span></div>
       </section>
       <div class="grid gap-4 sm:grid-cols-2">
-        <div><label for="target-provider" class="input-label">{{ t('upstreamCenter.form.provider') }}</label><select id="target-provider" v-model="form.provider" class="input"><option value="openai">{{ t('upstreamCenter.form.providerOpenAI') }}</option><option value="anthropic">{{ t('upstreamCenter.form.providerAnthropic') }}</option><option value="gemini">{{ t('upstreamCenter.form.providerGemini') }}</option></select></div>
-        <div v-if="form.provider === 'openai'"><label for="target-api-mode" class="input-label">{{ t('upstreamCenter.form.apiMode') }}</label><select id="target-api-mode" v-model="form.api_mode" class="input"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></div>
+        <div><label for="target-provider" class="input-label">{{ t('upstreamCenter.form.provider') }}</label><Select id="target-provider" v-model="form.provider" :options="providerOptions" :searchable="false" :aria-label="t('upstreamCenter.form.provider')" /></div>
+        <div v-if="form.provider === 'openai'"><label for="target-api-mode" class="input-label">{{ t('upstreamCenter.form.apiMode') }}</label><Select id="target-api-mode" v-model="form.api_mode" :options="apiModeOptions" :searchable="false" :aria-label="t('upstreamCenter.form.apiMode')" /></div>
       </div>
       <div><label for="target-endpoint" class="input-label">{{ t('upstreamCenter.form.endpoint') }}</label><input id="target-endpoint" v-model="form.endpoint" type="url" required class="input" :placeholder="t('upstreamCenter.form.websitePlaceholder')" /><p class="mt-1.5 text-xs text-gray-500 dark:text-dark-400">{{ t('upstreamCenter.form.endpointHint') }}</p></div>
       <div><label for="target-key" class="input-label">{{ t('upstreamCenter.form.apiKey') }}</label><input id="target-key" v-model="form.api_key" type="password" autocomplete="new-password" class="input" :required="!canKeepSavedKey && !sourceAccount && !(supplier && form.account_ids.length)" :placeholder="t(sourceAccount ? 'upstreamCenter.form.importedKeyPlaceholder' : canKeepSavedKey ? 'upstreamCenter.form.keepKey' : 'upstreamCenter.form.apiKeyPlaceholder')" /><p v-if="target?.api_key_masked && !sourceAccount && canKeepSavedKey" class="mt-1.5 font-mono text-xs text-gray-400">{{ t('upstreamCenter.form.existingKey', { key: target.api_key_masked }) }}</p><p v-if="sourceAccount || (supplier && form.account_ids.length)" class="mt-1.5 text-xs text-primary-600 dark:text-primary-400">{{ t(target && !sourceAccount ? 'upstreamCenter.form.accountEditHint' : 'upstreamCenter.form.useAccountKeyHint') }}</p><p v-else-if="target && !canKeepSavedKey" class="mt-1.5 text-xs text-amber-600 dark:text-amber-400">{{ t('upstreamCenter.form.changedConnectionKeyHint') }}</p></div>
@@ -53,6 +53,12 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 const props = defineProps<{ show: boolean; target: UpstreamTarget | null; supplier: UpstreamSupplier | null }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 const { t } = useI18n()
+const providerOptions = computed(() => [
+  { value: 'openai', label: t('upstreamCenter.form.providerOpenAI') },
+  { value: 'anthropic', label: t('upstreamCenter.form.providerAnthropic') },
+  { value: 'gemini', label: t('upstreamCenter.form.providerGemini') }
+])
+const apiModeOptions = [{ value: 'chat_completions', label: 'Chat Completions' }, { value: 'responses', label: 'Responses' }]
 const title = computed(() => t(props.target ? props.supplier ? 'upstreamCenter.editGroup' : 'upstreamCenter.editMonitor' : props.supplier ? 'upstreamCenter.addGroup' : 'upstreamCenter.addMonitor'))
 const defaults = (): UpstreamTargetInput => ({ supplier_id: props.supplier?.id || null, name: '', provider: 'openai', api_mode: 'chat_completions', endpoint: props.supplier?.website || '', api_key: '', models: ['gpt-5.6-sol'], enabled: true, interval_seconds: 30, timeout_seconds: 45, degraded_threshold_ms: 6000, account_ids: [], wallet_ref: 'default', notes: '' })
 const form = reactive<UpstreamTargetInput>(defaults())

@@ -45,6 +45,8 @@ API Key 使用项目已有 AES-GCM 密钥加密，接口仅返回掩码。请求
 
 智商监控和 OAuth 监控共用 `/api/v1/admin/intelligence-monitors`，在 UI 中分为两个 Tab。任务固定使用 `gpt-6-astra`、`high`，提示词为 `创建一个 HTML，内容是用 SVG 绘制一个鹈鹕骑自行车的 2D 动画。你不需要任何测试。`。新计划定时默认关闭，开启后才参与调度；关闭浏览器不影响已排队任务。
 
+全部智商来源默认最多等待 15 分钟，界面提供 5/10/15 分钟，API 接受整数 180–900 秒以兼容旧设置。迁移 `250_intelligence_monitor_generation_timeout.sql` 将已有 180–300 秒计划统一提升到 900 秒，仅改 `timeout_seconds`，保留启停、下次执行时间、`updated_at` 等其他配置；已排队、执行中及历史记录的超时快照不改，也不自动重放。任务租约按本次超时加 180 秒生成，15 分钟任务的租约为 18 分钟，防止旧 8 分钟租约提前结束正在生成的作品。
+
 每个计划最近 20 条已结束执行（`succeeded`/`failed`）按 `created_at DESC,id DESC` 保留，横版卡片左新右旧。`pruneIntelligencePlanRuns` 在完成或租约过期事务内持有计划锁清理旧行；启动调用 `PruneRuns` 清理已有超量数据，归档计划也处理。超出部分的记录及 HTML/原始回复物理删除；`pending`/`running` 排除在保留删除之外，因此存在活跃任务时总数可暂时大于 20。此规则只适用于智商作品，不能套用于财务依赖的可用性监控记录。
 
 OAuth 来源为 `openai_oauth`，迁移 `246_intelligence_monitor_oauth.sql` 加入 `account_id`。管理员选择站内已有 OpenAI OAuth 账号，名称跟随账号当前名称，运行快照保存当次名称与账号。服务端校验账号类型、固定模型能力、未重映射以及执行时可调度状态，拒绝影子/合成测试账号。

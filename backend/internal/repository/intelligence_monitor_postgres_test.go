@@ -29,7 +29,7 @@ func (intelligencePGEncryptor) Decrypt(cipher string) (string, error) {
 
 // Uses a random private schema and a single connection. It never migrates or
 // modifies public. Run with the same opt-in DSN as the upstream ledger test.
-func intelligenceMonitorTestDB(t *testing.T) (*sql.DB, context.Context) {
+func intelligenceMonitorTestDB(t *testing.T, legacySchema ...bool) (*sql.DB, context.Context) {
 	t.Helper()
 	dsn := os.Getenv("UPSTREAM_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -63,6 +63,14 @@ func intelligenceMonitorTestDB(t *testing.T) (*sql.DB, context.Context) {
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, string(migration))
 	require.NoError(t, err, "OAuth migration must remain idempotent")
+	if len(legacySchema) == 0 || !legacySchema[0] {
+		for _, name := range []string{"249_intelligence_monitor_interval_seconds.sql", "250_intelligence_monitor_generation_timeout.sql"} {
+			migration, err = migrations.FS.ReadFile(name)
+			require.NoError(t, err)
+			_, err = db.ExecContext(ctx, string(migration))
+			require.NoError(t, err)
+		}
+	}
 	return db, ctx
 }
 
@@ -176,6 +184,54 @@ func TestIntelligenceMonitorPostgresCRUDAndRuns(t *testing.T) {
 	detailed, err = repo.GetRun(ctx, oauthRun.ID)
 	require.NoError(t, err)
 	require.Equal(t, float64(56), detailed.SourceSnapshot["account_id"])
+}
+
+func TestIntelligenceMonitorPostgresCustomSecondIntervals(t *testing.T) {
+	db, ctx := intelligenceMonitorTestDB(t, true)
+	repo := &intelligenceMonitorRepository{db: db}
+	var existingID int64
+	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO intelligence_monitor_plans(name,source_type,interval_seconds,created_by) VALUES('Existing seconds','external',3600,1) RETURNING id`).Scan(&existingID))
+	migration, err := migrations.FS.ReadFile("249_intelligence_monitor_interval_seconds.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.ExecContext(ctx, string(migration))
+		require.NoError(t, err)
+	}
+	existing, err := repo.GetPlan(ctx, existingID)
+	require.NoError(t, err)
+	require.Equal(t, 3600, existing.IntervalSeconds, "migration must not rewrite existing schedules")
+	require.Equal(t, 300, existing.TimeoutSeconds)
+	var id int64
+	var interval, timeout int
+	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO intelligence_monitor_plans(name,source_type,created_by) VALUES('Default seconds','external',1) RETURNING id,interval_seconds,timeout_seconds`).Scan(&id, &interval, &timeout))
+	require.Equal(t, 3600, interval)
+	require.Equal(t, 300, timeout)
+	for _, seconds := range []int{29, 86401} {
+		_, err = db.ExecContext(ctx, `UPDATE intelligence_monitor_plans SET interval_seconds=$2 WHERE id=$1`, id, seconds)
+		require.Error(t, err)
+	}
+	for _, seconds := range []int{30, 31, 97, 86400} {
+		_, err = db.ExecContext(ctx, `UPDATE intelligence_monitor_plans SET interval_seconds=$2,enabled=TRUE,next_run_at=NOW() WHERE id=$1`, id, seconds)
+		require.NoError(t, err)
+		plan, err := repo.GetPlan(ctx, id)
+		require.NoError(t, err)
+		run := &service.IntelligenceMonitorRun{PlanID: id, PlanUpdatedAt: plan.UpdatedAt, PlanName: plan.Name, Trigger: "scheduled", Model: service.IntelligenceMonitorModel, ReasoningEffort: service.IntelligenceMonitorReasoning, Prompt: service.IntelligenceMonitorPrompt, SourceType: "external", SourceName: plan.Name, APIMode: "responses", TimeoutSeconds: 300}
+		require.NoError(t, repo.Enqueue(ctx, run, true))
+		duplicate := *run
+		require.ErrorIs(t, repo.Enqueue(ctx, &duplicate, false), service.ErrIntelligenceBusy, "a short interval must not allow overlapping runs")
+		claimed, err := repo.ClaimNext(ctx, "custom-seconds-worker")
+		require.NoError(t, err)
+		require.NotNil(t, claimed)
+		require.Equal(t, run.ID, claimed.ID)
+		claimed.Status = "failed"
+		claimed.Error = "Synthetic repository regression; no generation requested"
+		require.NoError(t, repo.CompleteRun(ctx, claimed))
+		plan, err = repo.GetPlan(ctx, id)
+		require.NoError(t, err)
+		require.NotNil(t, plan.LastRunAt)
+		require.NotNil(t, plan.NextRunAt)
+		require.Equal(t, time.Duration(seconds)*time.Second, plan.NextRunAt.Sub(*plan.LastRunAt), "schedule uses exact seconds after completion")
+	}
 }
 
 func TestIntelligenceMonitorPostgresRetainsOnlyTwentyTerminalRuns(t *testing.T) {

@@ -311,7 +311,7 @@ describe('AccountTestModal', () => {
     wrapper.unmount()
   })
 
-  it('仅提供绑定代理并禁用停用、过期和未加载的代理，指定选择后携带代理 ID', async () => {
+  it('不再显示代理选择，并由后端从账号代理池自动分配', async () => {
     const wrapper = mountModal({
       id: 42,
       name: 'Proxy pool account',
@@ -331,25 +331,16 @@ describe('AccountTestModal', () => {
     await wrapper.setProps({ show: true })
     await flushPromises()
 
-    const proxySelect = wrapper.get('[data-testid="account-test-proxy-select"]')
-    expect(proxySelect.findAll('option').map(option => option.element.value)).toEqual(['', '12', '13', '14', '15', '16'])
-    expect(proxySelect.text()).not.toContain('Outside pool')
-    expect(proxySelect.get('option[value="12"]').attributes('disabled')).toBeUndefined()
-    for (const id of [13, 14, 15, 16]) {
-      expect(proxySelect.get(`option[value="${id}"]`).attributes('disabled')).toBeDefined()
-    }
-    expect(proxySelect.get('option[value="13"]').text()).toContain('admin.accounts.testProxyOptions.inactive')
-    expect(proxySelect.get('option[value="14"]').text()).toContain('admin.accounts.testProxyOptions.expired')
-    expect(proxySelect.get('option[value="15"]').text()).toContain('admin.accounts.testProxyOptions.unavailable')
-    await proxySelect.setValue('12')
+    expect(wrapper.find('[data-testid="account-test-proxy-select"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('admin.accounts.testProxyOptions.label')
     await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
     await flushPromises()
 
-    expect(JSON.parse(vi.mocked(global.fetch).mock.calls[0][1]!.body as string).proxy_id).toBe(12)
+    expect(JSON.parse(vi.mocked(global.fetch).mock.calls[0][1]!.body as string)).not.toHaveProperty('proxy_id')
     wrapper.unmount()
   })
 
-  it('兼容旧版单代理绑定且自动选择不提交代理 ID', async () => {
+  it('兼容旧版单代理绑定且不提交代理 ID', async () => {
     const wrapper = mountModal({
       id: 42,
       name: 'Legacy proxy account',
@@ -361,16 +352,14 @@ describe('AccountTestModal', () => {
     })
     await wrapper.setProps({ show: true })
     await flushPromises()
-    const proxySelect = wrapper.get('[data-testid="account-test-proxy-select"]')
-    expect(proxySelect.findAll('option').map(option => option.element.value)).toEqual(['', '11'])
-    expect((proxySelect.element as HTMLSelectElement).value).toBe('')
+    expect(wrapper.find('[data-testid="account-test-proxy-select"]').exists()).toBe(false)
     await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
     await flushPromises()
     expect(JSON.parse(vi.mocked(global.fetch).mock.calls[0][1]!.body as string)).not.toHaveProperty('proxy_id')
     wrapper.unmount()
   })
 
-  it('重试保留代理选择，连接时禁用选择，重新打开恢复自动选择', async () => {
+  it('每次重试都保留后端自动代理轮询，不固定上次代理', async () => {
     let finishRetry!: (response: Response) => void
     global.fetch = vi.fn()
       .mockResolvedValueOnce(createStreamResponse([
@@ -388,29 +377,148 @@ describe('AccountTestModal', () => {
     })
     await wrapper.setProps({ show: true })
     await flushPromises()
-    const proxySelect = wrapper.get('[data-testid="account-test-proxy-select"]')
-    await proxySelect.setValue('12')
     await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="account-test-metrics"]').exists()).toBe(false)
 
     await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.retry'))!.trigger('click')
     await flushPromises()
-    expect((proxySelect.element as HTMLSelectElement).value).toBe('12')
-    expect(proxySelect.attributes('disabled')).toBeDefined()
-    expect(JSON.parse(vi.mocked(global.fetch).mock.calls[1][1]!.body as string).proxy_id).toBe(12)
+    expect(JSON.parse(vi.mocked(global.fetch).mock.calls[1][1]!.body as string)).not.toHaveProperty('proxy_id')
+    expect(wrapper.findAll('button').find(button => button.text().includes('admin.accounts.testing'))!.attributes('disabled')).toBeDefined()
 
     finishRetry(createStreamResponse([
       'data: {"type":"test_metrics","duration_ms":450}\n',
       'data: {"type":"test_complete","success":true}\n'
     ]))
     await flushPromises()
-    expect(proxySelect.attributes('disabled')).toBeUndefined()
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true })
     await flushPromises()
-    expect((proxySelect.element as HTMLSelectElement).value).toBe('')
     expect(wrapper.find('[data-testid="account-test-metrics"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('打开弹窗、加载模型和修改选择都不会测试，手动开始后仅发起一次请求', async () => {
+    let finishModels!: (models: Array<{ id: string; display_name: string }>) => void
+    getAvailableModels.mockImplementationOnce(() => new Promise(resolve => { finishModels = resolve }))
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.attributes('disabled')).toBeDefined()
+
+    finishModels([
+      { id: 'gemini-3.1-flash-image', display_name: 'Gemini Image' },
+      { id: 'gemini-2.0-flash', display_name: 'Gemini Flash' }
+    ])
+    await flushPromises()
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('admin.accounts.readyToTest')
+    expect(wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('select.select-stub').setValue('gemini-2.0-flash')
+    await wrapper.setProps({ account: { ...wrapper.props('account')!, name: 'Renamed account' } })
+    await flushPromises()
+    expect(global.fetch).not.toHaveBeenCalled()
+
+    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(vi.mocked(global.fetch).mock.calls[0][1]!.body as string)).toEqual({
+      model_id: 'gemini-2.0-flash',
+      prompt: ''
+    })
+    wrapper.unmount()
+  })
+
+  it('等待模型时关闭弹窗，不会发起后台测试', async () => {
+    let finishModels!: (models: Array<{ id: string; display_name: string }>) => void
+    getAvailableModels.mockImplementationOnce(() => new Promise(resolve => { finishModels = resolve }))
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await wrapper.setProps({ show: false })
+    finishModels([{ id: 'gemini-2.0-flash', display_name: 'Gemini Flash' }])
+    await flushPromises()
+    expect(global.fetch).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('重新打开其他账号时忽略旧模型请求，手动开始后只测试当前账号', async () => {
+    let finishOldModels!: (models: Array<{ id: string; display_name: string }>) => void
+    getAvailableModels.mockImplementationOnce(() => new Promise(resolve => { finishOldModels = resolve }))
+    getAvailableModels.mockResolvedValueOnce([{ id: 'new-account-model', display_name: 'New model' }])
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true, account: { ...wrapper.props('account')!, id: 99 } })
+    await flushPromises()
+    finishOldModels([{ id: 'old-account-model', display_name: 'Old model' }])
+    await flushPromises()
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('Old model')
+    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(global.fetch).mock.calls[0][0]).toContain('/admin/accounts/99/test')
+    expect(JSON.parse(vi.mocked(global.fetch).mock.calls[0][1]!.body as string).model_id).toBe('new-account-model')
+    expect(wrapper.text()).not.toContain('Old model')
+    wrapper.unmount()
+  })
+
+  it('关闭手动测试会取消请求，重新打开等待点击且迟到的旧响应不会覆盖新测试结果', async () => {
+    let finishOldTest!: (response: Response) => void
+    global.fetch = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { finishOldTest = resolve }))
+      .mockResolvedValueOnce(createStreamResponse([
+        'data: {"type":"proxy_info","route_type":"managed","proxy_id":13,"proxy_name":"Current proxy"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])) as any
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(global.fetch).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+    const previousSignal = vi.mocked(global.fetch).mock.calls[0][1]!.signal!
+    await wrapper.setProps({ show: false })
+    expect(previousSignal.aborted).toBe(true)
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('admin.accounts.readyToTest')
+    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+    finishOldTest(createStreamResponse([
+      'data: {"type":"proxy_info","route_type":"managed","proxy_id":12,"proxy_name":"Old proxy"}\n',
+      'data: {"type":"error","error":"Old test failure"}\n'
+    ]))
+    await flushPromises()
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('Current proxy')
+    expect(wrapper.text()).not.toContain('Old proxy')
+    expect(wrapper.text()).not.toContain('Old test failure')
+    expect(wrapper.text()).toContain('admin.accounts.testCompleted')
+    wrapper.unmount()
+  })
+
+  it('缺少测试模型时显示原因且不发送无效请求', async () => {
+    getAvailableModels.mockResolvedValueOnce([])
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.accounts.testNoModelsAvailable')
+    expect(global.fetch).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('测试模型加载失败时显示可理解的错误', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    getAvailableModels.mockRejectedValueOnce(new Error('model fetch failed'))
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.accounts.testModelsLoadFailed')
+    expect(global.fetch).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

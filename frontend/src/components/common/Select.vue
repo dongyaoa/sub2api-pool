@@ -460,12 +460,30 @@ const onDropdownKeyDown = (e: KeyboardEvent) => {
       break
     case 'Escape':
       e.preventDefault()
+      e.stopPropagation()
       isOpen.value = false
       triggerRef.value?.focus()
       break
-    case 'Tab':
+    case 'Tab': {
+      // Custom slots may contain actions (for example proxy connection tests).
+      // Keep those reachable before leaving the teleported dropdown.
+      const focusable = Array.from(dropdownRef.value?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]'
+      ) ?? []).filter(element => element.tabIndex >= 0 && !element.closest('[hidden], [inert]'))
+      const index = focusable.indexOf(e.target as HTMLElement)
+      const nextIndex = index + (e.shiftKey ? -1 : 1)
+      if (index >= 0 && nextIndex >= 0 && nextIndex < focusable.length) {
+        e.preventDefault()
+        focusable[nextIndex].focus()
+        break
+      }
       isOpen.value = false
+      // Restore the trigger as the tab-order anchor. Forward Tab can then move
+      // to the next field instead of escaping to the end of document.body.
+      triggerRef.value?.focus()
+      if (e.shiftKey) e.preventDefault()
       break
+    }
   }
 }
 

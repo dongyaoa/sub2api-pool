@@ -75,7 +75,10 @@ export default {
       dataExportFailed: 'Failed to export data',
       copyProxyUrl: 'Copy Proxy URL',
       urlCopied: 'Proxy URL copied',
-      searchProxies: 'Search proxies...',
+      searchProxies: 'Search name, address, IP or location…',
+      selectorAvailable: '{count} available proxies',
+      testVisible: 'Test filtered proxies',
+      usedByAccounts: '{count} accounts',
       allProtocols: 'All Protocols',
       allStatus: 'All Status',
       protocols: {

@@ -49,8 +49,9 @@ func NewIntelligenceMonitorService(repo IntelligenceMonitorRepository, encryptor
 		port = cfg.Server.Port
 	}
 	localEndpoint := "http://127.0.0.1:" + strconv.Itoa(port)
-	localTransport := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, ResponseHeaderTimeout: 300 * time.Second, MaxIdleConns: 4, IdleConnTimeout: 90 * time.Second}
-	return &IntelligenceMonitorService{repo: repo, encryptor: encryptor, upstreams: upstreamRepo, groups: groupRepo, keys: apiKeys, finance: finance, cfg: cfg, externalClient: newSSRFSafeHTTPClientWithHeaderTimeout(300*time.Second, 300*time.Second), localClient: &http.Client{Timeout: 300 * time.Second, Transport: localTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, localEndpoint: localEndpoint, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 2), wake: make(chan struct{}, 1)}
+	requestTimeout := time.Duration(IntelligenceMonitorMaxTimeoutSeconds) * time.Second
+	localTransport := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, ResponseHeaderTimeout: requestTimeout, MaxIdleConns: 4, IdleConnTimeout: 90 * time.Second}
+	return &IntelligenceMonitorService{repo: repo, encryptor: encryptor, upstreams: upstreamRepo, groups: groupRepo, keys: apiKeys, finance: finance, cfg: cfg, externalClient: newSSRFSafeHTTPClientWithHeaderTimeout(requestTimeout, requestTimeout), localClient: &http.Client{Timeout: requestTimeout, Transport: localTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, localEndpoint: localEndpoint, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 2), wake: make(chan struct{}, 1)}
 }
 
 func (s *IntelligenceMonitorService) ListPlans(ctx context.Context) ([]*IntelligenceMonitorPlan, error) {
@@ -124,7 +125,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 	if actorID <= 0 {
 		return nil, ErrIntelligenceInvalid
 	}
-	p := &IntelligenceMonitorPlan{SourceType: "external", APIMode: MonitorAPIModeResponses, IntervalSeconds: 3600, TimeoutSeconds: 300, CreatedBy: actorID}
+	p := &IntelligenceMonitorPlan{SourceType: "external", APIMode: MonitorAPIModeResponses, IntervalSeconds: 3600, TimeoutSeconds: IntelligenceMonitorDefaultTimeoutSeconds, CreatedBy: actorID}
 	var old *IntelligenceMonitorPlan
 	if id > 0 {
 		var err error
@@ -136,9 +137,19 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		old = &copy
 	}
 	if id > 0 && intelligenceEnabledOnly(in) {
-		if p.SourceType == "openai_oauth" && p.AccountID != nil && s.accounts != nil {
-			if account, e := s.accounts.GetByID(ctx, *p.AccountID); e == nil {
+		if p.SourceType == "openai_oauth" {
+			if *in.Enabled {
+				account, err := s.intelligenceOAuthAccount(ctx, p.AccountID)
+				if err != nil {
+					return nil, err
+				}
 				p.Name, p.SourceName = account.Name, account.Name
+			} else if p.AccountID != nil && s.accounts != nil {
+				// Pausing must remain possible after an account is disabled,
+				// deleted or temporarily unavailable.
+				if account, e := s.accounts.GetByID(ctx, *p.AccountID); e == nil && account != nil {
+					p.Name, p.SourceName = account.Name, account.Name
+				}
 			}
 		}
 		p.Enabled = *in.Enabled
@@ -183,7 +194,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		}
 	}
 	if p.SourceType == "openai_oauth" {
-		account, err := s.intelligenceOAuthAccount(ctx, p.AccountID, false)
+		account, err := s.intelligenceOAuthAccount(ctx, p.AccountID)
 		if err != nil {
 			return nil, err
 		}
@@ -191,7 +202,13 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		p.Name, p.SourceName = account.Name, account.Name
 		p.APIMode = MonitorAPIModeResponses
 	}
-	if p.Name == "" || utf8.RuneCountInString(p.Name) > 100 || len(p.Endpoint) > 500 || len(p.SupplierNote) > 500 || len(p.GroupNote) > 500 || len(p.RateNote) > 500 || len(p.Notes) > 4000 || p.IntervalSeconds < 300 || p.IntervalSeconds > 86400 || p.TimeoutSeconds < 180 || p.TimeoutSeconds > 300 {
+	if p.IntervalSeconds < 30 || p.IntervalSeconds > 86400 {
+		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "interval_seconds", "detail": "choose an integer interval between 30 and 86400 seconds"})
+	}
+	if p.TimeoutSeconds < IntelligenceMonitorMinTimeoutSeconds || p.TimeoutSeconds > IntelligenceMonitorMaxTimeoutSeconds {
+		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "timeout_seconds", "detail": "choose an integer timeout between 180 and 900 seconds"})
+	}
+	if p.Name == "" || utf8.RuneCountInString(p.Name) > 100 || len(p.Endpoint) > 500 || len(p.SupplierNote) > 500 || len(p.GroupNote) > 500 || len(p.RateNote) > 500 || len(p.Notes) > 4000 {
 		return nil, ErrIntelligenceInvalid
 	}
 	if p.APIMode != MonitorAPIModeResponses && p.APIMode != MonitorAPIModeChatCompletions {
@@ -349,7 +366,7 @@ func (s *IntelligenceMonitorService) enqueue(ctx context.Context, id int64, sche
 		run.SourceSnapshot["account_id"] = p.AccountID
 		run.SourceSnapshot["auth_type"] = "oauth"
 		run.SourceSnapshot["oauth"] = true
-		if account, e := s.intelligenceOAuthAccount(ctx, p.AccountID, false); e != nil {
+		if account, e := s.intelligenceOAuthAccount(ctx, p.AccountID); e != nil {
 			run.SourceSnapshot["resolution_error"] = "selected OpenAI OAuth account is unavailable"
 		} else {
 			run.PlanName, run.SourceName = account.Name, account.Name

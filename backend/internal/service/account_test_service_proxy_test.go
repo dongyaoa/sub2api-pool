@@ -158,6 +158,29 @@ func TestAccountTestConnectionProxyMatchesTransport(t *testing.T) {
 	}
 }
 
+func TestAccountTestConnectionAutomaticProxyRotatesAcrossTests(t *testing.T) {
+	account := accountTestProxyFixture()
+	account.ID = 9401
+	account.ProxyPool[0].Concurrency = 20
+	account.ProxyPool[1].Concurrency = 20
+	account.ProxyPool[0].Proxy.Status = StatusActive
+	account.ProxyPool[0].Proxy.Protocol = "http"
+	account.ProxyPool[0].Proxy.Host = "first-proxy.example"
+	account.ProxyPool[0].Proxy.Port = 8080
+	for i := 0; i < 4; i++ {
+		upstream := &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK, Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader("data: {\"type\":\"message_stop\"}\n\n")),
+		}}
+		events, _, err := runAccountProxyTest(t, account, upstream)
+		require.NoError(t, err)
+		want := account.ProxyPool[i%2].Proxy
+		require.Equal(t, want.ID, *events[0].ProxyID)
+		require.Equal(t, want.URL(), upstream.lastProxyURL)
+		require.False(t, account.ProxyPoolSelected)
+	}
+}
+
 func TestAccountTestConnectionUnavailablePoolDoesNotSendRequest(t *testing.T) {
 	for _, unavailable := range []string{"inactive", "expired", "missing hydration", "deleted pool"} {
 		t.Run(unavailable, func(t *testing.T) {

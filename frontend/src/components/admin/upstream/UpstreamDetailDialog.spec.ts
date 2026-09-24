@@ -18,8 +18,17 @@ function target(): UpstreamTarget {
 }
 let wrapper: VueWrapper | undefined
 function render(selected: UpstreamHistoryRecord | null = null) {
-  wrapper = mount(UpstreamDetailDialog, { props: { show: true, supplier: null, target: target(), model: 'model-a', record: selected, window: '24h', busy: false }, global: { stubs: { BaseDialog: dialog, UpstreamFinancePanel: finance, UpstreamHistoryBar: true, UpstreamWallet: true, UpstreamStatusBadge: true, Icon: true, Pagination: true } } })
+  wrapper = mount(UpstreamDetailDialog, { props: { show: true, supplier: null, target: target(), model: 'model-a', record: selected, window: '24h', busy: false }, global: { stubs: { BaseDialog: dialog, UpstreamFinancePanel: finance, UpstreamHistoryBar: true, UpstreamWallet: true, UpstreamStatusBadge: true, Icon: true, Pagination: true, teleport: true, transition: true } } })
   return wrapper
+}
+async function choose(view: VueWrapper, selector: string, label: string) {
+  const trigger = view.get(selector)
+  await trigger.trigger('click')
+  expect(trigger.attributes('aria-expanded')).toBe('true')
+  expect(view.find('.select-search-input').exists()).toBe(false)
+  await view.findAll('[role="option"]').find(option => option.text() === label)!.trigger('click')
+  expect(trigger.attributes('aria-expanded')).toBe('false')
+  expect(trigger.text()).toBe(label)
 }
 beforeEach(() => { vi.resetAllMocks(); history.mockResolvedValue({ items: [record('model-a')], total: 1, page: 1, page_size: 50 }) })
 afterEach(() => { wrapper?.unmount(); wrapper = undefined })
@@ -31,7 +40,7 @@ describe('upstream history filter lifecycle', () => {
     expect(view.text()).toContain('upstreamCenter.history.selected')
     let rejectHistory: (error: unknown) => void = () => undefined
     history.mockReturnValueOnce(new Promise((_, reject) => { rejectHistory = reject }))
-    await view.get('#history-model').setValue('model-b')
+    await choose(view, '#history-model', 'model-b')
     expect(history).toHaveBeenLastCalledWith(9, expect.objectContaining({ model: 'model-b', page: 1 }), expect.any(AbortSignal))
     expect(view.text()).not.toContain('upstreamCenter.history.selected')
     expect(view.text()).not.toContain('model-a record detail')
@@ -71,23 +80,24 @@ describe('upstream history filter lifecycle', () => {
     expect(history).toHaveBeenCalledTimes(2)
     expect(view.text()).toContain('upstreamCenter.history.selected')
     expect(view.text()).toContain('model-b record detail')
-    expect((view.get('#history-model').element as HTMLSelectElement).value).toBe('model-b')
+    expect(view.get('#history-model').text()).toBe('model-b')
   })
   it('keeps the chosen model and time range when an overview refresh replaces the same target', async () => {
     const view = render()
     await flushPromises()
     history.mockResolvedValue({ items: [record('model-b')], total: 1, page: 1, page_size: 50 })
-    await view.get('#history-model').setValue('model-b')
+    await choose(view, '#history-model', 'model-b')
     await flushPromises()
-    await view.get('#history-window').setValue('7d')
+    await choose(view, '#history-window', 'upstreamCenter.ranges.7d')
+    expect(view.emitted('window-change')?.at(-1)).toEqual(['7d'])
     await flushPromises()
     await view.get('tbody button').trigger('click')
     const requestCount = history.mock.calls.length
 
     await view.setProps({ target: { ...target(), name: 'Refreshed group' } })
     await flushPromises()
-    expect((view.get('#history-model').element as HTMLSelectElement).value).toBe('model-b')
-    expect((view.get('#history-window').element as HTMLSelectElement).value).toBe('7d')
+    expect(view.get('#history-model').text()).toBe('model-b')
+    expect(view.get('#history-window').text()).toBe('upstreamCenter.ranges.7d')
     expect(view.text()).toContain('upstreamCenter.history.selected')
     expect(history).toHaveBeenCalledTimes(requestCount)
   })

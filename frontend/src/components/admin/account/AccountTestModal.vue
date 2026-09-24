@@ -41,20 +41,6 @@
         </span>
       </div>
 
-      <div class="space-y-1.5">
-        <label for="account-test-proxy" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {{ t('admin.accounts.testProxyOptions.label') }}
-        </label>
-        <Select
-          id="account-test-proxy"
-          v-model="selectedProxyId"
-          :options="proxyOptions"
-          :disabled="status === 'connecting'"
-          :aria-label="t('admin.accounts.testProxyOptions.label')"
-          data-testid="account-test-proxy-select"
-        />
-      </div>
-
       <!-- Grok: mode first, then optional model / mode params -->
       <div v-if="isGrokAccount" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -379,17 +365,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import { Icon } from '@/components/icons'
 import { useClipboard } from '@/composables/useClipboard'
 import { buildApiUrl } from '@/api/client'
 import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
-import type { Account, AccountProxyPoolEntry, ClaudeModel } from '@/types'
+import type { Account, ClaudeModel } from '@/types'
 
 const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
@@ -418,51 +404,12 @@ const status = ref<'idle' | 'connecting' | 'success' | 'error'>('idle')
 const outputLines = ref<OutputLine[]>([])
 const streamingContent = ref('')
 const errorMessage = ref('')
-const selectedProxyId = ref<number | null>(null)
-const proxyAvailabilityTime = ref(Date.now())
-const boundProxyEntries = computed<AccountProxyPoolEntry[]>(() => {
-  const account = props.account
-  if (!account) return []
-  const entries = account.proxy_pool?.length
-    ? account.proxy_pool
-    : account.proxy_id || account.proxy?.id
-      ? [{ proxy_id: account.proxy_id || account.proxy!.id, concurrency: 1, proxy: account.proxy ?? undefined }]
-      : []
-  const seen = new Set<number>()
-  return entries.filter(entry => {
-    if (!Number.isInteger(entry.proxy_id) || entry.proxy_id <= 0 || seen.has(entry.proxy_id)) return false
-    seen.add(entry.proxy_id)
-    return true
-  })
-})
-const proxyUnavailableReason = (entry: AccountProxyPoolEntry, now: number): string => {
-  if (!entry.proxy || entry.proxy.id !== entry.proxy_id) return 'unavailable'
-  if (entry.proxy.status === 'expired') return 'expired'
-  if (entry.proxy.status !== 'active') return 'inactive'
-  if (entry.proxy.expires_at) {
-    const expiresAt = Date.parse(entry.proxy.expires_at)
-    if (!Number.isFinite(expiresAt)) return 'unavailable'
-    if (expiresAt <= now) return 'expired'
-  }
-  return ''
-}
-const proxyOptions = computed<SelectOption[]>(() => [
-  { value: null, label: t('admin.accounts.testProxyOptions.auto') },
-  ...boundProxyEntries.value.map(entry => {
-    const reason = proxyUnavailableReason(entry, proxyAvailabilityTime.value)
-    const name = entry.proxy?.name || `#${entry.proxy_id}`
-    return {
-      value: entry.proxy_id,
-      label: `${name} (ID: ${entry.proxy_id})${reason ? ` - ${t(`admin.accounts.testProxyOptions.${reason}`)}` : ''}`,
-      disabled: Boolean(reason)
-    }
-  })
-])
 const availableModels = ref<ClaudeModel[]>([])
 const selectedModelId = ref('')
 const testPrompt = ref('')
 const loadingModels = ref(false)
 let abortController: AbortController | null = null
+let modalSession = 0
 const generatedImages = ref<PreviewMedia[]>([])
 const generatedAudios = ref<PreviewMedia[]>([])
 const generatedVideos = ref<PreviewMedia[]>([])
@@ -728,8 +675,7 @@ const testModeSummary = computed(() => {
 })
 
 const canStartTest = computed(() => {
-  if (status.value === 'connecting') return false
-  if (selectedProxyId.value !== null && !proxyOptions.value.some(option => option.value === selectedProxyId.value && !option.disabled)) return false
+  if (loadingModels.value || status.value === 'connecting') return false
   if (isGrokAccount.value) {
     if (
       grokTestMode.value === 'search' ||
@@ -789,22 +735,26 @@ const pickDefaultModelForMode = () => {
 }
 
 watch(
-  () => props.show,
-  async (newVal) => {
-    if (newVal && props.account) {
-      selectedProxyId.value = null
-      proxyAvailabilityTime.value = Date.now()
+  [() => props.show, () => props.account?.id],
+  async ([show]) => {
+    const session = ++modalSession
+    abortStream()
+    if (show && props.account) {
       testPrompt.value = ''
       testMode.value = 'default'
       grokTestMode.value = 'text'
+      clearMediaUploads()
       resetState()
-      await loadAvailableModels()
+      await loadAvailableModels(props.account, session)
+      if (session !== modalSession || !props.show) return
       if (isGrokAccount.value) {
         pickDefaultModelForMode()
-        applyDefaultPromptForMode()
       }
-    } else {
-      abortStream()
+      if (!selectedModelId.value && status.value !== 'error') {
+        status.value = 'error'
+        errorMessage.value = t('admin.accounts.testNoModelsAvailable')
+      }
+      applyDefaultPromptForMode()
     }
   }
 )
@@ -817,19 +767,19 @@ watch(grokTestMode, () => {
   applyDefaultPromptForMode()
 })
 
-const loadAvailableModels = async () => {
-  if (!props.account) return
-
+const loadAvailableModels = async (account: Account, session: number) => {
   loadingModels.value = true
+  availableModels.value = []
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = await adminAPI.accounts.getAvailableModels(props.account.id)
-    availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
+    const models = await adminAPI.accounts.getAvailableModels(account.id)
+    if (session !== modalSession || !props.show) return
+    availableModels.value = account.platform === 'gemini' || account.platform === 'antigravity'
       ? sortTestModels(models)
       : models
     // Default selection by platform
     if (availableModels.value.length > 0) {
-      if (props.account.platform === 'gemini') {
+      if (account.platform === 'gemini') {
         selectedModelId.value = availableModels.value[0].id
       } else {
         // Try to select Sonnet as default, otherwise use first model
@@ -838,12 +788,15 @@ const loadAvailableModels = async () => {
       }
     }
   } catch (error) {
+    if (session !== modalSession || !props.show) return
     console.error('Failed to load available models:', error)
     // Fallback to empty list
     availableModels.value = []
     selectedModelId.value = ''
+    status.value = 'error'
+    errorMessage.value = t('admin.accounts.testModelsLoadFailed')
   } finally {
-    loadingModels.value = false
+    if (session === modalSession) loadingModels.value = false
   }
 }
 
@@ -859,6 +812,7 @@ const resetState = () => {
 }
 
 const handleClose = () => {
+  modalSession++
   abortStream()
   emit('close')
 }
@@ -869,6 +823,11 @@ const abortStream = () => {
     abortController = null
   }
 }
+
+onBeforeUnmount(() => {
+  modalSession++
+  abortStream()
+})
 
 const addLine = (text: string, className: string = 'text-gray-300') => {
   outputLines.value.push({ text, class: className })
@@ -883,8 +842,7 @@ const scrollToBottom = async () => {
 }
 
 const startTest = async () => {
-  proxyAvailabilityTime.value = Date.now()
-  if (!props.account || !canStartTest.value) return
+  if (!props.show || !props.account || !canStartTest.value) return
 
   resetState()
   status.value = 'connecting'
@@ -899,7 +857,8 @@ const startTest = async () => {
 
   abortStream()
 
-  abortController = new AbortController()
+  const controller = new AbortController()
+  abortController = controller
 
   try {
     const requestBody: {
@@ -908,12 +867,10 @@ const startTest = async () => {
       mode?: string
       image_data_url?: string
       audio_data_url?: string
-      proxy_id?: number
     } = {
       model_id: showModelSelect.value ? selectedModelId.value : '',
       prompt: supportsPromptInput.value ? testPrompt.value.trim() : ''
     }
-    if (selectedProxyId.value !== null) requestBody.proxy_id = selectedProxyId.value
     if (isOpenAIAccount.value) {
       requestBody.mode = testMode.value
     }
@@ -949,8 +906,10 @@ const startTest = async () => {
         [ADMIN_UI_REQUEST_HEADER]: '1'
       },
       body: JSON.stringify(requestBody),
-      signal: abortController.signal
+      signal: controller.signal
     })
+
+    if (abortController !== controller) return
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
@@ -966,6 +925,7 @@ const startTest = async () => {
 
     while (true) {
       const { done, value } = await reader.read()
+      if (abortController !== controller) return
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
@@ -987,6 +947,7 @@ const startTest = async () => {
       }
     }
   } catch (error: unknown) {
+    if (abortController !== controller) return
     if (error instanceof DOMException && error.name === 'AbortError') {
       status.value = 'idle'
       return
@@ -995,6 +956,8 @@ const startTest = async () => {
     const msg = error instanceof Error ? error.message : t('common.unknownError')
     errorMessage.value = msg
     addLine(t('admin.accounts.errorPrefix', { message: msg }), 'text-red-400')
+  } finally {
+    if (abortController === controller) abortController = null
   }
 }
 

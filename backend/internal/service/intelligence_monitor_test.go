@@ -190,6 +190,41 @@ func TestIntelligenceExternalEndpointAndSecretValidation(t *testing.T) {
 	require.ErrorIs(t, err, ErrChannelMonitorInvalidEndpoint)
 }
 
+func TestIntelligenceCustomSecondIntervalAndGenerationTimeoutBounds(t *testing.T) {
+	name, endpoint, key := "Custom seconds", "https://8.8.8.8", "test-private-key"
+	for _, seconds := range []int{-1, 0, 29, 30, 31, 97, 300, 3600, 86400, 86401} {
+		repo := &intelligenceTestRepository{}
+		svc := NewIntelligenceMonitorService(repo, upstreamTestEncryptor{}, nil, nil, nil, nil, nil)
+		plan, err := svc.SavePlan(context.Background(), 0, 1, IntelligenceMonitorInput{Name: &name, Endpoint: &endpoint, APIKey: &key, IntervalSeconds: &seconds})
+		if seconds < 30 || seconds > 86400 {
+			require.ErrorIs(t, err, ErrIntelligenceInvalid)
+			require.Nil(t, repo.saved)
+		} else {
+			require.NoError(t, err)
+			require.Equal(t, seconds, plan.IntervalSeconds)
+			require.Equal(t, seconds, repo.saved.IntervalSeconds)
+			require.Equal(t, 900, plan.TimeoutSeconds)
+			require.False(t, plan.Enabled)
+		}
+	}
+	for _, timeout := range []int{179, 180, 240, 300, 301, 600, 900, 901} {
+		repo := &intelligenceTestRepository{}
+		svc := NewIntelligenceMonitorService(repo, upstreamTestEncryptor{}, nil, nil, nil, nil, nil)
+		plan, err := svc.SavePlan(context.Background(), 0, 1, IntelligenceMonitorInput{Name: &name, Endpoint: &endpoint, APIKey: &key, TimeoutSeconds: &timeout})
+		if timeout < 180 || timeout > 900 {
+			require.ErrorIs(t, err, ErrIntelligenceInvalid)
+		} else {
+			require.NoError(t, err)
+			require.Equal(t, 3600, plan.IntervalSeconds, "the default remains one hour")
+			require.Equal(t, timeout, plan.TimeoutSeconds)
+		}
+	}
+	for _, raw := range []string{`{"interval_seconds":30.5}`, `{"interval_seconds":"30"}`, `{"timeout_seconds":899.5}`, `{"timeout_seconds":"900"}`} {
+		var input IntelligenceMonitorInput
+		require.Error(t, json.Unmarshal([]byte(raw), &input), "the API accepts integer JSON seconds only")
+	}
+}
+
 func TestIntelligenceLocalRouteCannotUseSourceEndpointAsOverride(t *testing.T) {
 	cfg := &config.Config{Server: config.ServerConfig{Port: 9876}}
 	svc := NewIntelligenceMonitorService(nil, nil, nil, nil, nil, nil, cfg)
@@ -198,7 +233,39 @@ func TestIntelligenceLocalRouteCannotUseSourceEndpointAsOverride(t *testing.T) {
 	require.Equal(t, "http://127.0.0.1:9876", endpoint)
 	require.Nil(t, client.Transport.(*http.Transport).Proxy)
 	require.ErrorIs(t, client.CheckRedirect(nil, nil), http.ErrUseLastResponse)
-	require.Equal(t, 300*time.Second, client.Timeout)
+	require.Equal(t, 900*time.Second, client.Timeout)
+	require.Equal(t, 900*time.Second, client.Transport.(*http.Transport).ResponseHeaderTimeout)
+	require.Equal(t, 900*time.Second, svc.externalClient.Timeout)
+}
+
+func TestIntelligenceHTTPExecutionKeepsCapturedTimeoutAcrossSources(t *testing.T) {
+	for _, source := range []string{"external", "upstream", "local_group"} {
+		for _, timeout := range []int{180, 240, 300, 600, 900} {
+			repo := &intelligenceTestRepository{}
+			groupID, keyID := int64(9), int64(22)
+			key := "generation-fixture-key"
+			upstreams := &upstreamTestRepo{target: &UpstreamTarget{ID: 7, Name: "fixture", Endpoint: "https://8.8.8.8", APIKeyEncrypted: "encrypted:" + key}}
+			keyRepo := &intelligenceKeyRepoStub{key: &APIKey{ID: keyID, UserID: 1, GroupID: &groupID, Key: key, Status: StatusActive}}
+			svc := NewIntelligenceMonitorService(repo, upstreamTestEncryptor{}, upstreams, nil, &APIKeyService{apiKeyRepo: keyRepo}, nil, nil)
+			calls := 0
+			client := &http.Client{Transport: upstreamModelsTransport(func(request *http.Request) (*http.Response, error) {
+				if request.Method == http.MethodGet {
+					return &http.Response{StatusCode: 404, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("unsupported billing fixture"))}, nil
+				}
+				calls++
+				deadline, bound := request.Context().Deadline()
+				require.True(t, bound)
+				require.InDelta(t, float64(timeout), time.Until(deadline).Seconds(), 2, "source=%s", source)
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"output_text":"<html><svg></svg></html>","status":"completed"}`))}, nil
+			})}
+			svc.externalClient, svc.localClient = client, client
+			run := &IntelligenceMonitorRun{ID: 11, PlanID: 3, SourceType: source, SourceEndpoint: "https://8.8.8.8", RequestKeyEncrypted: "encrypted:" + key, TimeoutSeconds: timeout, APIMode: "responses", SourceSnapshot: map[string]any{"upstream_target_id": int64(7), "local_api_key_id": keyID, "group_id": groupID}}
+			svc.execute(run)
+			require.Equal(t, 1, calls)
+			require.Equal(t, "succeeded", repo.completed.Status)
+			require.Equal(t, timeout, repo.completed.TimeoutSeconds)
+		}
+	}
 }
 
 func TestIntelligenceExtractsArtifactsAndRetainsIncompleteText(t *testing.T) {

@@ -65,6 +65,7 @@ func TestIntelligenceOAuthUsesAccountNameAndNeverCopiesCredentials(t *testing.T)
 	plan, err := svc.SavePlan(context.Background(), 0, 1, IntelligenceMonitorInput{SourceType: &source, AccountID: json.RawMessage(`55`), Name: &name, APIKey: &key, Endpoint: &endpoint})
 	require.NoError(t, err)
 	require.Equal(t, accounts.account.Name, plan.Name)
+	require.Equal(t, 900, plan.TimeoutSeconds)
 	require.True(t, plan.OAuth)
 	require.Equal(t, "responses", plan.APIMode)
 	require.Empty(t, plan.APIKeyEncrypted)
@@ -75,6 +76,7 @@ func TestIntelligenceOAuthUsesAccountNameAndNeverCopiesCredentials(t *testing.T)
 	run, err := svc.Enqueue(context.Background(), 3)
 	require.NoError(t, err)
 	require.Equal(t, accounts.account.Name, run.PlanName)
+	require.Equal(t, 900, run.TimeoutSeconds)
 	require.True(t, run.OAuth)
 	require.Empty(t, run.RequestKeyEncrypted)
 	encoded, err := json.Marshal(run)
@@ -121,10 +123,90 @@ func TestIntelligenceOAuthRejectsOtherCredentialsAndChangedRouting(t *testing.T)
 	}
 }
 
+func TestIntelligenceOAuthSaveEnableAndExecutionRequireUsableAccount(t *testing.T) {
+	future, past := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
+	for _, test := range []struct {
+		name   string
+		change func(*Account)
+	}{
+		{"inactive", func(a *Account) { a.Status = "inactive" }},
+		{"error", func(a *Account) { a.Status = StatusError }},
+		{"paused", func(a *Account) { a.Schedulable = false }},
+		{"expired", func(a *Account) { a.AutoPauseOnExpired = true; a.ExpiresAt = &past }},
+		{"overloaded", func(a *Account) { a.OverloadUntil = &future }},
+		{"rate limited", func(a *Account) { a.RateLimitResetAt = &future }},
+		{"cooling down", func(a *Account) { a.TempUnschedulableUntil = &future }},
+		{"shadow", func(a *Account) { parent := int64(3); a.ParentAccountID = &parent }},
+		{"synthetic", func(a *Account) { a.Extra = map[string]any{"synthetic_ui_test": true} }},
+		{"different type", func(a *Account) { a.Type = AccountTypeAPIKey }},
+		{"remapped model", func(a *Account) {
+			a.Credentials["model_mapping"] = map[string]any{IntelligenceMonitorModel: "another-model"}
+		}},
+		{"unsupported model", func(a *Account) { a.Credentials["model_mapping"] = map[string]any{"another-model": "another-model"} }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, accounts, slots := intelligenceOAuthFixture()
+			repo := &intelligenceTestRepository{}
+			svc.repo = repo
+			test.change(accounts.account)
+			source := "openai_oauth"
+			_, err := svc.SavePlan(context.Background(), 0, 1, IntelligenceMonitorInput{SourceType: &source, AccountID: json.RawMessage(`55`)})
+			require.ErrorIs(t, err, ErrIntelligenceInvalid)
+			require.Nil(t, repo.saved)
+			repo.plan = &IntelligenceMonitorPlan{ID: 3, Name: "Existing", SourceType: source, AccountID: &accounts.account.ID, APIMode: MonitorAPIModeResponses, IntervalSeconds: 3600, TimeoutSeconds: 300}
+			notes := "Update existing plan"
+			_, err = svc.SavePlan(context.Background(), 3, 1, IntelligenceMonitorInput{Notes: &notes})
+			require.ErrorIs(t, err, ErrIntelligenceInvalid)
+			enabled := true
+			_, err = svc.SavePlan(context.Background(), 3, 1, IntelligenceMonitorInput{Enabled: &enabled})
+			require.ErrorIs(t, err, ErrIntelligenceInvalid, "the enabled-only fast path must revalidate the account")
+			require.Nil(t, repo.saved)
+			called := false
+			svc.oauthForward = intelligenceOAuthForwardFunc(func(context.Context, *gin.Context, *Account, []byte) (*OpenAIForwardResult, error) {
+				called = true
+				return nil, nil
+			})
+			_, _, message := svc.generateOpenAIOAuth(context.Background(), intelligenceOAuthRun())
+			require.NotEmpty(t, message)
+			require.False(t, called)
+			require.Zero(t, slots.accountID, "unavailable accounts must fail before concurrency acquisition")
+			enabled = false
+			_, err = svc.SavePlan(context.Background(), 3, 1, IntelligenceMonitorInput{Enabled: &enabled})
+			require.NoError(t, err, "pausing remains possible when the source becomes unusable")
+			require.False(t, repo.saved.Enabled)
+		})
+	}
+}
+
+func TestIntelligenceOAuthEnableAcceptsRecoveredAccountAndPauseMissingAccount(t *testing.T) {
+	svc, accounts, _ := intelligenceOAuthFixture()
+	past, future := time.Now().Add(-time.Minute), time.Now().Add(time.Hour)
+	accounts.account.OverloadUntil = &past
+	accounts.account.RateLimitResetAt = &past
+	accounts.account.TempUnschedulableUntil = &past
+	accounts.account.AutoPauseOnExpired = true
+	accounts.account.ExpiresAt = &future
+	id := accounts.account.ID
+	repo := &intelligenceTestRepository{plan: &IntelligenceMonitorPlan{ID: 3, Name: "Existing", SourceType: "openai_oauth", AccountID: &id}}
+	svc.repo = repo
+	enabled := true
+	plan, err := svc.SavePlan(context.Background(), 3, 1, IntelligenceMonitorInput{Enabled: &enabled})
+	require.NoError(t, err)
+	require.True(t, plan.Enabled)
+	require.Equal(t, accounts.account.Name, plan.Name)
+	accounts.account = nil
+	_, err = svc.SavePlan(context.Background(), 3, 1, IntelligenceMonitorInput{Enabled: &enabled})
+	require.ErrorIs(t, err, ErrIntelligenceInvalid)
+	enabled = false
+	plan, err = svc.SavePlan(context.Background(), 3, 1, IntelligenceMonitorInput{Enabled: &enabled})
+	require.NoError(t, err)
+	require.False(t, plan.Enabled)
+}
+
 func TestIntelligenceOAuthForwardsExactAccountPromptAndBoundedContext(t *testing.T) {
 	svc, accounts, slots := intelligenceOAuthFixture()
 	run := intelligenceOAuthRun()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	svc.oauthForward = intelligenceOAuthForwardFunc(func(forwardCtx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 		require.Equal(t, int64(55), account.ID)
@@ -202,8 +284,9 @@ func TestIntelligenceOAuthRealGatewayUsesTokenProviderAndAccountProxy(t *testing
 	gateway.openAITokenProvider = NewOpenAITokenProvider(accounts, cache, nil)
 	gateway.accountRepo = accounts
 	svc.oauthForward = gateway
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
+	deadline, _ := ctx.Deadline()
 	status, raw, message := svc.generateOpenAIOAuth(ctx, intelligenceOAuthRun())
 	require.Empty(t, message)
 	require.Equal(t, 200, *status)
@@ -214,8 +297,33 @@ func TestIntelligenceOAuthRealGatewayUsesTokenProviderAndAccountProxy(t *testing
 	require.Equal(t, IntelligenceMonitorModel, gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, slots.released)
 	require.Len(t, upstream.requests, 1)
-	_, bound := upstream.lastReq.Context().Deadline()
+	upstreamDeadline, bound := upstream.lastReq.Context().Deadline()
 	require.True(t, bound)
+	require.Equal(t, deadline, upstreamDeadline, "the real gateway must preserve the full generation deadline")
+	require.Equal(t, 15*time.Minute, HTTPUpstreamResponseHeaderTimeoutFromContext(upstream.lastReq.Context()))
+}
+
+func TestIntelligenceOAuthExecutionKeepsCapturedGenerationTimeout(t *testing.T) {
+	for _, timeout := range []int{180, 240, 300, 600, 900} {
+		svc, _, _ := intelligenceOAuthFixture()
+		repo := &intelligenceTestRepository{}
+		svc.repo = repo
+		run := intelligenceOAuthRun()
+		run.TimeoutSeconds = timeout
+		calls := 0
+		svc.oauthForward = intelligenceOAuthForwardFunc(func(ctx context.Context, c *gin.Context, _ *Account, _ []byte) (*OpenAIForwardResult, error) {
+			calls++
+			deadline, bound := ctx.Deadline()
+			require.True(t, bound)
+			require.InDelta(t, float64(timeout), time.Until(deadline).Seconds(), 2)
+			c.Data(200, "application/json", []byte(`{"output_text":"<html><svg></svg></html>","status":"completed"}`))
+			return &OpenAIForwardResult{UpstreamModel: IntelligenceMonitorModel}, nil
+		})
+		svc.execute(run)
+		require.Equal(t, 1, calls)
+		require.Equal(t, "succeeded", repo.completed.Status)
+		require.Equal(t, timeout, repo.completed.TimeoutSeconds)
+	}
 }
 
 func TestIntelligenceOAuthStopCancelsBoundUpstreamAndPersistsResult(t *testing.T) {

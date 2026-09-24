@@ -2,6 +2,7 @@ import { defineComponent } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import UpstreamTargetDialog from './UpstreamTargetDialog.vue'
+import Select from '@/components/common/Select.vue'
 import ModelTagInput from '@/components/admin/channel/ModelTagInput.vue'
 import type { UpstreamSupplier, UpstreamTarget } from '@/api/admin/upstreamCenter'
 
@@ -17,12 +18,22 @@ function target(): UpstreamTarget {
   return { id: 9, supplier_id: 2, name: 'Existing group', provider: 'openai', api_mode: 'responses', endpoint: 'https://example.com', api_key_masked: 'sk-***', models: ['gpt-test'], enabled: true, interval_seconds: 300, timeout_seconds: 45, degraded_threshold_ms: 6000, account_ids: [7], wallet_ref: 'shared', notes: '', statistics: [] } as unknown as UpstreamTarget
 }
 let wrapper: VueWrapper | undefined
-function render(item: UpstreamTarget | null = null, realModelInput = false, parentSupplier: UpstreamSupplier | null = supplier) {
-  wrapper = mount(UpstreamTargetDialog, { props: { show: true, target: item, supplier: parentSupplier }, global: { stubs: { BaseDialog: dialog, Select: select, Toggle: true, Icon: true, ModelTagInput: realModelInput ? false : tags } } })
+function render(item: UpstreamTarget | null = null, realModelInput = false, parentSupplier: UpstreamSupplier | null = supplier, realSelect = false) {
+  wrapper = mount(UpstreamTargetDialog, { attachTo: document.body, props: { show: true, target: item, supplier: parentSupplier }, global: { stubs: { BaseDialog: dialog, Select: realSelect ? false : select, Toggle: true, Icon: true, ModelTagInput: realModelInput ? false : tags, transition: true } } })
   return wrapper
 }
+async function chooseOption(view: VueWrapper, selector: string, text: string) {
+  await view.get(selector).trigger('click')
+  await flushPromises()
+  const option = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find(item => item.textContent?.includes(text))
+  expect(option).toBeDefined()
+  option!.click()
+  await flushPromises()
+  expect(view.get(selector).attributes('aria-expanded')).toBe('false')
+  expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+}
 beforeEach(() => { vi.resetAllMocks(); mocks.accounts.mockResolvedValue({ items: [{ id: 7, name: 'Imported account', platform: 'openai' }] }); mocks.account.mockResolvedValue({ id: 7, name: 'Imported account', platform: 'openai', credentials: { base_url: 'https://example.com' } }); mocks.models.mockResolvedValue(['gpt-test']); mocks.create.mockResolvedValue({}); mocks.update.mockResolvedValue({}) })
-afterEach(() => wrapper?.unmount())
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = '' })
 
 describe('upstream target credentials and form lifecycle', () => {
   it('imports a standalone monitor from a server-side credential reference without binding business accounts', async () => {
@@ -109,13 +120,20 @@ describe('upstream target credentials and form lifecycle', () => {
     expect(modelButton().attributes('disabled')).toBeUndefined()
   })
   it.each(['endpoint', 'provider', 'key'])('drops the imported credential reference when the %s is manually changed', async field => {
-    const view = render(null, true, null)
+    const view = render(null, true, null, field === 'provider')
     await flushPromises()
-    await view.get('.test-accounts').setValue('7')
+    if (field === 'provider') await chooseOption(view, '.select-trigger', 'Imported account')
+    else await view.get('.test-accounts').setValue('7')
     await view.findAll('button').find(button => button.text() === 'upstreamCenter.form.importAccount')!.trigger('click')
     await flushPromises()
     if (field === 'endpoint') await view.get('#target-endpoint').setValue('https://manual.example')
-    if (field === 'provider') await view.get('#target-provider').setValue('anthropic')
+    if (field === 'provider') {
+      expect(view.findAllComponents(Select).filter(item => !item.props('remote')).every(item => item.props('searchable') === false)).toBe(true)
+      expect(view.findAllComponents(Select)[0].props('remote')).toBe(true)
+      await chooseOption(view, '#target-provider', 'upstreamCenter.form.providerAnthropic')
+      expect(view.find('#target-api-mode').exists()).toBe(false)
+      expect(view.getComponent(ModelTagInput).props('platform')).toBe('anthropic')
+    }
     if (field === 'key') await view.get('#target-key').setValue('manual-key')
     expect(view.find('button[aria-label="upstreamCenter.remove Imported account"]').exists()).toBe(false)
     if (field !== 'key') {
@@ -126,7 +144,7 @@ describe('upstream target credentials and form lifecycle', () => {
     }
     await view.get('form').trigger('submit')
     await flushPromises()
-    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ account_ids: [], source_account_id: undefined, api_key: 'manual-key' }))
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ account_ids: [], source_account_id: undefined, api_key: 'manual-key', provider: field === 'provider' ? 'anthropic' : 'openai' }))
   })
   it('does not retain an imported source after closing and reopening a standalone editor', async () => {
     const item = { ...target(), supplier_id: null, account_ids: [] }
@@ -211,14 +229,22 @@ describe('upstream target credentials and form lifecycle', () => {
     expect(item.models).toEqual(['gpt-4o-mini', 'gpt-4o'])
     expect(view.emitted('saved')).toHaveLength(1)
   })
-  it('hydrates an initially open editor and keeps the secret out of the form and blank-key update', async () => {
-    const view = render(target())
+  it('hydrates saved selection and collapses the protocol picker while retaining a blank-key update', async () => {
+    const view = render(target(), false, supplier, true)
     await flushPromises()
     expect((view.get('#target-name').element as HTMLInputElement).value).toBe('Existing group')
     expect((view.get('#target-key').element as HTMLInputElement).value).toBe('')
+    expect(view.find('select').exists()).toBe(false)
+    expect(view.get('#target-api-mode').text()).toContain('Responses')
+    await view.get('#target-api-mode').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('.select-search-input')).toBeNull()
+    await view.get('#target-api-mode').trigger('click')
+    await chooseOption(view, '#target-api-mode', 'Chat Completions')
+    expect(view.get('#target-api-mode').text()).toContain('Chat Completions')
     await view.get('form').trigger('submit')
     await flushPromises()
-    expect(mocks.update).toHaveBeenCalledWith(9, expect.objectContaining({ api_key: undefined, account_ids: [7], models: ['gpt-test'], api_mode: 'responses' }))
+    expect(mocks.update).toHaveBeenCalledWith(9, expect.objectContaining({ api_key: undefined, account_ids: [7], models: ['gpt-test'], api_mode: 'chat_completions' }))
     expect(view.emitted('saved')).toHaveLength(1)
     expect(view.emitted('close')).toHaveLength(1)
   })

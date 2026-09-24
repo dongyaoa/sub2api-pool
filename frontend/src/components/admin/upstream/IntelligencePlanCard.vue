@@ -99,7 +99,12 @@ const completedWorks = computed(() => {
   }).slice(0, 20)
 })
 const works = computed(() => active.value && props.plan.latest_run ? [props.plan.latest_run, ...completedWorks.value] : completedWorks.value)
-const intervalLabel = computed(() => props.plan.interval_seconds < 3600 ? t('intelligenceMonitor.minutes', { count: props.plan.interval_seconds / 60 }) : t('intelligenceMonitor.hours', { count: props.plan.interval_seconds / 3600 }))
+const intervalLabel = computed(() => {
+  const seconds = props.plan.interval_seconds
+  if (seconds % 3600 === 0) return t('intelligenceMonitor.hours', { count: seconds / 3600 })
+  if (seconds % 60 === 0) return t('intelligenceMonitor.minutes', { count: seconds / 60 })
+  return t('intelligenceMonitor.seconds', { count: seconds })
+})
 function statusClass(status?: string) {
   if (status === 'succeeded') return 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400'
   if (status === 'failed') return 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'

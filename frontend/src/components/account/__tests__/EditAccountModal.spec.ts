@@ -55,6 +55,8 @@ vi.mock('vue-i18n', async () => {
 })
 
 import EditAccountModal from '../EditAccountModal.vue'
+import AccountProxyPoolEditor from '../AccountProxyPoolEditor.vue'
+import ProxySelector from '@/components/common/ProxySelector.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -329,6 +331,80 @@ describe('EditAccountModal', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('does not submit an empty pool when preserving a legacy single proxy', async () => {
+    const account = { ...buildAccount(), proxy_id: 7, concurrency: 12 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const payload = updateAccountMock.mock.calls[0][1]
+    expect(payload.proxy_id).toBe(7)
+    expect(payload.concurrency).toBe(12)
+    expect(payload).not.toHaveProperty('proxy_pool')
+    wrapper.unmount()
+  })
+
+  it('retains the next account single proxy when reopening after a pooled account', async () => {
+    const pooled = { ...buildAccount(), proxy_id: 1, proxy_pool: [{ proxy_id: 1, concurrency: 20 }], concurrency: 20 }
+    const legacy = { ...buildAccount(), id: 2, proxy_id: 7, concurrency: 9 }
+    updateAccountMock.mockReset().mockResolvedValue(legacy)
+    const wrapper = mountModal(pooled)
+    await flushPromises()
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true, account: legacy })
+    await flushPromises()
+
+    expect(wrapper.findComponent(ProxySelector).props('modelValue')).toBe(7)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0][1]).toMatchObject({ proxy_id: 7, concurrency: 9 })
+    expect(updateAccountMock.mock.calls[0][1]).not.toHaveProperty('proxy_pool')
+    wrapper.unmount()
+  })
+
+  it('sends an explicit pool clear plus the chosen replacement single proxy', async () => {
+    const account = { ...buildAccount(), proxy_id: 1, proxy_pool: [{ proxy_id: 1, concurrency: 20 }], concurrency: 20 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-testid="pool-remove"]').trigger('click')
+    const singleProxy = wrapper.findComponent(ProxySelector)
+    expect(singleProxy.props('modelValue')).toBeNull()
+    singleProxy.vm.$emit('update:modelValue', 7)
+    await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0][1]).toMatchObject({ proxy_pool: [], proxy_id: 7, concurrency: 20 })
+    wrapper.unmount()
+  })
+
+  it('submits only pool configuration while preserving hydrated proxy labels in the editor', async () => {
+    const proxy = { id: 1, name: 'Bound proxy', host: 'localhost', port: 8080, status: 'inactive' }
+    const account = { ...buildAccount(), proxy_id: 1, proxy_pool: [{ proxy_id: 1, concurrency: 20, proxy }], concurrency: 20 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.findComponent(AccountProxyPoolEditor).props('modelValue')[0].proxy).toEqual(proxy)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0][1].proxy_pool).toEqual([{ proxy_id: 1, concurrency: 20 }])
+    wrapper.unmount()
+  })
+
+  it('does not send inherited proxy fields when editing a shadow account', async () => {
+    const account = {
+      ...buildOpenAISparkShadowAccount(),
+      proxy_id: 1,
+      proxy_pool: [{ proxy_id: 1, concurrency: 20 }]
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const payload = updateAccountMock.mock.calls[0][1]
+    expect(payload).not.toHaveProperty('proxy_pool')
+    expect(payload).not.toHaveProperty('proxy_id')
+    wrapper.unmount()
+  })
 
   it.each(['oauth', 'setup-token'])('loads and preserves multi-window mode and TLS profile for %s', async (type) => {
     const account = buildOpenAIOAuthParentAccount()

@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-5">
     <form class="flex flex-wrap items-end gap-3" @submit.prevent="page = 1; load()">
-      <div v-if="supplier && !target" class="min-w-[160px] flex-1"><label for="finance-target" class="input-label">{{ t('upstreamCenter.finance.group') }}</label><select id="finance-target" v-model="targetId" class="input"><option value="">{{ t('upstreamCenter.financeDetails') }}</option><option v-for="item in supplier.targets" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></div>
+      <div v-if="supplier && !target" class="min-w-0 flex-1 basis-40"><label for="finance-target" class="input-label">{{ t('upstreamCenter.finance.group') }}</label><Select id="finance-target" v-model="targetId" :options="targetOptions" :searchable="false" :aria-label="t('upstreamCenter.finance.group')" /></div>
       <div class="min-w-[140px] flex-1"><label for="finance-from" class="input-label">{{ t('upstreamCenter.history.start') }}</label><input id="finance-from" v-model="fromDate" type="date" class="input" :max="toDate || undefined" /></div><div class="min-w-[140px] flex-1"><label for="finance-to" class="input-label">{{ t('upstreamCenter.history.end') }}</label><input id="finance-to" v-model="toDate" type="date" class="input" :min="fromDate || undefined" /></div>
       <button type="submit" class="btn btn-primary" :disabled="loading">{{ t('upstreamCenter.finance.refresh') }}</button><button type="button" class="btn btn-secondary" :disabled="loading" @click="fromDate = ''; toDate = ''; page = 1; load()">{{ t('upstreamCenter.finance.today') }}</button>
     </form>
@@ -27,12 +27,17 @@ import { useI18n } from 'vue-i18n'
 import { upstreamCenterAPI, type UpstreamFinancePage, type UpstreamSupplier, type UpstreamTarget } from '@/api/admin/upstreamCenter'
 import Icon from '@/components/icons/Icon.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import Select from '@/components/common/Select.vue'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { dateTime, money } from './format'
 const props = defineProps<{ supplier: UpstreamSupplier | null; target: UpstreamTarget | null }>()
 const { t } = useI18n()
 const data = ref<UpstreamFinancePage | null>(null), error = ref(''), loading = ref(false)
 const page = ref(1), fromDate = ref(''), toDate = ref(''), targetId = ref('')
+const targetOptions = computed(() => [
+  { value: '', label: t('upstreamCenter.financeDetails') },
+  ...(props.supplier?.targets || []).map(target => ({ value: String(target.id), label: target.name }))
+])
 const metrics = computed(() => data.value ? [
   { key: 'revenue', value: data.value.summary.revenue }, { key: 'businessCost', value: data.value.summary.business_cost }, { key: 'monitorCost', value: data.value.summary.monitor_cost },
   { key: 'profit', value: data.value.summary.profit }, { key: 'remoteUsedRange', value: data.value.summary.remote_used }, { key: 'reconciliation', value: data.value.summary.reconciliation_delta },

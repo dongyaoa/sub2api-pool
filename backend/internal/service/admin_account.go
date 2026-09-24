@@ -499,8 +499,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		if len(pool) > 0 {
 			input.ProxyID = &pool[0].ProxyID
 			input.Concurrency = AccountProxyPoolConcurrency(pool)
-		} else {
-			input.ProxyID = nil
 		}
 	}
 	if err := ValidateUpstreamRequestIDHeaderExtra(accountExtra); err != nil {
@@ -606,6 +604,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			account.Extra = make(map[string]any)
 		}
 		SetAccountProxyPoolExtra(account.Extra, normalizedProxyPool)
+		account.ProxyPool = normalizedProxyPool
 		if len(normalizedProxyPool) > 0 {
 			proxyID := normalizedProxyPool[0].ProxyID
 			account.ProxyID = &proxyID
@@ -793,7 +792,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	// 影子代理恒继承母账号(由 propagateProxyToShadows 同步),不接受独立编辑——外审 B/P1;
 	// 否则要等母账号下次改 proxy 才被覆盖,期间影子会出现"有时继承、有时独立"的漂移。
-	if input.ProxyID != nil && input.ProxyPool == nil && !account.IsCredentialShadow() {
+	if input.ProxyID != nil && len(normalizedProxyPool) == 0 && !account.IsCredentialShadow() {
 		// 0 表示清除代理（前端发送 0 而不是 null 来表达清除意图）
 		if *input.ProxyID == 0 {
 			account.ProxyID = nil
@@ -802,10 +801,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
 	}
-	// A proxy pool owns the account-wide concurrency value. Ignore a legacy
-	// concurrency field in the same request once a pool was supplied.
 	if input.ProxyPool != nil {
-		account.Concurrency = AccountProxyPoolConcurrency(normalizedProxyPool)
 		account.Proxy = nil
 	}
 	if !reflect.DeepEqual(previousProbeIdentity, upstreamBillingProbeIdentity(account)) && account.Extra != nil {
@@ -829,6 +825,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	// 只在指针非 nil 时更新 Concurrency（支持设置为 0）
 	if input.Concurrency != nil {
 		account.Concurrency = normalizeAccountConcurrency(account.Platform, account.Type, *input.Concurrency)
+	}
+	// A configured pool owns the final account-wide capacity, including when
+	// an edit leaves the pool unchanged but submits the legacy concurrency field.
+	// Clearing the pool restores the explicit single-proxy/direct value above.
+	if poolConcurrency := AccountProxyPoolConcurrency(AccountProxyPoolFromExtra(account.Extra)); poolConcurrency > 0 {
+		account.Concurrency = poolConcurrency
 	}
 	// 只在指针非 nil 时更新 Priority（支持设置为 0）
 	if input.Priority != nil {
@@ -1012,10 +1014,10 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			concurrency := AccountProxyPoolConcurrency(normalizedProxyPool)
 			input.Concurrency = &concurrency
 		} else {
-			zero := int64(0)
-			input.ProxyID = &zero
-			concurrency := 0
-			input.Concurrency = &concurrency
+			if input.ProxyID == nil {
+				zero := int64(0)
+				input.ProxyID = &zero
+			}
 		}
 	}
 

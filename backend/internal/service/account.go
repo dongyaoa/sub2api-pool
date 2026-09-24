@@ -67,6 +67,9 @@ type Account struct {
 	// existing transport code remains backward compatible.
 	ProxyPool         []AccountProxyPoolEntry `json:"proxy_pool,omitempty"`
 	ProxyPoolSelected bool                    `json:"-"`
+	// ProxyPoolMetadata marks credential-free scheduler projections whose proxy
+	// entries contain only identity and availability, never transport details.
+	ProxyPoolMetadata bool `json:"proxy_pool_metadata,omitempty"`
 	AccountGroups     []AccountGroup
 	GroupIDs          []int64
 	Groups            []*Group

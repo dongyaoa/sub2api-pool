@@ -5,7 +5,7 @@ import UpstreamTargetCard from './UpstreamTargetCard.vue'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard: vi.fn() }) }))
-const stubs = { Icon: true, UpstreamHistoryBar: true, UpstreamStatusBadge: true }
+const stubs = { Icon: true, UpstreamHistoryBar: true, UpstreamStatusBadge: true, teleport: true }
 
 function target(): UpstreamTarget {
   return {
@@ -80,7 +80,8 @@ describe('standalone upstream monitor card', () => {
   it('keeps the selected model, latest metrics and existing actions available alongside the new badge', async () => {
     const item = withBilling(billing())
     const wrapper = mount(UpstreamTargetCard, { props: { target: item }, global: { stubs } })
-    await wrapper.get('select').setValue('model-b')
+    await wrapper.get('.select-trigger').trigger('click')
+    await wrapper.findAll('[role="option"]')[1]!.trigger('click')
     expect(wrapper.get('[data-testid="upstream-availability"]').text()).toBe('70.50%')
     expect(wrapper.get('[data-testid="upstream-latency"]').text()).toBe('7,000 ms')
     expect(wrapper.getComponent({ name: 'UpstreamHistoryBar' }).props('lastCheckedAt')).toBe('2026-09-24T00:00:01Z')
@@ -111,7 +112,8 @@ describe('standalone upstream monitor card', () => {
     const record: UpstreamHistoryRecord = { id: 44, target_id: item.id, model: 'model-b', status: 'failed', latency_ms: 123, ping_latency_ms: null, http_status: 503, message: 'upstream unavailable', checked_at: '2026-09-24T00:00:01Z', cost: null, cost_source: 'unknown' }
     item.statistics[1]!.timeline = [record]
     const wrapper = mount(UpstreamTargetCard, { props: { target: item }, global: { stubs } })
-    await wrapper.get('select').setValue('model-b')
+    await wrapper.get('.select-trigger').trigger('click')
+    await wrapper.findAll('[role="option"]')[1]!.trigger('click')
     const history = wrapper.getComponent({ name: 'UpstreamHistoryBar' })
     expect(history.props('records')).toEqual([record])
     expect(history.props('lastCheckedAt')).toBe(record.checked_at)

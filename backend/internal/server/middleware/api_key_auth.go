@@ -184,6 +184,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			if !billingInfoRequest {
 				_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 			}
+			monitorCtx, releaseMonitor := service.BindIntelligenceLocalRequest(c.Request, apiKey)
+			defer releaseMonitor()
+			c.Request = c.Request.WithContext(monitorCtx)
 			c.Next()
 			return
 		}
@@ -283,6 +286,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 		}
 
+		monitorCtx, releaseMonitor := service.BindIntelligenceLocalRequest(c.Request, apiKey)
+		defer releaseMonitor()
+		c.Request = c.Request.WithContext(monitorCtx)
 		c.Next()
 	}
 }

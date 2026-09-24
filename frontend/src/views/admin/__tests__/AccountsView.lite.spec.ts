@@ -302,6 +302,34 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it('places test connection before edit and opens the manual test dialog with full account details', async () => {
+    let finishAccount!: (account: typeof fullAccount) => void
+    getById.mockImplementationOnce(() => new Promise(resolve => { finishAccount = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    const buttons = wrapper.get('[data-account-name]').findAll('button')
+    expect(buttons.slice(0, 2).map(button => button.text())).toEqual([
+      'admin.accounts.testConnection',
+      'common.edit'
+    ])
+    const quickTest = wrapper.get('[data-testid="account-test-connection"]')
+    await quickTest.trigger('click')
+    expect(quickTest.attributes('disabled')).toBeDefined()
+    expect(quickTest.attributes('aria-busy')).toBe('true')
+    await quickTest.trigger('click')
+    expect(getById).toHaveBeenCalledTimes(1)
+    finishAccount(fullAccount)
+    await flushPromises()
+    const modal = wrapper.findComponent(AccountTestModalStub)
+    expect(modal.props('show')).toBe(true)
+    expect(modal.props('account')).toEqual(fullAccount)
+    modal.vm.$emit('close')
+    await flushPromises()
+    expect(quickTest.attributes('disabled')).toBeUndefined()
+    expect(modal.props('show')).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows the warning and patches the account after a partial Antigravity refresh', async () => {
     refreshCredentials.mockResolvedValue({
       account: { ...fullAccount, name: 'refreshed account' },

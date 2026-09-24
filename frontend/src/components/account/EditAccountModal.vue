@@ -3905,6 +3905,7 @@ const form = reactive({
 watch(
   () => form.proxy_pool,
   (pool, previousPool) => {
+    if (syncingForm.value) return
     if (pool.length > 0) {
       form.proxy_id = pool[0].proxy_id
       form.concurrency = pool.reduce((total, entry) => total + Math.max(1, entry.concurrency || 1), 0)
@@ -4016,7 +4017,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.proxy_id = newAccount.proxy_id
   form.proxy_pool = (newAccount.proxy_pool || []).map((entry) => ({
     proxy_id: entry.proxy_id,
-    concurrency: entry.concurrency
+    concurrency: entry.concurrency,
+    proxy: entry.proxy
   }))
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
@@ -5042,8 +5044,13 @@ const handleSubmit = async () => {
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0
     }
-    if (form.proxy_pool.length > 0) {
-      updatePayload.proxy_pool = form.proxy_pool.map((entry) => ({ ...entry }))
+    // An omitted pool preserves legacy single-proxy settings. An explicit empty
+    // pool only means that the user removed a previously configured pool.
+    delete updatePayload.proxy_pool
+    if (isSparkShadow.value) {
+      delete updatePayload.proxy_id
+    } else if (form.proxy_pool.length > 0) {
+      updatePayload.proxy_pool = form.proxy_pool.map(({ proxy_id, concurrency }) => ({ proxy_id, concurrency }))
       updatePayload.proxy_id = form.proxy_pool[0].proxy_id
       updatePayload.concurrency = form.proxy_pool.reduce((total, entry) => total + entry.concurrency, 0)
     } else if ((props.account.proxy_pool?.length || 0) > 0) {

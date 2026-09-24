@@ -69,6 +69,8 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
+import AccountProxyPoolEditor from '../AccountProxyPoolEditor.vue'
+import ProxySelector from '@/components/common/ProxySelector.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -213,6 +215,47 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('sends only pool configuration on the generic API-key creation path', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Proxy pool account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    const entry = {
+      proxy_id: 7,
+      concurrency: 20,
+      proxy: { id: 7, name: 'Bound proxy', host: 'localhost', port: 8080, status: 'active' },
+      current_concurrency: 3
+    }
+    wrapper.findComponent(AccountProxyPoolEditor).vm.$emit('update:modelValue', [entry])
+    await flushPromises()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0][0]).toMatchObject({
+      proxy_id: 7,
+      concurrency: 20,
+      proxy_pool: [{ proxy_id: 7, concurrency: 20 }]
+    })
+    expect(createAccountMock.mock.calls[0][0].proxy_pool[0]).not.toHaveProperty('proxy')
+    expect(createAccountMock.mock.calls[0][0].proxy_pool[0]).not.toHaveProperty('current_concurrency')
+    wrapper.unmount()
+  })
+
+  it('uses single proxy settings when creating without a pool', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Single proxy account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    wrapper.findComponent(ProxySelector).vm.$emit('update:modelValue', 7)
+    await flushPromises()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0][0].proxy_id).toBe(7)
+    expect(createAccountMock.mock.calls[0][0].proxy_pool).toBeUndefined()
+    wrapper.unmount()
+  })
 
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })

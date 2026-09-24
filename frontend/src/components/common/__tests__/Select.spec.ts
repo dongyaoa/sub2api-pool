@@ -156,6 +156,84 @@ describe('Select custom option filtering', () => {
   })
 })
 
+describe('Select dropdown keyboard actions', () => {
+  it('closes only the dropdown when Escape is pressed inside a modal', async () => {
+    const closeModal = vi.fn()
+    document.addEventListener('keydown', closeModal)
+    try {
+      const wrapper = mount(Select, {
+        attachTo: document.body,
+        props: { modelValue: null, searchable: true, options: [{ value: 1, label: 'Proxy 1' }] },
+      })
+      unmountWrapper = () => wrapper.unmount()
+      await wrapper.get('button').trigger('click')
+      await nextTick()
+      document.body.querySelector<HTMLInputElement>('.select-search-input')!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      )
+      await nextTick()
+      expect(wrapper.get('button').attributes('aria-expanded')).toBe('false')
+      expect(closeModal).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(wrapper.get('button').element)
+    } finally {
+      document.removeEventListener('keydown', closeModal)
+    }
+  })
+
+  it('tabs through custom actions before closing and restores the trigger as the tab anchor', async () => {
+    const wrapper = mount(Select, {
+      attachTo: document.body,
+      props: { modelValue: null, searchable: true, options: [{ value: 1, label: 'Proxy 1' }] },
+      slots: {
+        'after-search': '<button data-test="batch-test">Test visible</button>',
+        option: '<button data-test="disabled-test" disabled>Unavailable</button><button data-test="proxy-test">Test proxy</button>'
+      }
+    })
+    unmountWrapper = () => wrapper.unmount()
+    const trigger = wrapper.get('button')
+    await trigger.trigger('click')
+    await nextTick()
+    const search = document.body.querySelector<HTMLInputElement>('.select-search-input')!
+    const batch = document.body.querySelector<HTMLButtonElement>('[data-test="batch-test"]')!
+    const proxy = document.body.querySelector<HTMLButtonElement>('[data-test="proxy-test"]')!
+    expect(document.activeElement).toBe(search)
+
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(batch)
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    batch.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(proxy)
+    proxy.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(batch)
+    batch.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    proxy.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger.element)
+  })
+
+  it.each([false, true])('still closes a plain searchable dropdown with shiftKey=%s', async shiftKey => {
+    const wrapper = mount(Select, {
+      attachTo: document.body,
+      props: { modelValue: null, searchable: true, options: [{ value: 1, label: 'One' }] }
+    })
+    unmountWrapper = () => wrapper.unmount()
+    const trigger = wrapper.get('button')
+    await trigger.trigger('click')
+    await nextTick()
+    document.body.querySelector<HTMLInputElement>('.select-search-input')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true })
+    )
+    await nextTick()
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger.element)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+})
+
 describe('Select remote search', () => {
   const mountRemoteSelect = (props: Record<string, unknown> = {}) => {
     const wrapper = mount(Select, {

@@ -24,16 +24,17 @@
       </div>
       <div><label for="supplier-notes" class="input-label">{{ t('upstreamCenter.form.notes') }}</label><textarea id="supplier-notes" v-model="form.notes" class="input min-h-[64px] resize-y" maxlength="2000" :disabled="saving || identityLocked" :placeholder="t('upstreamCenter.form.optional')"></textarea></div>
       <p v-if="createdSupplierId && selected.some(item => item.status !== 'done')" role="status" class="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">{{ t('upstreamCenter.import.retryHint') }}</p>
-      <div v-if="recoveryChoices.length" class="rounded-lg border border-amber-200 p-3 dark:border-amber-900"><p class="mb-2 text-xs text-amber-700 dark:text-amber-400">{{ t('upstreamCenter.import.chooseExisting') }}</p><select v-model="recoveryId" class="input !text-xs"><option value="">{{ t('upstreamCenter.import.choosePlaceholder') }}</option><option v-for="item in recoveryChoices" :key="item.id" :value="String(item.id)">#{{ item.id }} · {{ item.name }} · {{ item.website }}</option></select></div>
+      <div v-if="recoveryChoices.length" class="rounded-lg border border-amber-200 p-3 dark:border-amber-900"><label for="supplier-recovery" class="mb-2 block text-xs text-amber-700 dark:text-amber-400">{{ t('upstreamCenter.import.chooseExisting') }}</label><Select id="supplier-recovery" v-model="recoveryId" :options="recoveryOptions" :searchable="false" :aria-label="t('upstreamCenter.import.chooseExisting')" /></div>
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">{{ error }}</p>
     </form>
     <template #footer><div class="flex justify-end gap-3"><button type="button" class="btn btn-secondary" :disabled="saving" @click="close">{{ t(createdSupplierId ? 'common.close' : 'common.cancel') }}</button><button type="submit" form="upstream-supplier-form" class="btn btn-primary" :disabled="saving || preparingIds.size > 0"><Icon v-if="saving" name="refresh" size="sm" class="mr-2 animate-spin" />{{ t(saving ? 'upstreamCenter.form.saving' : createdSupplierId ? 'upstreamCenter.import.retry' : selected.length ? 'upstreamCenter.import.save' : 'upstreamCenter.form.save') }}</button></div></template>
   </BaseDialog>
 </template>
 <script setup lang="ts">
-import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { upstreamCenterAPI, type UpstreamProvider, type UpstreamSupplier } from '@/api/admin/upstreamCenter'
 import * as accountsAPI from '@/api/admin/accounts'
@@ -48,6 +49,10 @@ const selected = ref<ImportAccount[]>([]), enabled = ref(true), saving = ref(fal
 const identityLocked = ref(false)
 const accounts = ref<AccountListItem[]>([]), accountsLoading = ref(false), accountSearch = ref(''), accountPage = ref(1), accountTotal = ref(0), accountError = ref(''), preparingIds = ref(new Set<number>())
 const recoveryChoices = ref<UpstreamSupplier[]>([]), recoveryId = ref('')
+const recoveryOptions = computed(() => [
+  { value: '', label: t('upstreamCenter.import.choosePlaceholder') },
+  ...recoveryChoices.value.map(item => ({ value: String(item.id), label: `#${item.id} · ${item.name} · ${item.website}` }))
+])
 let accountRequest = 0, generation = 0, supplierAttempted = false, draftPending = false
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(() => props.show, show => {

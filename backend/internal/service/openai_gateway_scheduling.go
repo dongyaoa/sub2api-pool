@@ -1721,6 +1721,9 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 		if !account.ProxyPoolSelected {
 			SelectAccountProxy(account)
 		}
+		if account.ProxyPoolMetadata || !accountProxySelectionUsable(account) {
+			return nil, fmt.Errorf("selected openai account %d has no usable proxy", account.ID)
+		}
 		return account, nil
 	}
 	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
@@ -1730,7 +1733,9 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected openai account %d not found during hydration", account.ID)
 	}
-	CarryAccountProxySelection(account, hydrated)
+	if !CarryAccountProxySelection(account, hydrated) {
+		return nil, fmt.Errorf("selected openai account %d proxy is unavailable after hydration", account.ID)
+	}
 	return hydrated, nil
 }
 

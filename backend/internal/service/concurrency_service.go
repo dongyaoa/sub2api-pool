@@ -391,18 +391,37 @@ func (s *ConcurrencyService) AcquireAccountSlotForAccount(ctx context.Context, a
 	if account == nil {
 		return s.AcquireAccountSlot(ctx, 0, 0)
 	}
-	proxyCache, ok := s.cache.(AccountProxyConcurrencyCache)
-	if len(account.ProxyPool) == 0 || !ok {
+	if !accountHasProxyPool(account) {
 		return s.AcquireAccountSlot(ctx, account.ID, account.Concurrency)
 	}
-	if !account.ProxyPoolSelected {
+	if !account.ProxyPoolSelected || !accountProxySelectionUsable(account) {
 		SelectAccountProxy(account)
+	}
+	if !accountProxySelectionUsable(account) {
+		return &AcquireResult{Acquired: false}, nil
 	}
 	// The pool is the source of truth for a multi-IP account. Older records may
 	// still carry the first proxy's legacy concurrency in accounts.concurrency;
 	// use the sum of pool capacities so those accounts can actually use every
 	// configured IP instead of being capped by the first entry.
 	accountConcurrency := EffectiveAccountConcurrency(account)
+	proxyCache, ok := s.cache.(AccountProxyConcurrencyCache)
+	if !ok {
+		return s.AcquireAccountSlot(ctx, account.ID, accountConcurrency)
+	}
+	accountResult, err := s.AcquireAccountSlot(ctx, account.ID, accountConcurrency)
+	if err != nil || accountResult == nil || !accountResult.Acquired {
+		return accountResult, err
+	}
+	// Keep one account slot while probing full IPs. Releasing and reacquiring
+	// it per attempt needlessly adds cache round trips and lets another request
+	// take the account capacity before this request reaches an available IP.
+	keepAccountSlot := false
+	defer func() {
+		if !keepAccountSlot {
+			accountResult.ReleaseFunc()
+		}
+	}()
 
 	// A proxy can be full while the account still has capacity. Try each pool
 	// entry once before returning false so a busy IP never pins the request to
@@ -423,17 +442,13 @@ func (s *ConcurrencyService) AcquireAccountSlotForAccount(ctx context.Context, a
 			continue
 		}
 
-		accountResult, err := s.AcquireAccountSlot(ctx, account.ID, accountConcurrency)
-		if err != nil || accountResult == nil || !accountResult.Acquired {
-			return accountResult, err
-		}
 		proxyRequestID := generateRequestID()
 		proxyAcquired, err := proxyCache.AcquireAccountProxySlot(ctx, account.ID, proxyID, capacity, proxyRequestID)
 		if err != nil {
-			accountResult.ReleaseFunc()
 			return nil, err
 		}
 		if proxyAcquired {
+			keepAccountSlot = true
 			accountRelease := accountResult.ReleaseFunc
 			var releaseOnce sync.Once
 			return &AcquireResult{
@@ -451,7 +466,6 @@ func (s *ConcurrencyService) AcquireAccountSlotForAccount(ctx context.Context, a
 			}, nil
 		}
 
-		accountResult.ReleaseFunc()
 		excluded[proxyID] = struct{}{}
 		account.ProxyPoolSelected = false
 		if !selectNextAccountProxy(account, excluded) {
@@ -464,7 +478,7 @@ func (s *ConcurrencyService) AcquireAccountSlotForAccount(ctx context.Context, a
 
 func accountProxyPoolCapacity(entries []AccountProxyPoolEntry, proxyID int64) int {
 	for _, entry := range entries {
-		if entry.ProxyID == proxyID {
+		if entry.ProxyID == proxyID && accountProxyPoolEntryUsable(entry, time.Now()) {
 			return entry.Concurrency
 		}
 	}

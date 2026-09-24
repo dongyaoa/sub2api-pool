@@ -12,7 +12,8 @@
       <p v-if="run?.status === 'failed' && run.error" class="max-w-full break-words text-[10px] leading-4 text-slate-400 dark:text-dark-400" :class="large ? 'line-clamp-4' : 'line-clamp-2'" :title="run.error">{{ run.error }}</p>
       <button v-if="error" type="button" class="text-xs text-primary-600" @click="load">{{ t('intelligenceMonitor.refresh') }}</button>
     </div>
-    <button v-if="preview && !large" type="button" class="preview-open absolute inset-0 z-10 flex items-end justify-end bg-transparent p-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500" :aria-label="t('intelligenceMonitor.open')" @click="emit('open')"><span class="preview-open-label inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-medium text-gray-700 shadow-sm backdrop-blur-sm"><Icon name="eye" size="xs" />{{ t('intelligenceMonitor.open') }}</span></button>
+    <button v-if="preview && !large" type="button" class="preview-open absolute inset-0 z-10 flex items-end justify-end bg-transparent p-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500" :class="durationLabel && 'pb-9'" :aria-label="t('intelligenceMonitor.open')" @click="emit('open')"><span class="preview-open-label inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-medium text-gray-700 shadow-sm backdrop-blur-sm"><Icon name="eye" size="xs" />{{ t('intelligenceMonitor.open') }}</span></button>
+    <div v-if="durationLabel" class="pointer-events-none absolute bottom-2 right-2 z-20 inline-flex items-center gap-1.5 rounded-md border border-white/70 bg-white/90 px-2 py-1 font-medium tabular-nums text-slate-600 shadow-sm backdrop-blur-sm dark:border-dark-600/70 dark:bg-dark-800/90 dark:text-dark-200" :class="large ? 'text-xs' : 'text-[10px]'" data-testid="artwork-duration" :title="`${t('intelligenceMonitor.totalDuration')} · ${durationLabel}`" :aria-label="`${t('intelligenceMonitor.totalDuration')} · ${durationLabel}`"><Icon name="clock" size="xs" /><span>{{ durationLabel }}</span></div>
     <div v-if="preview && large" class="absolute right-3 top-3 z-10"><button type="button" class="rounded-lg border border-gray-200 bg-white/90 p-2 text-gray-500 shadow-sm" :title="t('intelligenceMonitor.reloadPreview')" @click="replay++"><Icon name="refresh" size="sm" /></button></div>
     <p v-if="preview && large && prepared?.scriptsDisabled" class="pointer-events-none absolute left-3 top-3 z-10 max-w-[calc(100%-4.5rem)] rounded-md bg-white/95 px-2 py-1 text-[10px] leading-relaxed text-slate-500 shadow-sm" role="note">{{ t('intelligenceMonitor.scriptsDisabled') }}</p>
   </div>
@@ -23,6 +24,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { intelligenceMonitorAPI, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { intelligencePreviewContent } from './intelligencePreview'
+import { intelligenceDurationLabel } from './intelligenceDuration'
 import PelicanLoadingScene from './PelicanLoadingScene.vue'
 const props = withDefaults(defineProps<{ run: IntelligenceRun | null; large?: boolean }>(), { large: false })
 const emit = defineEmits<{ open: [] }>()
@@ -45,6 +47,7 @@ const canvasStyle = computed(() => {
 const active = computed(() => Boolean(props.run && ['pending', 'running'].includes(props.run.status)))
 const prepared = computed(() => html.value ? intelligencePreviewContent(html.value) : null)
 const preview = computed(() => prepared.value?.document || '')
+const durationLabel = computed(() => props.run?.status === 'succeeded' ? intelligenceDurationLabel(props.run, t) : null)
 let controller: AbortController | undefined, observer: IntersectionObserver | undefined, resizeObserver: ResizeObserver | undefined
 function measureViewport() {
   if (!container.value) return

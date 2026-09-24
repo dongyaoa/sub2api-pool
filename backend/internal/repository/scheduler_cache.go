@@ -300,6 +300,11 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 		if err != nil {
 			return nil, false, err
 		}
+		if len(account.ProxyPool) > 0 && !account.ProxyPoolMetadata {
+			// Older projections omitted proxy eligibility. Rebuild through the
+			// normal cache-miss path instead of trusting incomplete candidates.
+			return nil, false, nil
+		}
 		if err := applySchedulerLastUsed(account, lastUsedValues[i]); err != nil {
 			return nil, false, err
 		}
@@ -888,6 +893,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		ParentAccountID:         account.ParentAccountID,
 		QuotaDimension:          account.QuotaDimension,
 		ProxyPool:               filterSchedulerProxyPool(account.ProxyPool),
+		ProxyPoolMetadata:       len(account.ProxyPool) > 0,
 		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
 		Credentials:             filterSchedulerCredentials(account.Credentials),
@@ -902,7 +908,13 @@ func filterSchedulerProxyPool(entries []service.AccountProxyPoolEntry) []service
 	filtered := make([]service.AccountProxyPoolEntry, 0, len(entries))
 	for _, entry := range entries {
 		if entry.ProxyID > 0 && entry.Concurrency > 0 {
-			filtered = append(filtered, service.AccountProxyPoolEntry{ProxyID: entry.ProxyID, Concurrency: entry.Concurrency})
+			metadata := service.AccountProxyPoolEntry{ProxyID: entry.ProxyID, Concurrency: entry.Concurrency}
+			if entry.Proxy != nil {
+				// Selection happens before full hydration. Keep eligibility, but
+				// never publish proxy endpoints or credentials in metadata.
+				metadata.Proxy = &service.Proxy{ID: entry.Proxy.ID, Status: entry.Proxy.Status, ExpiresAt: entry.Proxy.ExpiresAt}
+			}
+			filtered = append(filtered, metadata)
 		}
 	}
 	if len(filtered) == 0 {

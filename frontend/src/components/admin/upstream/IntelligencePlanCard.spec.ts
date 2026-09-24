@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import IntelligencePlanCard from './IntelligencePlanCard.vue'
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: { count?: number }) => values?.count === undefined ? key : `${key}:${values.count}` }) }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: { detail: vi.fn() } }))
 const preview = defineComponent({ name: 'IntelligenceArtifactPreview', props: ['run'], emits: ['open'], template: '<button class="test-preview" @click="$emit(\'open\')">{{ run.id }}</button>' })
 const run = (id: number, status: IntelligenceRun['status'] = 'succeeded') => ({ id, status, created_at: '2026-09-23T10:00:00Z', started_at: null, model: 'gpt-6-astra', reasoning_effort: 'high' } as IntelligenceRun)
@@ -14,6 +14,20 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it.each([
+    [30, 'seconds', 30],
+    [75, 'seconds', 75],
+    [90, 'seconds', 90],
+    [300, 'minutes', 5],
+    [3660, 'minutes', 61],
+    [3600, 'hours', 1],
+    [86400, 'hours', 24],
+  ])('shows a %i-second interval without rounding away custom seconds', (interval, unit, count) => {
+    const view = render(plan({ enabled: true, interval_seconds: Number(interval) }))
+    expect(view.get('aside').text()).toContain(`intelligenceMonitor.${unit}:${count}`)
+    view.unmount()
+  })
+
   it('shows at most twenty results in server order and opens the specifically selected result', async () => {
     const ids = [91, 105, 82, ...Array.from({ length: 19 }, (_, i) => 70 - i)]
     const view = render(plan({ recent_runs: ids.map(id => run(id)), latest_run: run(91) }))

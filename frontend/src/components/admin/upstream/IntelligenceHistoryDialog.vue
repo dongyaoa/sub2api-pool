@@ -28,6 +28,7 @@ import { intelligenceMonitorAPI, type IntelligencePlan, type IntelligenceRun } f
 import { extractApiErrorMessage } from '@/utils/apiError'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
 import { intelligenceNotes, intelligenceRateLabel } from './intelligencePreview'
+import { intelligenceDurationLabel } from './intelligenceDuration'
 import { dateTime } from './format'
 const props=defineProps<{show:boolean;plan:IntelligencePlan|null;initialRunId?:number|null}>()
 const emit=defineEmits<{close:[]}>()
@@ -39,7 +40,7 @@ const runNotes=computed(()=>intelligenceNotes(detail.value?.notes_snapshot))
 const metadata=computed(()=>{
   const run=detail.value; if (!run) return []
   const multiplier=intelligenceRateLabel(run.rate_snapshot)
-  return [{label:'started',value:dateTime(run.started_at || run.created_at)},{label:'finished',value:dateTime(run.finished_at)},{label:'duration',value:run.duration_ms==null?'—':t('intelligenceMonitor.seconds',{count:(run.duration_ms/1000).toFixed(1)})},{label:'model',value:run.model},{label:'reasoning',value:run.reasoning_effort},{label:'rateAtRun',value:multiplier ? `${multiplier}${run.rate_snapshot?.stale ? ` · ${t('intelligenceMonitor.rateStale')}` : ''}` : t('intelligenceMonitor.rateUnknown')},{label:'runSource',value:run.source_name || run.source_endpoint || t(`intelligenceMonitor.source.${run.source_type}`)},{label:'http',value:run.http_status || '—'}]
+  return [{label:'started',value:dateTime(run.started_at || run.created_at)},{label:'finished',value:dateTime(run.finished_at)},{label:'duration',value:intelligenceDurationLabel(run,t)||'—'},{label:'model',value:run.model},{label:'reasoning',value:run.reasoning_effort},{label:'rateAtRun',value:multiplier ? `${multiplier}${run.rate_snapshot?.stale ? ` · ${t('intelligenceMonitor.rateStale')}` : ''}` : t('intelligenceMonitor.rateUnknown')},{label:'runSource',value:run.source_name || run.source_endpoint || t(`intelligenceMonitor.source.${run.source_type}`)},{label:'http',value:run.http_status || '—'}]
 })
 let listController:AbortController|undefined,detailController:AbortController|undefined,timer:ReturnType<typeof setInterval>|undefined,initialSelection:number|null=null
 async function loadRuns(){

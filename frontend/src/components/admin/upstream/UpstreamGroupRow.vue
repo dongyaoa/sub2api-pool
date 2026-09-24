@@ -25,9 +25,7 @@
         <div class="monitor-model flex min-w-0 flex-wrap items-center justify-between gap-2">
           <div class="flex min-w-0 flex-1 items-center gap-2">
             <label :for="`upstream-group-model-${target.id}`" class="sr-only">{{ t('upstreamCenter.model') }}</label>
-            <select v-if="target.models.length > 1" :id="`upstream-group-model-${target.id}`" v-model="selectedModel" class="min-w-0 max-w-full rounded-md border-0 bg-white py-1 pl-2 pr-6 text-[11px] text-gray-600 ring-1 ring-gray-200/70 dark:bg-dark-800 dark:text-gray-300 dark:ring-dark-600">
-              <option v-for="model in target.models" :key="model" :value="model">{{ model }} · {{ t(`upstreamCenter.status.${targetStatus(target, model)}`) }}</option>
-            </select>
+            <Select v-if="target.models.length > 1" :id="`upstream-group-model-${target.id}`" v-model="selectedModel" :options="modelOptions" :searchable="false" :aria-label="t('upstreamCenter.model')" class="model-select min-w-0 max-w-full" :title="selectedModel" />
             <span v-else class="truncate font-mono text-[11px] font-medium text-gray-600 dark:text-dark-300" :title="selectedModel">{{ selectedModel }}</span>
             <span v-if="modelIssues && target.models.length > 1" class="shrink-0 text-[10px] text-amber-600 dark:text-amber-400">{{ t('upstreamCenter.billing.modelIssuesShort', { count: modelIssues }) }}</span>
           </div>
@@ -81,6 +79,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { UpstreamHistoryRecord, UpstreamTarget } from '@/api/admin/upstreamCenter'
 import UpstreamHistoryBar from './UpstreamHistoryBar.vue'
@@ -93,11 +92,14 @@ const emit = defineEmits<{ details: [target: UpstreamTarget, model: string, reco
 const { t } = useI18n()
 const selectedModel = ref(props.target.models[0] || '')
 watch(() => props.target.models, models => { if (!models.includes(selectedModel.value)) selectedModel.value = models[0] || '' })
+const modelOptions = computed(() => props.target.models.map(model => ({ value: model, label: `${model} · ${t(`upstreamCenter.status.${targetStatus(props.target, model)}`)}` })))
 const statistics = computed(() => props.target.statistics?.find(item => item.model === selectedModel.value))
 const modelIssues = computed(() => props.target.models.filter(model => ['degraded', 'failed', 'error', 'stale'].includes(targetStatus(props.target, model))).length)
 </script>
 
 <style scoped>
+.model-select :deep(.select-trigger) { @apply min-w-0 gap-1 rounded-md px-2 py-[3px] text-[11px] leading-4 text-gray-600 dark:text-gray-300; }
+.model-select :deep(.select-icon svg) { @apply h-3 w-3; }
 .group-row { container-type: inline-size; padding: 14px 18px; }
 .group-body { display: grid; gap: 16px; min-width: 0; align-items: center; }
 .monitor-panel { @apply min-w-0 rounded-lg bg-gray-50/80 px-3 py-2.5 dark:bg-dark-900/40; }

@@ -8,11 +8,85 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/stretchr/testify/require"
 )
 
 type snapshotHydrationCache struct {
 	snapshot []*Account
 	accounts map[int64]*Account
+}
+
+func TestProxyPoolHydrationRejectsStaleProxyAndReleasesAcquiredSlot(t *testing.T) {
+	for _, platform := range []string{PlatformAnthropic, PlatformOpenAI} {
+		t.Run(platform, func(t *testing.T) {
+			id := int64(81)
+			source := &Account{ID: 9302, ProxyID: &id, ProxyPoolSelected: true,
+				ProxyPool: []AccountProxyPoolEntry{{ProxyID: id, Concurrency: 20}}}
+			cache := &snapshotHydrationCache{accounts: map[int64]*Account{9302: {
+				ID: 9302, ProxyPool: []AccountProxyPoolEntry{
+					{ProxyID: 81, Concurrency: 20, Proxy: &Proxy{ID: 81, Status: "inactive"}},
+					{ProxyID: 82, Concurrency: 20, Proxy: &Proxy{ID: 82, Status: StatusActive}},
+				},
+			}}}
+			snapshot := NewSchedulerSnapshotService(cache, nil, nil, nil, nil)
+			released := 0
+			release := func() { released++ }
+			var selection *AccountSelectionResult
+			var err error
+			if platform == PlatformAnthropic {
+				svc := &GatewayService{schedulerSnapshot: snapshot}
+				selection, err = svc.newSelectionResult(context.Background(), source, true, release, nil)
+			} else {
+				svc := &OpenAIGatewayService{schedulerSnapshot: snapshot}
+				selection, err = svc.newAcquiredSelectionResult(context.Background(), source, release)
+			}
+			require.ErrorContains(t, err, "proxy is unavailable after hydration")
+			require.Nil(t, selection)
+			require.Equal(t, 1, released)
+		})
+	}
+}
+
+func TestProxyPoolHydrationRejectsNewPoolAndReleasesAccountOnlySlot(t *testing.T) {
+	for _, platform := range []string{PlatformAnthropic, PlatformOpenAI} {
+		t.Run(platform, func(t *testing.T) {
+			source := &Account{ID: 9304, Concurrency: 40}
+			cache := &snapshotHydrationCache{accounts: map[int64]*Account{source.ID: {
+				ID: source.ID, Concurrency: 40, ProxyPool: []AccountProxyPoolEntry{
+					{ProxyID: 81, Concurrency: 20, Proxy: &Proxy{ID: 81, Status: StatusActive}},
+					{ProxyID: 82, Concurrency: 20, Proxy: &Proxy{ID: 82, Status: StatusActive}},
+				},
+			}}}
+			snapshot := NewSchedulerSnapshotService(cache, nil, nil, nil, nil)
+			released := 0
+			release := func() { released++ }
+			var selection *AccountSelectionResult
+			var err error
+			if platform == PlatformAnthropic {
+				svc := &GatewayService{schedulerSnapshot: snapshot}
+				selection, err = svc.newSelectionResult(context.Background(), source, true, release, nil)
+			} else {
+				svc := &OpenAIGatewayService{schedulerSnapshot: snapshot}
+				selection, err = svc.newAcquiredSelectionResult(context.Background(), source, release)
+			}
+			require.ErrorContains(t, err, "proxy is unavailable after hydration")
+			require.Nil(t, selection)
+			require.Equal(t, 1, released)
+		})
+	}
+}
+
+func TestProxyPoolHydrationNeverFallsBackToDirect(t *testing.T) {
+	account := &Account{ID: 9303, Extra: map[string]any{
+		AccountProxyPoolExtraKey: []AccountProxyPoolEntry{{ProxyID: 81, Concurrency: 20}},
+	}}
+	ctx := context.Background()
+	_, err := (&GatewayService{}).hydrateSelectedAccount(ctx, account)
+	require.ErrorContains(t, err, "no usable proxy")
+	_, err = (&OpenAIGatewayService{}).hydrateSelectedAccount(ctx, account)
+	require.ErrorContains(t, err, "no usable proxy")
+	_, err = (&GeminiMessagesCompatService{}).hydrateSelectedAccount(ctx, account)
+	require.ErrorContains(t, err, "no usable proxy")
 }
 
 func (c *snapshotHydrationCache) GetSnapshot(ctx context.Context, bucket SchedulerBucket) ([]*Account, bool, error) {

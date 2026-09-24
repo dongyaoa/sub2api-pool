@@ -1,7 +1,7 @@
 export default {
   intelligenceMonitor: {
     group: '分组', recentWorks: '最近作品', newestFirst: '左新右旧', latest: '最新', retention: '每个计划仅保留最近 20 次结果，旧记录自动清理。',
-    oauth: { title: 'OAuth 监控', add: '添加 OAuth 监控', account: 'OAuth 账号', select: '选择 OpenAI OAuth 账号', search: '搜索账号名称…', nameHint: '计划名称与账号管理中的名称保持一致', emptyTitle: '观察每个 OAuth 账号的作品表现', emptyHint: '选择本站 OpenAI OAuth 账号，使用相同的鹈鹕测试，保存最近 20 次作品。', noAccounts: '没有可选的 OpenAI OAuth 账号', loadFailed: '无法加载 OAuth 账号', hint: '直接使用所选账号执行，复用账号凭据刷新和代理配置。', more: '下一页', previous: '上一页', fixedModelRequired: '该账号当前模型配置不支持直接使用 gpt-6-astra，请先检查账号管理中的模型白名单或映射。' },
+    oauth: { title: 'OAuth 监控', add: '添加 OAuth 监控', account: 'OAuth 账号', select: '选择 OpenAI OAuth 账号', search: '搜索账号名称…', nameHint: '计划名称与账号管理中的名称保持一致', emptyTitle: '观察每个 OAuth 账号的作品表现', emptyHint: '选择本站 OpenAI OAuth 账号，使用相同的鹈鹕测试，保存最近 20 次作品。', noAccounts: '暂无已启用且状态正常的可调度 OpenAI OAuth 账号', loading: '正在读取全部可用 OAuth 账号…', loadFailed: '无法加载 OAuth 账号，请刷新重试', unavailable: '所选账号已停用或暂不可调度，请刷新后重新选择。', hint: '仅显示已启用、状态正常且当前可调度的真实 OpenAI OAuth 账号。直接使用所选账号执行，复用凭据刷新和代理配置。', more: '下一页', previous: '上一页', fixedModelRequired: '该账号当前模型配置不支持直接使用 gpt-6-astra，请先检查账号管理中的模型白名单或映射。' },
     title: '智商监控', add: '新建监测计划', edit: '编辑监测计划', search: '搜索计划、上游或分组', allSources: '全部来源',
     source: { external: '外部地址', upstream: '上游 Key', local_group: '本站分组', openai_oauth: 'OpenAI OAuth' },
     status: { pending: '排队中', running: '绘制中', succeeded: '已完成', failed: '失败', idle: '尚未执行' },
@@ -14,14 +14,15 @@ export default {
     preview: '动画预览', sourceCode: 'HTML 源码', response: '完整回复', download: '下载 HTML', reloadPreview: '重播', open: '查看作品',
     scriptsDisabled: '脚本未执行，可查看或下载原始 HTML',
     isolated: '独立预览', loadingPreview: '载入作品…', noHTML: '本次没有可展示的 HTML', selectRun: '选择一条记录查看作品', records: '每次运行单独存档',
-    started: '开始时间', finished: '完成时间', duration: '生成耗时', http: 'HTTP 状态', runSource: '本次来源', rate: '生效倍率', rateUnknown: '倍率未获取', rateStale: '最近已知倍率', rateAtRun: '运行时倍率', notes: '备注', autoRate: '自动获取',
+    started: '开始时间', finished: '完成时间', duration: '生成耗时', totalDuration: '总耗时', durationMinutesSeconds: '{minutes} 分 {seconds} 秒', http: 'HTTP 状态', runSource: '本次来源', rate: '生效倍率', rateUnknown: '倍率未获取', rateStale: '最近已知倍率', rateAtRun: '运行时倍率', notes: '备注', autoRate: '自动获取',
     historical: '展示这次执行时保存的参数与倍率', times: '{count} 次记录', seconds: '{count} 秒', minutes: '{count} 分钟', hours: '{count} 小时',
     sourceMissing: '来源已归档或暂不可用', notScored: '通过作品对比观察表现，不生成自动智商评分。',
     form: {
       name: '计划名称', namePlaceholder: '例如：北岸 · GPT 主力组', source: '检测来源', selectUpstream: '选择上游 Key 分组', selectGroup: '选择本站分组',
       endpoint: 'API 地址', key: 'API Key', keepKey: '留空保留已保存的 Key', protocol: '请求接口', sourceHint: '通过本站分组真实路由执行，使用当前管理员的专用监控 Key，并遵循正常计费与分组权限。',
       supplierNote: '上游备注', supplierPlaceholder: '哪一家中转', groupNote: '分组备注', groupPlaceholder: '哪个分组或线路', rateNote: '倍率备注', ratePlaceholder: '例如：标称 0.8×，活动价',
-      rateHint: '这是外部线路备注；自动获取的实际倍率会单独记录。', enabled: '定时检测', interval: '检测间隔', timeout: '单次最长等待', timeoutHint: '180–300 秒，为模型思考与生成动画预留时间。',
+      rateHint: '这是外部线路备注；自动获取的实际倍率会单独记录。', enabled: '定时检测', interval: '检测间隔', timeout: '单次最长等待', timeoutHint: '可选择 5–15 分钟，默认 15 分钟，为模型思考与生成动画预留时间。',
+      customInterval: '自定义', customSeconds: '自定义间隔（秒）', intervalPlaceholder: '例如：45', intervalHint: '支持 30–86400 秒的整数，默认 1 小时。', validInterval: '请输入 30–86400 之间的整数秒数。',
       scheduleHint: '开启后首次自动执行，后续按间隔检测；关闭时仍可手动执行。', notesPlaceholder: '记录线路特点、活动信息或需要比较的内容',
       requiredSource: '请选择检测来源', requiredName: '请输入计划名称', validEndpoint: '请填写有效的公网 HTTPS 地址', requiredKey: '请输入 API Key',
       saving: '保存中…', save: '保存计划', fixedPrompt: '每次均使用以下固定提示词与参数', loadGroupsFailed: '无法读取本站分组', noGroups: '没有可选分组',

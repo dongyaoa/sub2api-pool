@@ -11,6 +11,13 @@ const IntelligenceMonitorModel = "gpt-6-astra"
 const IntelligenceMonitorReasoning = "high"
 const IntelligenceMonitorPrompt = "创建一个 HTML，内容是用 SVG 绘制一个鹈鹕骑自行车的 2D 动画。你不需要任何测试。"
 const IntelligenceMonitorRetainedRuns = 20
+const IntelligenceMonitorDefaultTimeoutSeconds = 900
+const IntelligenceMonitorMinTimeoutSeconds = 180
+const IntelligenceMonitorMaxTimeoutSeconds = 900
+
+// Covers source preparation, result persistence and scheduler delay after the
+// generation deadline. A claimed run keeps its own captured timeout budget.
+const IntelligenceMonitorLeaseGraceSeconds = 180
 
 var (
 	ErrIntelligenceNotFound = infraerrors.NotFound("INTELLIGENCE_MONITOR_NOT_FOUND", "intelligence monitoring plan or run not found")

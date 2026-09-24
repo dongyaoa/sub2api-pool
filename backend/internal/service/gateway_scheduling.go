@@ -1569,6 +1569,9 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 		if !account.ProxyPoolSelected {
 			SelectAccountProxy(account)
 		}
+		if account.ProxyPoolMetadata || !accountProxySelectionUsable(account) {
+			return nil, fmt.Errorf("selected gateway account %d has no usable proxy", account.ID)
+		}
 		return account, nil
 	}
 	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
@@ -1578,13 +1581,18 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gateway account %d not found during hydration", account.ID)
 	}
-	CarryAccountProxySelection(account, hydrated)
+	if !CarryAccountProxySelection(account, hydrated) {
+		return nil, fmt.Errorf("selected gateway account %d proxy is unavailable after hydration", account.ID)
+	}
 	return hydrated, nil
 }
 
 func (s *GatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
+		if acquired && release != nil {
+			release()
+		}
 		return nil, err
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{

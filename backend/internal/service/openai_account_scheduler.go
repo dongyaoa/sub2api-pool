@@ -1217,7 +1217,10 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			release(result)
 			continue
 		}
-		CarryAccountProxySelection(candidate.account, fresh)
+		if !CarryAccountProxySelection(candidate.account, fresh) {
+			release(result)
+			continue
+		}
 		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
 			compactBlocked = true
 			release(result)

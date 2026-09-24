@@ -111,7 +111,10 @@ export default {
       urlCopied: '代理 URL 已复制',
       allProtocols: '全部协议',
       allStatus: '全部状态',
-      searchProxies: '搜索代理...',
+      searchProxies: '搜索名称、地址、IP 或地区…',
+      selectorAvailable: '{count} 个可用代理',
+      testVisible: '测试筛选结果',
+      usedByAccounts: '{count} 个账号',
       protocols: {
         http: 'HTTP',
         https: 'HTTPS',

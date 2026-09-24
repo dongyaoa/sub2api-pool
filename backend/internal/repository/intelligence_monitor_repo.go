@@ -243,7 +243,9 @@ func (r *intelligenceMonitorRepository) ClaimNext(ctx context.Context, token str
 	if active >= 2 {
 		return nil, nil
 	}
-	run, err := scanIntelligenceRun(tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status='running',started_at=NOW(),lease_token=$1,lease_until=NOW()+INTERVAL '8 minutes' WHERE id=(SELECT id FROM intelligence_monitor_runs WHERE status='pending' ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING `+intelligenceRunColumns, token), false)
+	// The execution budget includes source preparation and persistence. Base the
+	// lease on this run's immutable timeout, not the plan's current configuration.
+	run, err := scanIntelligenceRun(tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status='running',started_at=NOW(),lease_token=$1,lease_until=NOW()+make_interval(secs=>timeout_seconds+$2) WHERE id=(SELECT id FROM intelligence_monitor_runs WHERE status='pending' ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING `+intelligenceRunColumns, token, service.IntelligenceMonitorLeaseGraceSeconds), false)
 	if errors.Is(err, service.ErrIntelligenceNotFound) {
 		return nil, nil
 	}

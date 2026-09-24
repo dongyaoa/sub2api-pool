@@ -2,6 +2,7 @@ import { defineComponent } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import UpstreamSupplierDialog from './UpstreamSupplierDialog.vue'
+import Select from '@/components/common/Select.vue'
 
 const mocks = vi.hoisted(() => ({ createSupplier: vi.fn(), updateSupplier: vi.fn(), createTarget: vi.fn(), overview: vi.fn(), list: vi.fn(), getById: vi.fn() }))
 vi.mock('@/api/admin/upstreamCenter', () => ({ upstreamCenterAPI: { createSupplier: mocks.createSupplier, updateSupplier: mocks.updateSupplier, createTarget: mocks.createTarget, overview: mocks.overview } }))
@@ -9,7 +10,7 @@ vi.mock('@/api/admin/accounts', () => ({ list: mocks.list, getById: mocks.getByI
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 const dialog = defineComponent({ props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' })
 let wrapper: VueWrapper | undefined
-function render() { wrapper = mount(UpstreamSupplierDialog, { props: { show: true, supplier: null }, global: { stubs: { BaseDialog: dialog, Icon: true } } }); return wrapper }
+function render() { wrapper = mount(UpstreamSupplierDialog, { attachTo: document.body, props: { show: true, supplier: null }, global: { stubs: { BaseDialog: dialog, Icon: true, transition: true } } }); return wrapper }
 const account = (id: number) => ({ id, name: `Account ${id}`, platform: 'openai', credentials: { base_url: 'https://upstream.example/v1', ...(id === 1 ? { model_mapping: { 'model-from-account': 'remote-model' } } : {}) } })
 const supplier = { id: 10, name: 'Account 1', website: 'https://upstream.example', targets: [] }
 beforeEach(() => {
@@ -20,7 +21,7 @@ beforeEach(() => {
   mocks.createTarget.mockResolvedValue({ id: 30 })
   mocks.overview.mockResolvedValue({ suppliers: [supplier], monitors: [] })
 })
-afterEach(() => wrapper?.unmount())
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = '' })
 async function choose(view: VueWrapper, id: number) { await view.get(`input[aria-label="Account ${id}"]`).setValue(true); await flushPromises() }
 
 describe('upstream account batch import', () => {
@@ -110,7 +111,32 @@ describe('upstream account batch import', () => {
     expect(view.text()).toContain('upstreamCenter.import.chooseExisting')
     expect(mocks.createTarget).not.toHaveBeenCalled()
     expect(mocks.createSupplier).toHaveBeenCalledTimes(1)
-    await view.get('select').setValue('11')
+    expect(view.find('select').exists()).toBe(false)
+    expect(view.getComponent(Select).props('searchable')).toBe(false)
+    const recovery = view.get('#supplier-recovery')
+    expect(recovery.text()).toContain('upstreamCenter.import.choosePlaceholder')
+    await recovery.trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('.select-search-input')).toBeNull()
+    const selectRecovery = async (label: string) => {
+      const option = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find(item => item.textContent?.includes(label))
+      expect(option).toBeDefined()
+      option!.click()
+      await flushPromises()
+      expect(recovery.attributes('aria-expanded')).toBe('false')
+      expect(document.body.querySelector('[role="listbox"]')).toBeNull()
+    }
+    await selectRecovery('#11')
+    expect(view.getComponent(Select).props('modelValue')).toBe('11')
+    await recovery.trigger('click')
+    await flushPromises()
+    await selectRecovery('upstreamCenter.import.choosePlaceholder')
+    expect(view.getComponent(Select).props('modelValue')).toBe('')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.createTarget).not.toHaveBeenCalled()
+    await recovery.trigger('click')
+    await flushPromises()
+    await selectRecovery('#11')
     await view.get('form').trigger('submit'); await flushPromises()
     expect(mocks.createTarget).toHaveBeenCalledWith(expect.objectContaining({ supplier_id: 11 }))
   })

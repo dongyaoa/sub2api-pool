@@ -35,9 +35,9 @@ func (s *IntelligenceMonitorService) ConfigureOpenAIOAuth(accounts AccountReposi
 	}
 }
 
-func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Context, id *int64, executing bool) (*Account, error) {
+func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Context, id *int64) (*Account, error) {
 	invalid := func(message string) (*Account, error) {
-		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"detail": message})
+		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "account_id", "detail": message})
 	}
 	if id == nil || *id <= 0 || s.accounts == nil {
 		return invalid("choose an existing OpenAI OAuth account")
@@ -49,7 +49,10 @@ func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Contex
 	if !account.IsModelSupported(IntelligenceMonitorModel) || account.GetMappedModel(IntelligenceMonitorModel) != IntelligenceMonitorModel {
 		return invalid("the selected account must support the fixed gpt-6-astra model without remapping")
 	}
-	if executing && !account.IsSchedulable() {
+	// The picker and save endpoint must not admit an account that execution
+	// would immediately reject. Recheck again at execution because status and
+	// transient limits can change while a generation waits in the queue.
+	if !account.IsSchedulable() {
 		return invalid("the selected OAuth account is disabled, paused, expired, rate limited or cooling down")
 	}
 	return account, nil
@@ -63,7 +66,7 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 		return nil, "", "OpenAI OAuth monitoring is unavailable"
 	}
 	id := intelligenceSnapshotID(run.SourceSnapshot["account_id"])
-	account, err := s.intelligenceOAuthAccount(ctx, &id, true)
+	account, err := s.intelligenceOAuthAccount(ctx, &id)
 	if err != nil {
 		return nil, "", "selected OAuth account is unavailable, not schedulable, or does not support the fixed model"
 	}
@@ -98,9 +101,11 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 		run.SourceSnapshot["proxy_id"] = *selected.ProxyID
 	}
 	// Unlike an interactive gateway stream, a background generation must stop
-	// on timeout/shutdown. These private context values only narrow defaults.
+	// on timeout/shutdown and use its generation budget rather than a shorter
+	// interactive response-header setting. All overrides remain process-local.
 	ctx = context.WithValue(ctx, boundUpstreamLifecycleContextKey{}, true)
 	ctx = context.WithValue(ctx, upstreamResponseReadLimitContextKey{}, int64(intelligenceResponseMaxBytes))
+	ctx = WithHTTPUpstreamResponseHeaderTimeout(ctx, time.Duration(IntelligenceMonitorMaxTimeoutSeconds)*time.Second)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	payload, _ := json.Marshal(map[string]any{

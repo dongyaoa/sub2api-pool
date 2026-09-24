@@ -265,9 +265,77 @@ func TestAcquireAccountSlotForAccount_SkipsFullProxyAndUsesNext(t *testing.T) {
 	require.Equal(t, int64(89), *account.ProxyID)
 	result.ReleaseFunc()
 
-	// The failed first attempt is released before trying the next proxy; only
-	// the successful second proxy remains in the proxy-slot release list.
-	require.Equal(t, []int64{77, 77}, cache.releasedAccountIDs)
+	// One account slot is kept while probing busy proxies and released once.
+	require.Equal(t, []int64{77}, cache.releasedAccountIDs)
+	require.Equal(t, []int64{89}, cache.releasedProxyIDs)
+}
+
+func TestAcquireAccountSlotForAccount_ReleasesSlotWhenEveryProxyIsFull(t *testing.T) {
+	var attempted []int64
+	cache := &stubConcurrencyCacheForTest{acquireResult: true,
+		proxyAcquireFn: func(_ context.Context, _, proxyID int64, _ int, _ string) (bool, error) {
+			attempted = append(attempted, proxyID)
+			return false, nil
+		}}
+	svc := NewConcurrencyService(cache)
+	account := &Account{ID: 78, ProxyPool: []AccountProxyPoolEntry{
+		{ProxyID: 88, Concurrency: 20, Proxy: &Proxy{ID: 88, Status: StatusActive}},
+		{ProxyID: 89, Concurrency: 20, Proxy: &Proxy{ID: 89, Status: StatusActive}},
+	}}
+	result, err := svc.AcquireAccountSlotForAccount(context.Background(), account)
+	require.NoError(t, err)
+	require.False(t, result.Acquired)
+	require.ElementsMatch(t, []int64{88, 89}, attempted)
+	require.Equal(t, []int64{78}, cache.releasedAccountIDs)
+	require.Empty(t, cache.releasedProxyIDs)
+}
+
+func TestAcquireAccountSlotForAccount_ReleasesSlotOnProxyCacheError(t *testing.T) {
+	cache := &stubConcurrencyCacheForTest{acquireResult: true, proxyAcquireErr: errors.New("proxy cache unavailable")}
+	svc := NewConcurrencyService(cache)
+	account := &Account{ID: 79, ProxyPool: []AccountProxyPoolEntry{
+		{ProxyID: 88, Concurrency: 20, Proxy: &Proxy{ID: 88, Status: StatusActive}},
+	}}
+	result, err := svc.AcquireAccountSlotForAccount(context.Background(), account)
+	require.ErrorContains(t, err, "proxy cache unavailable")
+	require.Nil(t, result)
+	require.Equal(t, []int64{79}, cache.releasedAccountIDs)
+}
+
+func TestAcquireAccountSlotForAccount_DoesNotAcquireUnavailablePool(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		cache := &stubConcurrencyCacheForTest{acquireResult: true, proxyAcquireResult: true}
+		svc := NewConcurrencyService(cache)
+		account := &Account{ID: 80, ProxyPool: []AccountProxyPoolEntry{
+			{ProxyID: 88, Concurrency: 20, Proxy: &Proxy{ID: 88, Status: "inactive"}},
+		}}
+		if deleted {
+			account.Extra = map[string]any{AccountProxyPoolExtraKey: account.ProxyPool}
+			account.ProxyPool = nil
+		}
+		result, err := svc.AcquireAccountSlotForAccount(context.Background(), account)
+		require.NoError(t, err)
+		require.False(t, result.Acquired)
+		require.Nil(t, account.ProxyID)
+		require.Empty(t, cache.releasedAccountIDs)
+	}
+}
+
+func TestAcquireAccountSlotForAccount_RevalidatesPreselectedProxy(t *testing.T) {
+	id := int64(88)
+	cache := &stubConcurrencyCacheForTest{acquireResult: true, proxyAcquireResult: true}
+	svc := NewConcurrencyService(cache)
+	account := &Account{ID: 81, ProxyID: &id, ProxyPoolSelected: true, ProxyPool: []AccountProxyPoolEntry{
+		{ProxyID: 88, Concurrency: 20, Proxy: &Proxy{ID: 88, Status: "inactive"}},
+		{ProxyID: 89, Concurrency: 20, Proxy: &Proxy{ID: 89, Status: StatusActive}},
+	}}
+	result, err := svc.AcquireAccountSlotForAccount(context.Background(), account)
+	require.NoError(t, err)
+	require.True(t, result.Acquired)
+	require.Equal(t, int64(89), *account.ProxyID)
+	result.ReleaseFunc()
+	result.ReleaseFunc()
+	require.Equal(t, []int64{81}, cache.releasedAccountIDs)
 	require.Equal(t, []int64{89}, cache.releasedProxyIDs)
 }
 

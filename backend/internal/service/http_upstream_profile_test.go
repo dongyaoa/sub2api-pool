@@ -3,7 +3,24 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 )
+
+func TestHTTPUpstreamResponseHeaderTimeoutRequiresInternalMarkerAndDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	if got := HTTPUpstreamResponseHeaderTimeoutFromContext(ctx); got != 0 {
+		t.Fatalf("unmarked context must preserve configured defaults, got %v", got)
+	}
+	if got := HTTPUpstreamResponseHeaderTimeoutFromContext(WithHTTPUpstreamResponseHeaderTimeout(context.Background(), 15*time.Minute)); got != 0 {
+		t.Fatalf("override must require a bounded request, got %v", got)
+	}
+	ctx = WithHTTPUpstreamResponseHeaderTimeout(ctx, 15*time.Minute)
+	ctx = WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI)
+	if got := HTTPUpstreamResponseHeaderTimeoutFromContext(ctx); got != 15*time.Minute {
+		t.Fatalf("gateway profile must preserve the internal override, got %v", got)
+	}
+}
 
 func TestWithHTTPUpstreamProfile_DefaultKeepsContext(t *testing.T) {
 	ctx := context.Background()

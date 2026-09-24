@@ -47,6 +47,13 @@ func (s *IntelligenceMonitorService) generate(ctx context.Context, run *Intellig
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Sub2API-IntelligenceMonitor/1")
+	if run.SourceType == "local_group" {
+		cleanup, permitErr := AuthorizeIntelligenceLocalRequest(req, intelligenceSnapshotID(run.SourceSnapshot["local_api_key_id"]), key)
+		if permitErr != nil {
+			return nil, "", "local generation context is unavailable"
+		}
+		defer cleanup()
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {

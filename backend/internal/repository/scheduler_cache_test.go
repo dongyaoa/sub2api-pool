@@ -3,6 +3,7 @@ package repository
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -50,10 +51,24 @@ func TestSchedulerMetadataAccountKeepsProxyPoolCapacities(t *testing.T) {
 	metadata := buildSchedulerMetadataAccount(account)
 
 	require.Equal(t, []service.AccountProxyPoolEntry{
-		{ProxyID: 81, Concurrency: 10},
-		{ProxyID: 82, Concurrency: 20},
+		{ProxyID: 81, Concurrency: 10, Proxy: &service.Proxy{ID: 81}},
+		{ProxyID: 82, Concurrency: 20, Proxy: &service.Proxy{ID: 82}},
 	}, metadata.ProxyPool)
 	require.Equal(t, 30, service.EffectiveAccountConcurrency(&metadata))
+}
+
+func TestSchedulerMetadataAccountKeepsProxyEligibilityWithoutCredentials(t *testing.T) {
+	expires := time.Now().Add(time.Hour)
+	metadata := buildSchedulerMetadataAccount(service.Account{ProxyPool: []service.AccountProxyPoolEntry{
+		{ProxyID: 81, Concurrency: 20, Proxy: &service.Proxy{
+			ID: 81, Status: "inactive", ExpiresAt: &expires,
+			Host: "private.example", Port: 1080, Username: "secret-user", Password: "secret-password",
+		}},
+		{ProxyID: 82, Concurrency: 20, Proxy: &service.Proxy{ID: 82, Status: service.StatusActive}},
+	}})
+	require.Equal(t, &service.Proxy{ID: 81, Status: "inactive", ExpiresAt: &expires}, metadata.ProxyPool[0].Proxy)
+	service.SelectAccountProxy(&metadata)
+	require.Equal(t, int64(82), *metadata.ProxyID)
 }
 
 func TestSchedulerMetadataAccountProjectsUpstreamBillingProbe(t *testing.T) {

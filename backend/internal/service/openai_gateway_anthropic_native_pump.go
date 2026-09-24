@@ -18,6 +18,8 @@ import (
 	"errors"
 	"io"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 // errAnthropicNativeStreamIdle 表示上游流读间隔超时（见上方文件注释）。
@@ -118,9 +120,10 @@ func (p *anthropicNativeLinePump) stop() {
 
 // anthropicNativeStreamInterval 返回本组转换路径适用的读间隔上限；
 // gateway.stream_data_interval_timeout <= 0 时视为禁用。
-func (s *OpenAIGatewayService) anthropicNativeStreamInterval() time.Duration {
+func (s *OpenAIGatewayService) anthropicNativeStreamInterval(c *gin.Context) time.Duration {
+	interval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		return time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		interval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 	}
-	return 0
+	return intelligenceMonitorStreamInterval(c, interval)
 }

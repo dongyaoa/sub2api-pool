@@ -223,7 +223,7 @@
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
           </template>
           <template #cell-name="{ row, value }">
-            <div class="flex flex-col">
+            <div class="flex min-w-0 max-w-[200px] flex-col">
               <HelpTooltip
                 v-if="accountHomepageUrl(row)"
                 :content="accountHomepageUrl(row)"
@@ -235,13 +235,14 @@
                     :href="accountHomepageUrl(row)"
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="border-b border-dotted border-gray-300 font-medium text-gray-900 dark:border-dark-600 dark:text-white"
+                    :title="value"
+                    class="block min-w-0 max-w-[200px] truncate border-b border-dotted border-gray-300 font-medium text-gray-900 dark:border-dark-600 dark:text-white"
                   >
                     {{ value }}
                   </a>
                 </template>
               </HelpTooltip>
-              <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span v-else :title="value" class="block max-w-[200px] truncate font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <span
                 v-if="accountDisplayEmail(row)"
                 class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
@@ -441,6 +442,18 @@
           </template>
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
+              <button
+                type="button"
+                data-testid="account-test-connection"
+                :disabled="testLoadingAccountId !== null || showTest"
+                :aria-busy="testLoadingAccountId === row.id"
+                :aria-label="`${t('admin.accounts.testConnection')}: ${row.name}`"
+                @click="handleTest(row)"
+                class="flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+              >
+                <Icon :name="testLoadingAccountId === row.id ? 'refresh' : 'play'" size="sm" :class="{ 'animate-spin': testLoadingAccountId === row.id }" />
+                <span class="text-xs">{{ t('admin.accounts.testConnection') }}</span>
+              </button>
               <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
@@ -613,6 +626,7 @@ const showDeleteDialog = ref(false)
 const showCreateShadowDialog = ref(false)
 const showReAuth = ref(false)
 const showTest = ref(false)
+const testLoadingAccountId = ref<number | null>(null)
 const showStats = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
@@ -2361,10 +2375,16 @@ const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
 const handleTest = async (a: AccountListItem) => {
-  const account = await loadAccountDetails(a)
-  if (!account) return
-  testingAcc.value = account
-  showTest.value = true
+  if (testLoadingAccountId.value !== null || showTest.value) return
+  testLoadingAccountId.value = a.id
+  try {
+    const account = await loadAccountDetails(a)
+    if (!account) return
+    testingAcc.value = account
+    showTest.value = true
+  } finally {
+    testLoadingAccountId.value = null
+  }
 }
 const handleViewStats = async (a: AccountListItem) => {
   const account = await loadAccountDetails(a)
