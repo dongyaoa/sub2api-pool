@@ -41,13 +41,14 @@ export interface UpstreamBalanceSnapshot {
   kind: 'wallet' | 'key_quota' | 'subscription' | 'unsupported' | 'unknown'
   balance: number | null
   quota_remaining: number | null
+  unlimited_quota?: boolean
   today_used: number | null
   total_used: number | null
   currency: string
   status: 'ok' | 'error' | 'unsupported' | 'pending'
   synced_at: string | null
   last_attempt_at?: string | null
-  currency_source?: 'reported' | 'sub2api_default'
+  currency_source?: 'reported' | 'sub2api_default' | 'newapi_status'
   error: string
   billing?: UpstreamBillingSnapshot | null
 }
@@ -60,7 +61,8 @@ export interface UpstreamBillingSnapshot {
   resolved_rate_multiplier: number | null
   effective_rate_multiplier: number | null
   billing_scope: 'token'
-  source: 'sub2api_billing' | 'sub2api_usage' | 'unknown'
+  source: 'sub2api_billing' | 'sub2api_usage' | 'newapi_token' | 'newapi_account' | 'newapi_pricing' | 'unknown'
+  provider?: 'newapi'
   status: 'ok' | 'error' | 'unsupported' | 'pending'
   stale: boolean
   synced_at: string | null
@@ -94,6 +96,8 @@ export interface UpstreamTargetInput {
   api_mode: 'chat_completions' | 'responses'
   endpoint: string
   api_key?: string
+  newapi_user_id?: number
+  newapi_access_token?: string
   source_account_id?: number
   models: string[]
   enabled: boolean
@@ -105,9 +109,10 @@ export interface UpstreamTargetInput {
   notes: string
 }
 
-export interface UpstreamTarget extends Omit<UpstreamTargetInput, 'api_key' | 'source_account_id'> {
+export interface UpstreamTarget extends Omit<UpstreamTargetInput, 'api_key' | 'source_account_id' | 'newapi_access_token'> {
   id: number
   api_key_masked: string
+  newapi_access_token_configured?: boolean
   created_at: string
   updated_at: string
   last_checked_at: string | null

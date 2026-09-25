@@ -2,14 +2,17 @@
   <article class="card supplier-card grid min-w-0 overflow-hidden 2xl:grid-cols-[232px_minmax(0,1fr)]">
     <aside class="supplier-summary min-w-0 border-b border-gray-100 p-4 2xl:border-b-0 2xl:border-r dark:border-dark-700">
       <div class="supplier-identity min-w-0">
-        <div class="flex items-center gap-2.5">
+        <div class="flex items-start gap-2.5">
           <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-sm font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">{{ supplier.name.slice(0, 1).toUpperCase() }}</div>
-          <h2 class="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-gray-100" :title="supplier.name">{{ supplier.name }}</h2>
-          <button type="button" class="action" :title="t('upstreamCenter.editSupplier')" :aria-label="t('upstreamCenter.editSupplier')" @click="emit('edit', supplier)"><Icon name="edit" size="xs" /></button>
+          <h2 class="min-w-0 flex-1 self-center truncate text-sm font-semibold text-gray-900 dark:text-gray-100" :title="supplier.name">{{ supplier.name }}</h2>
+          <span v-if="hasLocalAccounts" class="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300" :title="t('upstreamCenter.localBadgeHint')">{{ t('upstreamCenter.localBadge') }}</span>
         </div>
         <div class="mt-2 flex min-w-0 items-center justify-between gap-2">
           <p class="min-w-0 truncate text-[11px] text-gray-400 dark:text-dark-400" :title="website || undefined">{{ website ? domain(website) : '—' }}</p>
-          <a v-if="website" :href="website" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="inline-flex shrink-0 items-center gap-1 rounded-md bg-primary-50 px-1.5 py-1 text-[10px] font-medium text-primary-600 transition-colors hover:bg-primary-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:bg-primary-500/10 dark:text-primary-400 dark:hover:bg-primary-500/20" :aria-label="t('upstreamCenter.visitWebsite')" data-testid="supplier-website">{{ t('upstreamCenter.visitWebsite') }}<Icon name="externalLink" size="xs" /></a>
+          <div class="flex shrink-0 items-center gap-1">
+            <button type="button" class="action" :title="t('upstreamCenter.editSupplier')" :aria-label="t('upstreamCenter.editSupplier')" @click="emit('edit', supplier)"><Icon name="edit" size="xs" /></button>
+            <a v-if="website" :href="website" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="inline-flex shrink-0 items-center gap-1 rounded-md bg-primary-50 px-1.5 py-1 text-[10px] font-medium text-primary-600 transition-colors hover:bg-primary-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:bg-primary-500/10 dark:text-primary-400 dark:hover:bg-primary-500/20" :aria-label="t('upstreamCenter.visitWebsite')" data-testid="supplier-website">{{ t('upstreamCenter.visitWebsite') }}<Icon name="externalLink" size="xs" /></a>
+          </div>
         </div>
       </div>
       <UpstreamWallet class="supplier-wallet !rounded-lg !p-3" :wallets="supplier.wallets || []" :target-id="supplier.targets[0]?.id" :syncable="!!supplier.targets.length" :busy="supplier.targets.some(target => busyIds.has(target.id))" @sync="id => emit('sync', id)" />
@@ -42,6 +45,7 @@ import { domain, money } from './format'
 import { safeWebsite } from './safeWebsite'
 const props = defineProps<{ supplier: UpstreamSupplier; busyIds: Set<number>; runningIds: Set<number> }>()
 const website = computed(() => safeWebsite(props.supplier.website))
+const hasLocalAccounts = computed(() => props.supplier.targets.some(target => target.account_ids?.length > 0))
 const emit = defineEmits<{ edit: [supplier: UpstreamSupplier]; delete: [supplier: UpstreamSupplier]; finance: [supplier: UpstreamSupplier]; 'add-target': [supplier: UpstreamSupplier]; 'order-groups': [supplier: UpstreamSupplier]; 'target-details': [target: UpstreamTarget, model: string, record?: UpstreamHistoryRecord]; run: [target: UpstreamTarget]; toggle: [target: UpstreamTarget]; 'edit-target': [target: UpstreamTarget]; 'delete-target': [target: UpstreamTarget]; sync: [targetId: number] }>()
 const { t } = useI18n()
 </script>

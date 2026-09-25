@@ -32,13 +32,14 @@ var (
 )
 
 type UpstreamFinanceService struct {
-	repo      UpstreamFinanceRepository
-	encryptor SecretEncryptor
-	billing   *BillingService
-	channels  *ChannelService
-	accounts  AccountRepository
-	client    *http.Client
-	now       func() time.Time
+	repo        UpstreamFinanceRepository
+	encryptor   SecretEncryptor
+	billing     *BillingService
+	channels    *ChannelService
+	accounts    AccountRepository
+	client      *http.Client
+	now         func() time.Time
+	newAPICache newAPIFinanceCache
 }
 
 func NewUpstreamFinanceService(repo UpstreamFinanceRepository, encryptor SecretEncryptor, billing *BillingService, channels *ChannelService, accounts AccountRepository) *UpstreamFinanceService {
@@ -108,7 +109,13 @@ func upstreamBalanceIdentity(t *UpstreamFinanceTarget) string {
 	if t.SupplierID != nil {
 		supplier = fmt.Sprint(*t.SupplierID)
 	}
-	digest := sha256.Sum256([]byte(t.Provider + "\x00" + t.Endpoint + "\x00" + t.APIKeyEncrypted + "\x00" + supplier + "\x00" + t.WalletRef))
+	identity := t.Provider + "\x00" + t.Endpoint + "\x00" + t.APIKeyEncrypted + "\x00" + supplier + "\x00" + t.WalletRef
+	// Preserve existing Sub2API snapshot identity; console authorization adds a
+	// distinct identity so one account's wallet cannot survive a credential swap.
+	if t.NewAPIUserID != 0 || t.NewAPIAccessTokenEncrypted != "" {
+		identity += fmt.Sprintf("\x00newapi:%d\x00%s", t.NewAPIUserID, t.NewAPIAccessTokenEncrypted)
+	}
+	digest := sha256.Sum256([]byte(identity))
 	return hex.EncodeToString(digest[:])
 }
 
@@ -156,11 +163,21 @@ func (s *UpstreamFinanceService) SyncBalance(ctx context.Context, targetID int64
 	if err != nil {
 		return nil, err
 	}
-	snapshot := s.fetchBalance(ctx, target)
+	// Adapters can require several reads. Their combined budget must remain
+	// shorter than the one-minute lease, including persistence and release.
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, 45*time.Second)
+	snapshot := s.fetchBalance(fetchCtx, target)
 	if snapshot.Billing == nil {
-		snapshot.Billing = s.fetchRemoteBilling(ctx, target)
+		snapshot.Billing = s.fetchRemoteBilling(fetchCtx, target)
 	}
-	if err = s.repo.SaveBalance(ctx, target, upstreamBalanceIdentity(target), snapshot, token, s.now().Add(upstreamBalanceInterval)); err != nil {
+	cancelFetch()
+	interval := upstreamBalanceInterval
+	if snapshot.Billing != nil && snapshot.Billing.Source == "newapi_token" && snapshot.Status == "ok" {
+		// New API's key-usage endpoint defaults to 20 requests / 20 minutes per
+		// source IP; this metadata cadence never changes availability probes.
+		interval = 20 * time.Minute
+	}
+	if err = s.repo.SaveBalance(ctx, target, upstreamBalanceIdentity(target), snapshot, token, s.now().Add(interval)); err != nil {
 		return nil, err
 	}
 	return s.LatestBalance(ctx, targetID)
@@ -200,7 +217,7 @@ func upstreamUsageURL(endpoint string) (string, error) {
 	return u.String(), nil
 }
 
-func (s *UpstreamFinanceService) fetchBalance(ctx context.Context, target *UpstreamFinanceTarget) *UpstreamBalanceSnapshot {
+func (s *UpstreamFinanceService) fetchSub2APIBalance(ctx context.Context, target *UpstreamFinanceTarget) *UpstreamBalanceSnapshot {
 	now := s.now().UTC()
 	snapshot := &UpstreamBalanceSnapshot{TargetID: target.ID, WalletRef: target.WalletRef, Kind: "unknown", Status: "error", SyncedAt: &now}
 	fail := func(code string) *UpstreamBalanceSnapshot { snapshot.Error = code; return snapshot }

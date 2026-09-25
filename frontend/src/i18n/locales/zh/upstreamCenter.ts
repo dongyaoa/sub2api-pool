@@ -1,5 +1,31 @@
 export default {
   upstreamCenter: {
+    localBadge: '站内', localBadgeHint: '包含已关联站内 API Key 账号的分组',
+    newapi: {
+      authorization: '余额与倍率授权',
+      autoDetectHint: '自动识别 Sub2API / New API。New API 的模型 Key 可查询 Key 额度；开启授权后可同步账号钱包和实际分组倍率。',
+      userId: 'New API 用户 ID', userIdPlaceholder: '例如：123', accessToken: '个人访问令牌',
+      tokenPlaceholder: '填写该上游的个人访问令牌', keepToken: '留空保留已保存的访问令牌',
+      tokenHint: '填写同一上游控制台的个人访问令牌（Access Token），与上方调用模型的 API Key 不同；不需要密码、Cookie 或手动填写倍率。凭据仅在服务端加密保存。',
+      configured: '已保存授权，可留空保留', changedConnectionHint: '地址、接口协议或用户 ID 已更改。请重新填写该上游的访问令牌，或关闭授权。',
+      requiredUserId: '请填写有效的 New API 用户 ID（正整数）', requiredToken: '请填写该上游的个人访问令牌，或关闭余额与倍率授权',
+      unlimited: '不限额', remoteGroup: '上游分组', dynamicRate: '动态',
+      usageHint: '金额统一显示为 USD 额度；仅 API Key 的额度刷新较慢，配置授权后可同步钱包和实时倍率。累计消费来自当前 Key；上游未提供今日消费时显示「—」。',
+      rawUsageHint: '额度换算比例未知，暂按原始 QUOTA 展示。累计消费来自当前 Key；上游未提供今日消费时显示「—」。',
+      errors: {
+        authorizationRequired: '已识别 New API。编辑此 Key 分组并开启「余额与倍率授权」，以同步账号钱包和实际倍率。',
+        authorizationFailed: 'New API 授权失效，请检查用户 ID 和个人访问令牌。',
+        identityMismatch: '个人访问令牌与用户 ID 不匹配，请使用同一账号的授权。',
+        tokenNotFound: '该账号下未找到当前模型 Key，请检查账号授权与 Key 是否属于同一上游账号。',
+        tokenAmbiguous: '上游返回多个匹配的 Key，无法确认分组，请检查上游的 Key 信息。',
+        autoGroup: '此 Key 使用自动分组，倍率随实际路由变化，无法给出单一固定倍率。',
+        rateUnavailable: 'New API 暂未提供该分组的有效倍率。',
+        quotaUnitUnknown: '上游未提供额度换算比例，暂按原始 QUOTA 单位展示。',
+        lookupUnsupported: '此 New API 版本不支持当前 Key 查询接口，暂无法确认分组。',
+        rateLimited: '上游限制额度查询频率，余额会稍后刷新；配置控制台授权可提高刷新频率。',
+        requestFailed: 'New API 同步请求失败，请稍后重试。', responseUnsupported: '上游返回的数据格式暂不支持。', httpError: 'New API 同步请求返回错误',
+      },
+    },
     order: {
       open: '手动排序', groups: '分组排序',
       titles: { suppliers: '上游排序', monitors: '监控排序', groups: 'Key 分组排序', intelligence: '智商监控排序', oauth: 'OAuth 监控排序' },

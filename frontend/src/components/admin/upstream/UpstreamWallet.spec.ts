@@ -1,9 +1,38 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import UpstreamWallet from './UpstreamWallet.vue'
-import type { UpstreamBalanceSnapshot } from '@/api/admin/upstreamCenter'
+import type { UpstreamBalanceSnapshot, UpstreamBillingSnapshot } from '@/api/admin/upstreamCenter'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { time?: string }) => `${key}${params?.time ? ` ${params.time}` : ''}` }) }))
 describe('upstream wallet sync failure', () => {
+  it('distinguishes unlimited New API key quota from a finite wallet balance', async () => {
+    const wallet: UpstreamBalanceSnapshot = { target_id: 7, wallet_ref: 'default', kind: 'key_quota', balance: null, quota_remaining: null, unlimited_quota: true, today_used: null, total_used: 10, currency: 'USD', status: 'ok', synced_at: null, error: '', billing: { source: 'newapi_token', error: 'newapi_account_auth_required' } as UpstreamBillingSnapshot }
+    const wrapper = mount(UpstreamWallet, { props: { wallets: [wallet] }, global: { stubs: { Icon: true } } })
+    expect(wrapper.get('[data-testid="wallet-balance"]').text()).toBe('upstreamCenter.newapi.unlimited')
+    expect(wrapper.get('[data-testid="wallet-balance"]').classes()).not.toContain('text-rose-600')
+    expect(wrapper.text()).toContain('New API')
+    expect(wrapper.text()).toContain('upstreamCenter.newapi.errors.authorizationRequired')
+    expect(wrapper.get('[data-testid="newapi-wallet-notice"]').classes()).toContain('text-amber-700')
+    expect(wrapper.text().match(/upstreamCenter\.newapi\.errors\.authorizationRequired/g)).toHaveLength(1)
+    await wrapper.setProps({ showKeyUsage: true })
+    expect(wrapper.text().match(/upstreamCenter\.newapi\.errors\.authorizationRequired/g)).toHaveLength(1)
+    expect(wrapper.text()).toContain('upstreamCenter.newapi.usageHint')
+    await wrapper.setProps({ wallets: [{ ...wallet, kind: 'wallet', balance: 3, billing: { source: 'newapi_account', error: '' } as UpstreamBillingSnapshot }] })
+    expect(wrapper.get('[data-testid="wallet-balance"]').text()).toContain('3.00')
+    expect(wrapper.get('[data-testid="wallet-balance"]').classes()).toContain('text-rose-600')
+    expect(wrapper.get('[data-testid="wallet-key-quota"]').text()).toContain('upstreamCenter.newapi.unlimited')
+    wrapper.unmount()
+  })
+  it('displays raw New API quota without currency or low-money warnings and leaves daily usage unknown', () => {
+    const wallet: UpstreamBalanceSnapshot = { target_id: 7, wallet_ref: 'default', kind: 'key_quota', balance: null, quota_remaining: 3, today_used: null, total_used: 1250, currency: 'QUOTA', status: 'ok', synced_at: null, error: 'newapi_quota_unit_unknown', billing: { source: 'newapi_token', error: 'newapi_account_auth_required' } as UpstreamBillingSnapshot }
+    const wrapper = mount(UpstreamWallet, { props: { wallets: [wallet], targetId: 7, showKeyUsage: true }, global: { stubs: { Icon: true } } })
+    expect(wrapper.get('[data-testid="wallet-balance"]').text()).toBe('3 QUOTA')
+    expect(wrapper.get('[data-testid="wallet-balance"]').classes()).not.toContain('text-rose-600')
+    expect(wrapper.get('[data-testid="key-upstream-today"]').text()).toBe('—')
+    expect(wrapper.get('[data-testid="key-upstream-total"]').text()).toBe('1,250 QUOTA')
+    expect(wrapper.text()).toContain('upstreamCenter.newapi.errors.quotaUnitUnknown')
+    expect(wrapper.text()).toContain('upstreamCenter.newapi.rawUsageHint')
+    wrapper.unmount()
+  })
   it.each([
     { balance: 4.99, low: true },
     { balance: 0, low: true },

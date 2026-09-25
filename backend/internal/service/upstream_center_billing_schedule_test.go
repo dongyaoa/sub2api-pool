@@ -136,3 +136,35 @@ func TestUpstreamIndependentScheduledBillingAndReadOnlyOverview(t *testing.T) {
 		})
 	}
 }
+
+func TestUpstreamNewAPIQuotaCadenceAndAccountRefresh(t *testing.T) {
+	for _, authorized := range []bool{false, true} {
+		t.Run(fmt.Sprint(authorized), func(t *testing.T) {
+			now := time.Now().UTC()
+			fixtures := newAPIFixtures()
+			svc, target, paths := newAPIFinanceFixture(t, fixtures, authorized)
+			repo := &upstreamScheduledBillingRepo{target: target, next: now}
+			svc.repo, svc.now = repo, func() time.Time { return now }
+			svc.SyncDueBalances(context.Background())
+			require.NotNil(t, repo.snapshot)
+			require.Equal(t, "ok", repo.snapshot.Status)
+			interval := 20 * time.Minute
+			if authorized {
+				interval = time.Minute
+			}
+			require.Equal(t, now.Add(interval), repo.next)
+			initialRequests := len(*paths)
+			now = now.Add(interval / 2)
+			svc.SyncDueBalances(context.Background())
+			require.Len(t, *paths, initialRequests)
+			now = now.Add(interval / 2)
+			fixtures["/api/user/self/groups"] = `{"success":true,"data":{"premium":{"ratio":0}}}`
+			svc.SyncDueBalances(context.Background())
+			require.Equal(t, "ok", repo.snapshot.Status)
+			if authorized {
+				require.Equal(t, []string{"/api/status", "/api/user/self", "/api/token/13", "/api/user/self/groups"}, (*paths)[initialRequests:])
+				require.Equal(t, 0.0, *repo.snapshot.Billing.EffectiveRateMultiplier)
+			}
+		})
+	}
+}

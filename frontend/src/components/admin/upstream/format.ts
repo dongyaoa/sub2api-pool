@@ -3,6 +3,7 @@ export { hslForPct as availabilityColor } from '@/composables/useChannelMonitorF
 
 export function money(value: number | null | undefined, currency = 'USD'): string {
   if (value == null || !Number.isFinite(value)) return '—'
+  if (currency === 'QUOTA') return `${value.toLocaleString(undefined, { maximumFractionDigits: 6 })} QUOTA`
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD', minimumFractionDigits: 2, maximumFractionDigits: Math.abs(value) > 0 && Math.abs(value) < 0.01 ? 6 : 2 }).format(value) }
   catch { return `${value.toFixed(2)} ${currency}` }
 }

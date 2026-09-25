@@ -34,32 +34,35 @@ type UpstreamBindingCredential struct {
 }
 
 type UpstreamTarget struct {
-	ID                  int64                               `json:"id"`
-	SupplierID          *int64                              `json:"supplier_id"`
-	Name                string                              `json:"name"`
-	Provider            string                              `json:"provider"`
-	APIMode             string                              `json:"api_mode"`
-	Endpoint            string                              `json:"endpoint"`
-	APIKeyEncrypted     string                              `json:"-"`
-	APIKeyFingerprint   string                              `json:"-"`
-	APIKeyMasked        string                              `json:"api_key_masked"`
-	Models              []string                            `json:"models"`
-	Enabled             bool                                `json:"enabled"`
-	IntervalSeconds     int                                 `json:"interval_seconds"`
-	TimeoutSeconds      int                                 `json:"timeout_seconds"`
-	DegradedThresholdMs int                                 `json:"degraded_threshold_ms"`
-	AccountIDs          []int64                             `json:"account_ids"`
-	WalletRef           string                              `json:"wallet_ref"`
-	Notes               string                              `json:"notes"`
-	LastCheckedAt       *time.Time                          `json:"last_checked_at"`
-	NextCheckAt         *time.Time                          `json:"next_check_at"`
-	CreatedAt           time.Time                           `json:"created_at"`
-	UpdatedAt           time.Time                           `json:"updated_at"`
-	Statistics          []*UpstreamModelStatistics          `json:"statistics"`
-	Balance             *UpstreamBalanceSnapshot            `json:"balance"`
-	Finance             *UpstreamFinanceSummary             `json:"finance"`
-	BindingCredentials  map[int64]UpstreamBindingCredential `json:"-"`
-	ResetBindings       bool                                `json:"-"`
+	ID                          int64                               `json:"id"`
+	SupplierID                  *int64                              `json:"supplier_id"`
+	Name                        string                              `json:"name"`
+	Provider                    string                              `json:"provider"`
+	APIMode                     string                              `json:"api_mode"`
+	Endpoint                    string                              `json:"endpoint"`
+	APIKeyEncrypted             string                              `json:"-"`
+	APIKeyFingerprint           string                              `json:"-"`
+	APIKeyMasked                string                              `json:"api_key_masked"`
+	NewAPIUserID                int64                               `json:"newapi_user_id"`
+	NewAPIAccessTokenEncrypted  string                              `json:"-"`
+	NewAPIAccessTokenConfigured bool                                `json:"newapi_access_token_configured"`
+	Models                      []string                            `json:"models"`
+	Enabled                     bool                                `json:"enabled"`
+	IntervalSeconds             int                                 `json:"interval_seconds"`
+	TimeoutSeconds              int                                 `json:"timeout_seconds"`
+	DegradedThresholdMs         int                                 `json:"degraded_threshold_ms"`
+	AccountIDs                  []int64                             `json:"account_ids"`
+	WalletRef                   string                              `json:"wallet_ref"`
+	Notes                       string                              `json:"notes"`
+	LastCheckedAt               *time.Time                          `json:"last_checked_at"`
+	NextCheckAt                 *time.Time                          `json:"next_check_at"`
+	CreatedAt                   time.Time                           `json:"created_at"`
+	UpdatedAt                   time.Time                           `json:"updated_at"`
+	Statistics                  []*UpstreamModelStatistics          `json:"statistics"`
+	Balance                     *UpstreamBalanceSnapshot            `json:"balance"`
+	Finance                     *UpstreamFinanceSummary             `json:"finance"`
+	BindingCredentials          map[int64]UpstreamBindingCredential `json:"-"`
+	ResetBindings               bool                                `json:"-"`
 }
 
 // Pointer fields retain partial-update semantics; an explicit null supplier_id
@@ -71,6 +74,10 @@ type UpstreamTargetInput struct {
 	APIMode    *string         `json:"api_mode"`
 	Endpoint   *string         `json:"endpoint"`
 	APIKey     *string         `json:"api_key"`
+	// Console credentials are optional and separate from the inference key.
+	// A zero user ID explicitly clears both fields; a blank token preserves it.
+	NewAPIUserID      *int64  `json:"newapi_user_id"`
+	NewAPIAccessToken *string `json:"newapi_access_token"`
 	// SourceAccountID copies credentials once for an independent monitor. It is
 	// never persisted as an account binding or returned in target responses.
 	SourceAccountID     *int64    `json:"source_account_id"`

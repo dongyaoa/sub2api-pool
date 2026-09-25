@@ -1,5 +1,31 @@
 export default {
   upstreamCenter: {
+    localBadge: 'Local', localBadgeHint: 'Includes groups linked to local API key accounts',
+    newapi: {
+      authorization: 'Balance & rate authorization',
+      autoDetectHint: 'Sub2API and New API are detected automatically. A New API model key can report its quota; enable authorization to sync the account wallet and effective group rate.',
+      userId: 'New API user ID', userIdPlaceholder: 'e.g. 123', accessToken: 'Personal access token',
+      tokenPlaceholder: 'Enter this upstream’s personal access token', keepToken: 'Leave blank to keep the saved access token',
+      tokenHint: 'Use the personal access token from this upstream’s console, separate from the model API key above. No password, cookie or manual rate is needed. Credentials are stored encrypted on the server.',
+      configured: 'Authorization saved; leave blank to keep it', changedConnectionHint: 'The URL, protocol or user ID changed. Enter the personal access token for this upstream again, or disable authorization.',
+      requiredUserId: 'Enter a valid New API user ID (positive integer)', requiredToken: 'Enter this upstream’s personal access token, or disable balance and rate authorization',
+      unlimited: 'Unlimited', remoteGroup: 'Upstream group', dynamicRate: 'Dynamic',
+      usageHint: 'Amounts are normalized to USD quota. API-key-only quota refreshes less often; authorize the account to sync its wallet and current rates. Lifetime usage belongs to this key; unavailable daily usage stays “—”.',
+      rawUsageHint: 'The conversion factor is unknown, so amounts use raw QUOTA units. Lifetime usage belongs to this key; unavailable daily usage stays “—”.',
+      errors: {
+        authorizationRequired: 'New API detected. Edit this key group and enable balance and rate authorization to sync the account wallet and effective rate.',
+        authorizationFailed: 'New API authorization failed. Check the user ID and personal access token.',
+        identityMismatch: 'The personal access token and user ID belong to different accounts. Use matching credentials.',
+        tokenNotFound: 'The model key was not found in this account. Check that the authorization and key belong to the same upstream account.',
+        tokenAmbiguous: 'The upstream returned multiple matching keys. Check the upstream key details to identify its group.',
+        autoGroup: 'This key uses automatic group routing. Its rate varies with the chosen route, so no single fixed rate is shown.',
+        rateUnavailable: 'New API has not provided an effective rate for this group.',
+        quotaUnitUnknown: 'The upstream has not provided a quota conversion factor. Values are shown in raw QUOTA units.',
+        lookupUnsupported: 'This New API version does not support the key lookup endpoint. Its group could not be confirmed.',
+        rateLimited: 'The upstream limits quota lookup frequency. The balance will refresh later; console authorization allows more frequent updates.',
+        requestFailed: 'The New API sync request failed. Try again later.', responseUnsupported: 'The upstream response format is not supported.', httpError: 'The New API sync request returned an error',
+      },
+    },
     order: {
       open: 'Reorder', groups: 'Reorder groups',
       titles: { suppliers: 'Reorder upstreams', monitors: 'Reorder monitors', groups: 'Reorder key groups', intelligence: 'Reorder intelligence monitors', oauth: 'Reorder OAuth monitors' },

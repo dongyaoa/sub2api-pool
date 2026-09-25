@@ -165,6 +165,8 @@ func (s *UpstreamCenterService) SaveTarget(ctx context.Context, id int64, in Ups
 	t := &UpstreamTarget{Provider: MonitorProviderOpenAI, APIMode: MonitorAPIModeChatCompletions, Enabled: true, IntervalSeconds: 30, TimeoutSeconds: 45, DegradedThresholdMs: 6000, WalletRef: "default", Models: []string{"gpt-5.6-sol"}, AccountIDs: []int64{}}
 	var oldSupplier *int64
 	oldProvider, oldEndpoint, oldEncrypted := "", "", ""
+	var oldNewAPIUserID int64
+	oldNewAPITokenEncrypted := ""
 	if id > 0 {
 		var err error
 		t, err = s.repo.GetTarget(ctx, id)
@@ -175,6 +177,8 @@ func (s *UpstreamCenterService) SaveTarget(ctx context.Context, id int64, in Ups
 		oldProvider = t.Provider
 		oldEndpoint = normalizeEndpoint(t.Endpoint)
 		oldEncrypted = t.APIKeyEncrypted
+		oldNewAPIUserID = t.NewAPIUserID
+		oldNewAPITokenEncrypted = t.NewAPIAccessTokenEncrypted
 	}
 	if len(in.SupplierID) > 0 {
 		if err := json.Unmarshal(in.SupplierID, &t.SupplierID); err != nil {
@@ -291,6 +295,10 @@ func (s *UpstreamCenterService) SaveTarget(ctx context.Context, id int64, in Ups
 		return nil, err
 	}
 	t.Endpoint = normalizeEndpoint(t.Endpoint)
+	if err := s.applyNewAPICredentials(t, in, oldNewAPIUserID, oldNewAPITokenEncrypted,
+		id > 0 && (t.Endpoint != oldEndpoint || t.Provider != oldProvider)); err != nil {
+		return nil, err
+	}
 	if t.SupplierID != nil {
 		if _, err := s.repo.GetSupplier(ctx, *t.SupplierID); err != nil {
 			return nil, err
@@ -321,6 +329,59 @@ func (s *UpstreamCenterService) SaveTarget(ctx context.Context, id int64, in Ups
 		t.Statistics = append(t.Statistics, &UpstreamModelStatistics{Model: m, Status: "unknown", Timeline: []*UpstreamHistoryRecord{}})
 	}
 	return t, nil
+}
+
+func (s *UpstreamCenterService) applyNewAPICredentials(t *UpstreamTarget, in UpstreamTargetInput, oldUserID int64, oldEncrypted string, recipientChanged bool) error {
+	invalid := func(detail string) error {
+		return ErrUpstreamInvalid.WithMetadata(map[string]string{"field": "newapi_access_token", "detail": detail})
+	}
+	if in.NewAPIUserID != nil {
+		if *in.NewAPIUserID < 0 {
+			return ErrUpstreamInvalid.WithMetadata(map[string]string{"field": "newapi_user_id", "detail": "New API user ID must be positive, or zero to clear the console credentials"})
+		}
+		t.NewAPIUserID = *in.NewAPIUserID
+		if t.NewAPIUserID == 0 {
+			t.NewAPIAccessTokenEncrypted = ""
+			return nil
+		}
+	}
+	plain := ""
+	if in.NewAPIAccessToken != nil {
+		// Validate line breaks before trimming: tokens are used in an HTTP header.
+		if len(*in.NewAPIAccessToken) > 4096 || strings.ContainsAny(*in.NewAPIAccessToken, "\r\n") {
+			return invalid("New API access token must not exceed 4096 bytes or contain line breaks")
+		}
+		plain = strings.TrimSpace(*in.NewAPIAccessToken)
+	}
+	if plain == "" {
+		if oldEncrypted != "" && (recipientChanged || t.NewAPIUserID != oldUserID) {
+			return invalid("enter a new New API access token or clear the console credentials before changing the endpoint, provider or user ID")
+		}
+		t.NewAPIAccessTokenEncrypted = oldEncrypted
+	} else {
+		if t.NewAPIUserID <= 0 {
+			return invalid("a positive New API user ID is required with the access token")
+		}
+		// Preserve stable ciphertext for unchanged credentials so cosmetic edits
+		// do not invalidate snapshots or schedule a redundant balance refresh.
+		previous := ""
+		if oldEncrypted != "" {
+			previous, _ = s.encryptor.Decrypt(oldEncrypted)
+		}
+		if oldEncrypted != "" && previous == plain {
+			t.NewAPIAccessTokenEncrypted = oldEncrypted
+		} else {
+			encrypted, err := s.encryptor.Encrypt(plain)
+			if err != nil {
+				return fmt.Errorf("encrypt upstream console credentials: %w", err)
+			}
+			t.NewAPIAccessTokenEncrypted = encrypted
+		}
+	}
+	if (t.NewAPIUserID > 0) != (t.NewAPIAccessTokenEncrypted != "") {
+		return invalid("provide both a New API user ID and access token, or clear the console credentials")
+	}
+	return nil
 }
 
 func sameUpstreamSupplier(a, b *int64) bool {
@@ -375,6 +436,7 @@ func validateUpstreamTargetConfig(t *UpstreamTarget, key string, validateNetwork
 }
 func (s *UpstreamCenterService) maskTarget(t *UpstreamTarget) {
 	t.APIKeyMasked = "***"
+	t.NewAPIAccessTokenConfigured = t.NewAPIUserID > 0 && t.NewAPIAccessTokenEncrypted != ""
 	plain, err := s.encryptor.Decrypt(t.APIKeyEncrypted)
 	if err == nil && len(plain) > 8 {
 		t.APIKeyMasked = plain[:4] + "••••" + plain[len(plain)-4:]

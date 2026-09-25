@@ -36,7 +36,7 @@ func TestUpstreamFinancePostgresLedger(t *testing.T) {
 	_, err = db.ExecContext(ctx, `CREATE TABLE accounts (id BIGINT PRIMARY KEY, credentials JSONB NOT NULL DEFAULT '{}', platform TEXT NOT NULL DEFAULT 'openai', type TEXT NOT NULL DEFAULT 'apikey', deleted_at TIMESTAMPTZ);
 CREATE TABLE usage_logs (id BIGSERIAL PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL, account_id BIGINT NOT NULL, group_id BIGINT, user_id BIGINT NOT NULL DEFAULT 1, api_key_id BIGINT NOT NULL DEFAULT 1, requested_model TEXT, model TEXT NOT NULL DEFAULT 'gpt-test', request_id TEXT, actual_cost NUMERIC NOT NULL DEFAULT 0, total_cost NUMERIC NOT NULL DEFAULT 0, account_stats_cost NUMERIC, account_rate_multiplier NUMERIC, billing_type SMALLINT NOT NULL DEFAULT 0, input_tokens INT NOT NULL DEFAULT 0, output_tokens INT NOT NULL DEFAULT 0, cache_creation_tokens INT NOT NULL DEFAULT 0, cache_read_tokens INT NOT NULL DEFAULT 0);`)
 	require.NoError(t, err)
-	for _, name := range []string{"242_upstream_center.sql", "243_upstream_finance.sql", "243_upstream_finance.sql", "244_upstream_remote_billing.sql", "244_upstream_remote_billing.sql", "247_upstream_finance_usage_totals.sql", "247_upstream_finance_usage_totals.sql"} {
+	for _, name := range []string{"242_upstream_center.sql", "243_upstream_finance.sql", "243_upstream_finance.sql", "244_upstream_remote_billing.sql", "244_upstream_remote_billing.sql", "247_upstream_finance_usage_totals.sql", "247_upstream_finance_usage_totals.sql", "253_upstream_newapi_credentials.sql", "253_upstream_newapi_credentials.sql"} {
 		migration, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, string(migration))
@@ -134,10 +134,31 @@ DELETE FROM usage_logs; DELETE FROM accounts WHERE id=1;`)
 	// timestamp, while exposing the newer failure and its attempt timestamp.
 	target, err = repo.GetTarget(ctx, 1)
 	require.NoError(t, err)
+	// Console credential changes independently invalidate in-flight snapshots.
+	_, err = db.ExecContext(ctx, `UPDATE upstream_targets SET newapi_user_id=42,newapi_access_token_encrypted='console-cipher' WHERE id=1`)
+	require.NoError(t, err)
+	err = repo.SaveBalance(ctx, target, "identity", &service.UpstreamBalanceSnapshot{Kind: "wallet", Status: "ok", SyncedAt: &now}, "first-token", now.Add(time.Minute))
+	require.ErrorIs(t, err, service.ErrUpstreamFinanceIdentityChanged)
+	target, err = repo.GetTarget(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, int64(42), target.NewAPIUserID)
+	require.Equal(t, "console-cipher", target.NewAPIAccessTokenEncrypted)
+	_, err = db.ExecContext(ctx, `UPDATE upstream_targets SET newapi_user_id=43 WHERE id=1`)
+	require.NoError(t, err)
+	err = repo.SaveBalance(ctx, target, "identity", &service.UpstreamBalanceSnapshot{Kind: "wallet", Status: "ok", SyncedAt: &now}, "first-token", now.Add(time.Minute))
+	require.ErrorIs(t, err, service.ErrUpstreamFinanceIdentityChanged)
+	target, err = repo.GetTarget(ctx, 1)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE upstream_targets SET newapi_access_token_encrypted='rotated-console-cipher' WHERE id=1`)
+	require.NoError(t, err)
+	err = repo.SaveBalance(ctx, target, "identity", &service.UpstreamBalanceSnapshot{Kind: "wallet", Status: "ok", SyncedAt: &now}, "first-token", now.Add(time.Minute))
+	require.ErrorIs(t, err, service.ErrUpstreamFinanceIdentityChanged)
+	target, err = repo.GetTarget(ctx, 1)
+	require.NoError(t, err)
 	balance := 12.5
 	rate := .3
 	billing := &service.UpstreamRemoteBillingSnapshot{Status: "ok", Source: "sub2api_billing", BillingScope: "token", GroupRateMultiplier: &rate, ResolvedRateMultiplier: &rate, EffectiveRateMultiplier: &rate, SyncedAt: &now, LastAttemptAt: &now, ObservedAt: &now}
-	err = repo.SaveBalance(ctx, target, "current-identity", &service.UpstreamBalanceSnapshot{Kind: "wallet", Status: "ok", Balance: &balance, Currency: "USD", CurrencySource: "reported", SyncedAt: &now, Billing: billing}, "first-token", now.Add(time.Minute))
+	err = repo.SaveBalance(ctx, target, "current-identity", &service.UpstreamBalanceSnapshot{Kind: "wallet", Status: "ok", Balance: &balance, UnlimitedQuota: true, Currency: "USD", CurrencySource: "reported", SyncedAt: &now, Billing: billing}, "first-token", now.Add(time.Minute))
 	require.NoError(t, err)
 	later := now.Add(time.Minute)
 	claimed, err = repo.ClaimBalance(ctx, 1, "failure-token", later, later.Add(time.Minute))
@@ -151,6 +172,7 @@ DELETE FROM usage_logs; DELETE FROM accounts WHERE id=1;`)
 	require.InDelta(t, 12.5, *view.Balance, 1e-9)
 	require.Equal(t, "error", view.Status)
 	require.Equal(t, "wallet", view.Kind)
+	require.True(t, view.UnlimitedQuota, "a failed refresh retains the last successful quota mode")
 	require.WithinDuration(t, now, *view.SyncedAt, time.Microsecond)
 	require.WithinDuration(t, later, *view.LastAttemptAt, time.Microsecond)
 	require.NotNil(t, view.Billing)
@@ -176,9 +198,56 @@ DELETE FROM usage_logs; DELETE FROM accounts WHERE id=1;`)
 	require.Equal(t, "ok", view.Billing.Status)
 	require.NotNil(t, view.Billing.EffectiveRateMultiplier)
 	require.Zero(t, *view.Billing.EffectiveRateMultiplier)
+	require.False(t, view.UnlimitedQuota, "a successful refresh can change unlimited quota back to limited")
 	missing, err := repo.LatestBalance(ctx, 1, "unrelated-new-key")
 	require.NoError(t, err)
 	require.Nil(t, missing, "a replacement key must never inherit old wallet amounts")
+
+	t.Run("console credential pairing is enforced by database", func(t *testing.T) {
+		for _, query := range []string{
+			`UPDATE upstream_targets SET newapi_user_id=-1 WHERE id=1`,
+			`UPDATE upstream_targets SET newapi_user_id=0 WHERE id=1`,
+			`UPDATE upstream_targets SET newapi_access_token_encrypted='' WHERE id=1`,
+			`UPDATE upstream_targets SET newapi_access_token_encrypted='orphaned-token' WHERE id=2`,
+		} {
+			_, err := db.ExecContext(ctx, query)
+			require.Error(t, err)
+		}
+		untouched, err := repo.GetTarget(ctx, 2)
+		require.NoError(t, err)
+		require.Zero(t, untouched.NewAPIUserID)
+		require.Empty(t, untouched.NewAPIAccessTokenEncrypted)
+	})
+
+	t.Run("New API migration preserves credentials and persists billing sources", func(t *testing.T) {
+		migration, err := migrations.FS.ReadFile("253_upstream_newapi_credentials.sql")
+		require.NoError(t, err)
+		for range 2 {
+			_, err = db.ExecContext(ctx, string(migration))
+			require.NoError(t, err)
+		}
+		persisted, err := repo.GetTarget(ctx, target.ID)
+		require.NoError(t, err)
+		require.Equal(t, target.NewAPIUserID, persisted.NewAPIUserID)
+		require.Equal(t, target.NewAPIAccessTokenEncrypted, persisted.NewAPIAccessTokenEncrypted)
+		prior, err := repo.LatestBalance(ctx, 1, "current-identity")
+		require.NoError(t, err)
+		require.Equal(t, "sub2api_billing", prior.Billing.Source)
+		require.InDelta(t, balance, *prior.Balance, 1e-9)
+		for i, source := range []string{"newapi_token", "newapi_account", "newapi_pricing"} {
+			attempted := changedAt.Add(time.Duration(i+1) * time.Minute)
+			claimed, err := repo.ClaimBalance(ctx, target.ID, source, attempted, attempted.Add(time.Minute))
+			require.NoError(t, err)
+			require.True(t, claimed)
+			snapshot := &service.UpstreamBalanceSnapshot{Kind: "key_quota", Status: "ok", SyncedAt: &attempted, UnlimitedQuota: true,
+				Billing: &service.UpstreamRemoteBillingSnapshot{Source: source, Status: "ok", LastAttemptAt: &attempted}}
+			require.NoError(t, repo.SaveBalance(ctx, target, source, snapshot, source, attempted.Add(time.Minute)))
+			view, err := repo.LatestBalance(ctx, target.ID, source)
+			require.NoError(t, err)
+			require.True(t, view.UnlimitedQuota)
+			require.Equal(t, source, view.Billing.Source)
+		}
+	})
 
 	t.Run("token snapshots preserve unknown history and account billing", func(t *testing.T) {
 		legacy, err := migrations.FS.ReadFile("243_upstream_finance.sql")
@@ -298,6 +367,11 @@ INSERT INTO upstream_monitor_history(target_id,target_name,model,status,latency_
 			{"key", func() { edited.APIKeyEncrypted = "new-schedule-key" }, true},
 			{"provider", func() { edited.Provider = "anthropic" }, true},
 			{"wallet", func() { edited.WalletRef = "second-wallet" }, true},
+			{"add console credentials", func() { edited.NewAPIUserID, edited.NewAPIAccessTokenEncrypted = 42, "console-cipher" }, true},
+			{"same console credentials", func() {}, false},
+			{"console user", func() { edited.NewAPIUserID = 43 }, true},
+			{"console token", func() { edited.NewAPIAccessTokenEncrypted = "rotated-console-cipher" }, true},
+			{"remove console credentials", func() { edited.NewAPIUserID, edited.NewAPIAccessTokenEncrypted = 0, "" }, true},
 			{"attach supplier", func() { edited.SupplierID = &one }, true},
 			{"same identity", func() {}, false},
 			{"detach supplier", func() { edited.SupplierID = nil }, true},
@@ -309,6 +383,10 @@ INSERT INTO upstream_monitor_history(target_id,target_name,model,status,latency_
 				require.NoError(t, err)
 				test.change()
 				require.NoError(t, center.SaveTarget(ctx, edited))
+				loaded, err := center.GetTarget(ctx, edited.ID)
+				require.NoError(t, err)
+				require.Equal(t, edited.NewAPIUserID, loaded.NewAPIUserID)
+				require.Equal(t, edited.NewAPIAccessTokenEncrypted, loaded.NewAPIAccessTokenEncrypted)
 				require.NoError(t, db.QueryRowContext(ctx, `SELECT balance_next_sync_at FROM upstream_targets WHERE id=$1`, edited.ID).Scan(&scheduled))
 				if test.reset {
 					require.WithinDuration(t, time.Now(), scheduled, 5*time.Second)

@@ -118,14 +118,14 @@ func (r *upstreamCenterRepository) ArchiveSupplier(ctx context.Context, id int64
 	return tx.Commit()
 }
 
-const upstreamTargetColumns = `id,supplier_id,name,provider,api_mode,endpoint,api_key_encrypted,models,enabled,interval_seconds,timeout_seconds,degraded_threshold_ms,wallet_ref,notes,last_checked_at,next_check_at,created_at,updated_at`
+const upstreamTargetColumns = `id,supplier_id,name,provider,api_mode,endpoint,api_key_encrypted,models,enabled,interval_seconds,timeout_seconds,degraded_threshold_ms,wallet_ref,notes,last_checked_at,next_check_at,created_at,updated_at,newapi_user_id,newapi_access_token_encrypted`
 
 type upstreamScanner interface{ Scan(...any) error }
 
 func scanUpstreamTarget(row upstreamScanner) (*service.UpstreamTarget, error) {
 	t := new(service.UpstreamTarget)
 	var models []byte
-	err := row.Scan(&t.ID, &t.SupplierID, &t.Name, &t.Provider, &t.APIMode, &t.Endpoint, &t.APIKeyEncrypted, &models, &t.Enabled, &t.IntervalSeconds, &t.TimeoutSeconds, &t.DegradedThresholdMs, &t.WalletRef, &t.Notes, &t.LastCheckedAt, &t.NextCheckAt, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.SupplierID, &t.Name, &t.Provider, &t.APIMode, &t.Endpoint, &t.APIKeyEncrypted, &models, &t.Enabled, &t.IntervalSeconds, &t.TimeoutSeconds, &t.DegradedThresholdMs, &t.WalletRef, &t.Notes, &t.LastCheckedAt, &t.NextCheckAt, &t.CreatedAt, &t.UpdatedAt, &t.NewAPIUserID, &t.NewAPIAccessTokenEncrypted)
 	if err != nil {
 		return nil, upstreamPersistenceError(err)
 	}
@@ -227,14 +227,14 @@ func (r *upstreamCenterRepository) SaveTarget(ctx context.Context, t *service.Up
 	if err != nil {
 		return err
 	}
-	args := []any{t.SupplierID, t.Name, t.Provider, t.APIMode, t.Endpoint, t.APIKeyEncrypted, string(models), t.Enabled, t.IntervalSeconds, t.TimeoutSeconds, t.DegradedThresholdMs, t.WalletRef, t.Notes, t.APIKeyFingerprint}
+	args := []any{t.SupplierID, t.Name, t.Provider, t.APIMode, t.Endpoint, t.APIKeyEncrypted, string(models), t.Enabled, t.IntervalSeconds, t.TimeoutSeconds, t.DegradedThresholdMs, t.WalletRef, t.Notes, t.APIKeyFingerprint, t.NewAPIUserID, t.NewAPIAccessTokenEncrypted}
 	if t.ID == 0 {
-		err = tx.QueryRowContext(ctx, `INSERT INTO upstream_targets(supplier_id,name,provider,api_mode,endpoint,api_key_encrypted,models,enabled,interval_seconds,timeout_seconds,degraded_threshold_ms,wallet_ref,notes,api_key_fingerprint,next_check_at) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,CASE WHEN $8 THEN NOW() ELSE NULL END) RETURNING id,created_at,updated_at,next_check_at`, args...).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt, &t.NextCheckAt)
+		err = tx.QueryRowContext(ctx, `INSERT INTO upstream_targets(supplier_id,name,provider,api_mode,endpoint,api_key_encrypted,models,enabled,interval_seconds,timeout_seconds,degraded_threshold_ms,wallet_ref,notes,api_key_fingerprint,newapi_user_id,newapi_access_token_encrypted,next_check_at) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16,CASE WHEN $8 THEN NOW() ELSE NULL END) RETURNING id,created_at,updated_at,next_check_at`, args...).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt, &t.NextCheckAt)
 	} else {
 		args = append(args, t.ID, t.UpdatedAt)
 		// A new financial identity has no cached balance or billing observation.
 		// Queue its first sync immediately, retaining the cadence for cosmetic edits.
-		err = tx.QueryRowContext(ctx, `UPDATE upstream_targets SET supplier_id=$1,name=$2,provider=$3,api_mode=$4,endpoint=$5,api_key_encrypted=$6,models=$7::jsonb,enabled=$8,interval_seconds=$9,timeout_seconds=$10,degraded_threshold_ms=$11,wallet_ref=$12,notes=$13,api_key_fingerprint=$14,next_check_at=CASE WHEN $8 THEN NOW() ELSE NULL END,balance_next_sync_at=CASE WHEN supplier_id IS DISTINCT FROM $1::bigint OR provider IS DISTINCT FROM $3::varchar OR endpoint IS DISTINCT FROM $5::varchar OR api_key_encrypted IS DISTINCT FROM $6::text OR wallet_ref IS DISTINCT FROM $12::varchar THEN NOW() ELSE balance_next_sync_at END,sort_order=CASE WHEN supplier_id IS DISTINCT FROM $1::bigint THEN NULL ELSE sort_order END,lease_until=NULL,check_token='',updated_at=clock_timestamp() WHERE id=$15 AND updated_at=$16 AND deleted_at IS NULL AND (lease_until IS NULL OR lease_until < NOW()) RETURNING updated_at,next_check_at`, args...).Scan(&t.UpdatedAt, &t.NextCheckAt)
+		err = tx.QueryRowContext(ctx, `UPDATE upstream_targets SET supplier_id=$1,name=$2,provider=$3,api_mode=$4,endpoint=$5,api_key_encrypted=$6,models=$7::jsonb,enabled=$8,interval_seconds=$9,timeout_seconds=$10,degraded_threshold_ms=$11,wallet_ref=$12,notes=$13,api_key_fingerprint=$14,newapi_user_id=$15,newapi_access_token_encrypted=$16,next_check_at=CASE WHEN $8 THEN NOW() ELSE NULL END,balance_next_sync_at=CASE WHEN supplier_id IS DISTINCT FROM $1::bigint OR provider IS DISTINCT FROM $3::varchar OR endpoint IS DISTINCT FROM $5::varchar OR api_key_encrypted IS DISTINCT FROM $6::text OR wallet_ref IS DISTINCT FROM $12::varchar OR newapi_user_id IS DISTINCT FROM $15::bigint OR newapi_access_token_encrypted IS DISTINCT FROM $16::text THEN NOW() ELSE balance_next_sync_at END,sort_order=CASE WHEN supplier_id IS DISTINCT FROM $1::bigint THEN NULL ELSE sort_order END,lease_until=NULL,check_token='',updated_at=clock_timestamp() WHERE id=$17 AND updated_at=$18 AND deleted_at IS NULL AND (lease_until IS NULL OR lease_until < NOW()) RETURNING updated_at,next_check_at`, args...).Scan(&t.UpdatedAt, &t.NextCheckAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return service.ErrUpstreamBusy
 		}

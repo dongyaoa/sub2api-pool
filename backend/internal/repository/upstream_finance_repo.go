@@ -108,9 +108,9 @@ func (r *upstreamFinanceRepository) Details(ctx context.Context, q service.Upstr
 
 func (r *upstreamFinanceRepository) GetTarget(ctx context.Context, id int64) (*service.UpstreamFinanceTarget, error) {
 	t := &service.UpstreamFinanceTarget{}
-	err := r.db.QueryRowContext(ctx, `SELECT t.id,t.supplier_id,t.provider,t.endpoint,t.api_key_encrypted,t.wallet_ref
+	err := r.db.QueryRowContext(ctx, `SELECT t.id,t.supplier_id,t.provider,t.endpoint,t.api_key_encrypted,t.wallet_ref,t.newapi_user_id,t.newapi_access_token_encrypted
  FROM upstream_targets t LEFT JOIN upstream_suppliers s ON s.id=t.supplier_id
- WHERE t.id=$1 AND t.deleted_at IS NULL AND (t.supplier_id IS NULL OR s.deleted_at IS NULL)`, id).Scan(&t.ID, &t.SupplierID, &t.Provider, &t.Endpoint, &t.APIKeyEncrypted, &t.WalletRef)
+ WHERE t.id=$1 AND t.deleted_at IS NULL AND (t.supplier_id IS NULL OR s.deleted_at IS NULL)`, id).Scan(&t.ID, &t.SupplierID, &t.Provider, &t.Endpoint, &t.APIKeyEncrypted, &t.WalletRef, &t.NewAPIUserID, &t.NewAPIAccessTokenEncrypted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrUpstreamFinanceTargetNotFound
 	}
@@ -133,10 +133,11 @@ SELECT l.target_id,l.wallet_ref,
  CASE WHEN l.status='ok' THEN l.quota_remaining ELSE g.quota_remaining END,
  CASE WHEN l.status='ok' THEN l.today_used ELSE g.today_used END,
  CASE WHEN l.status='ok' THEN l.total_used ELSE g.total_used END,
+ CASE WHEN l.status='ok' OR g.id IS NULL THEN l.unlimited_quota ELSE g.unlimited_quota END,
  CASE WHEN l.status='ok' OR g.id IS NULL THEN l.currency ELSE g.currency END,
  CASE WHEN l.status='ok' OR g.id IS NULL THEN l.currency_source ELSE g.currency_source END,
  l.status,CASE WHEN l.status='ok' THEN l.synced_at ELSE g.synced_at END,l.error,l.synced_at
- FROM latest l LEFT JOIN good g ON TRUE`, id, identity).Scan(&s.TargetID, &s.WalletRef, &s.Kind, &s.Balance, &s.QuotaRemaining, &s.TodayUsed, &s.TotalUsed, &s.Currency, &s.CurrencySource, &s.Status, &s.SyncedAt, &s.Error, &s.LastAttemptAt)
+ FROM latest l LEFT JOIN good g ON TRUE`, id, identity).Scan(&s.TargetID, &s.WalletRef, &s.Kind, &s.Balance, &s.QuotaRemaining, &s.TodayUsed, &s.TotalUsed, &s.UnlimitedQuota, &s.Currency, &s.CurrencySource, &s.Status, &s.SyncedAt, &s.Error, &s.LastAttemptAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -189,7 +190,8 @@ func (r *upstreamFinanceRepository) SaveBalance(ctx context.Context, t *service.
 	var id int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM upstream_targets WHERE id=$1 AND deleted_at IS NULL
  AND supplier_id IS NOT DISTINCT FROM $2::bigint AND provider=$3 AND endpoint=$4
- AND api_key_encrypted=$5 AND wallet_ref=$6 AND balance_lease_token=$7 FOR UPDATE`, t.ID, t.SupplierID, t.Provider, t.Endpoint, t.APIKeyEncrypted, t.WalletRef, token).Scan(&id)
+ AND api_key_encrypted=$5 AND wallet_ref=$6 AND balance_lease_token=$7
+ AND newapi_user_id=$8 AND newapi_access_token_encrypted=$9 FOR UPDATE`, t.ID, t.SupplierID, t.Provider, t.Endpoint, t.APIKeyEncrypted, t.WalletRef, token, t.NewAPIUserID, t.NewAPIAccessTokenEncrypted).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrUpstreamFinanceIdentityChanged
 	}
@@ -197,8 +199,8 @@ func (r *upstreamFinanceRepository) SaveBalance(ctx context.Context, t *service.
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO upstream_balance_snapshots
- (target_id,supplier_id,wallet_ref,identity_hash,kind,balance,quota_remaining,today_used,total_used,currency,currency_source,status,synced_at,error)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, t.ID, t.SupplierID, t.WalletRef, identity, s.Kind, s.Balance, s.QuotaRemaining, s.TodayUsed, s.TotalUsed, s.Currency, s.CurrencySource, s.Status, s.SyncedAt, s.Error)
+ (target_id,supplier_id,wallet_ref,identity_hash,kind,balance,quota_remaining,today_used,total_used,currency,currency_source,status,synced_at,error,unlimited_quota)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, t.ID, t.SupplierID, t.WalletRef, identity, s.Kind, s.Balance, s.QuotaRemaining, s.TodayUsed, s.TotalUsed, s.Currency, s.CurrencySource, s.Status, s.SyncedAt, s.Error, s.UnlimitedQuota)
 	if err != nil {
 		return fmt.Errorf("save upstream balance snapshot: %w", err)
 	}

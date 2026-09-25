@@ -38,7 +38,7 @@ func manualOrderTestDB(t *testing.T) (*sql.DB, context.Context, func() *sql.DB) 
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `CREATE TABLE accounts(id BIGINT PRIMARY KEY,type TEXT NOT NULL DEFAULT 'apikey',credentials JSONB NOT NULL DEFAULT '{}',deleted_at TIMESTAMPTZ); CREATE TABLE api_keys(id BIGINT PRIMARY KEY,status TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),deleted_at TIMESTAMPTZ)`)
 	require.NoError(t, err)
-	for _, name := range []string{"242_upstream_center.sql", "245_intelligence_monitor.sql", "246_intelligence_monitor_oauth.sql", "249_intelligence_monitor_interval_seconds.sql", "250_intelligence_monitor_generation_timeout.sql"} {
+	for _, name := range []string{"242_upstream_center.sql", "245_intelligence_monitor.sql", "246_intelligence_monitor_oauth.sql", "249_intelligence_monitor_interval_seconds.sql", "250_intelligence_monitor_generation_timeout.sql", "253_upstream_newapi_credentials.sql"} {
 		migration, e := migrations.FS.ReadFile(name)
 		require.NoError(t, e)
 		_, e = db.ExecContext(ctx, string(migration))

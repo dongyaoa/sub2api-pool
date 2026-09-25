@@ -43,6 +43,8 @@ describe('upstream monitoring display invariants', () => {
     expect(availability(null)).toBe('—')
     expect(availability(0)).toBe('0.00%')
     expect(money(0)).not.toBe('—')
+    expect(money(1234567, 'QUOTA')).toBe('1,234,567 QUOTA')
+    expect(money(0, 'QUOTA')).toBe('0 QUOTA')
   })
   it('does not hide another model’s failure behind a healthy primary model', () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-23T10:00:00Z'))

@@ -3,8 +3,13 @@
     <aside class="flex min-w-0 flex-col border-b border-gray-100 p-4 lg:border-b-0 lg:border-r dark:border-dark-700">
       <div class="flex items-start gap-2.5">
         <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400"><Icon :name="oauth ? 'shield' : 'server'" size="sm" /></div>
-        <div class="min-w-0 flex-1"><h3 class="truncate text-sm font-semibold text-gray-900 dark:text-white" :title="plan.name">{{ plan.name }}</h3><p class="mt-1 truncate text-[11px] text-gray-500 dark:text-dark-400" :title="siteName">{{ siteName }}</p></div>
-        <span v-if="oauth" class="rounded-md border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300">OAuth</span>
+        <div class="min-w-0 flex-1">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <h3 class="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white" :title="plan.name">{{ plan.name }}</h3>
+            <span class="shrink-0 whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-3" :class="sourceBadgeClass" :title="t(`intelligenceMonitor.source.${plan.source_type}`)">{{ oauth ? 'OAuth' : t(`intelligenceMonitor.source.${plan.source_type}`) }}</span>
+          </div>
+          <p class="mt-1 truncate text-[11px] text-gray-500 dark:text-dark-400" :title="siteName">{{ siteName }}</p>
+        </div>
       </div>
       <p class="mt-2 truncate font-mono text-[10px] text-gray-400 dark:text-dark-400" :title="endpoint">{{ endpoint || '—' }}</p>
       <div class="mt-3 flex items-end justify-between gap-3">
@@ -62,6 +67,12 @@ const cardActive = computed(() => panelActive.value && props.visible)
 // Filtered cards retain their artwork DOM; hidden cards must pause playback.
 provide(intelligencePanelActiveKey, cardActive)
 const oauth = computed(() => props.plan.source_type === 'openai_oauth')
+const sourceBadgeClass = computed(() => ({
+  external: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300',
+  upstream: 'border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
+  local_group: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300',
+  openai_oauth: 'border-violet-200 bg-violet-50 text-violet-600 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
+})[props.plan.source_type])
 const supplier = computed(() => props.overview?.suppliers.find(item => item.targets.some(target => target.id === props.plan.upstream_target_id)))
 const target = computed(() => supplier.value?.targets.find(item => item.id === props.plan.upstream_target_id))
 const siteName = computed(() => oauth.value ? 'OpenAI' : supplier.value?.name || props.plan.supplier_note || props.plan.source_name || t(`intelligenceMonitor.source.${props.plan.source_type}`))

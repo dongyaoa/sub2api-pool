@@ -35,6 +35,7 @@ type UpstreamBalanceSnapshot struct {
 	Kind           string     `json:"kind"`
 	Balance        *float64   `json:"balance"`
 	QuotaRemaining *float64   `json:"quota_remaining"`
+	UnlimitedQuota bool       `json:"unlimited_quota"`
 	TodayUsed      *float64   `json:"today_used"`
 	TotalUsed      *float64   `json:"total_used"`
 	Currency       string     `json:"currency"`
@@ -106,12 +107,14 @@ type UpstreamFinancePage struct {
 // UpstreamFinanceTarget is internal and deliberately has no exported JSON form.
 // Credentials must never be serialized by handlers or persisted in snapshots.
 type UpstreamFinanceTarget struct {
-	ID              int64  `json:"-"`
-	SupplierID      *int64 `json:"-"`
-	Provider        string `json:"-"`
-	Endpoint        string `json:"-"`
-	APIKeyEncrypted string `json:"-"`
-	WalletRef       string `json:"-"`
+	ID                         int64  `json:"-"`
+	SupplierID                 *int64 `json:"-"`
+	Provider                   string `json:"-"`
+	Endpoint                   string `json:"-"`
+	APIKeyEncrypted            string `json:"-"`
+	NewAPIUserID               int64  `json:"-"`
+	NewAPIAccessTokenEncrypted string `json:"-"`
+	WalletRef                  string `json:"-"`
 }
 
 type UpstreamFinanceRepository interface {

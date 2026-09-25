@@ -1,6 +1,9 @@
 package service
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // WalletRef identifies a shared supplier wallet, not a key's ability to read
 // it. Failed keys retain their own observations on target.Balance; they do not
@@ -9,7 +12,7 @@ func upstreamSupplierWallets(targets []*UpstreamTarget) []*UpstreamBalanceSnapsh
 	knownWallets := make(map[string]bool)
 	for _, target := range targets {
 		if target != nil && target.Balance != nil && target.Balance.Kind == "wallet" && target.Balance.Balance != nil {
-			knownWallets[upstreamWalletRef(target)] = true
+			knownWallets[upstreamWalletScope(target)] = true
 		}
 	}
 	type walletIdentity struct {
@@ -17,6 +20,7 @@ func upstreamSupplierWallets(targets []*UpstreamTarget) []*UpstreamBalanceSnapsh
 		currency string
 		targetID int64
 		kind     string
+		account  string
 	}
 	positions := make(map[walletIdentity]int)
 	wallets := make([]*UpstreamBalanceSnapshot, 0)
@@ -26,7 +30,7 @@ func upstreamSupplierWallets(targets []*UpstreamTarget) []*UpstreamBalanceSnapsh
 		}
 		observation := target.Balance
 		ref := upstreamWalletRef(target)
-		identity := walletIdentity{ref: ref}
+		identity := walletIdentity{ref: ref, account: upstreamWalletScope(target)}
 		switch observation.Kind {
 		case "key_quota", "subscription":
 			// Explicit per-key allowances are never a shared wallet, even if the
@@ -36,7 +40,7 @@ func upstreamSupplierWallets(targets []*UpstreamTarget) []*UpstreamBalanceSnapsh
 			identity.kind = "wallet"
 			identity.currency = strings.ToUpper(strings.TrimSpace(observation.Currency))
 		default:
-			if knownWallets[ref] {
+			if knownWallets[upstreamWalletScope(target)] {
 				continue
 			}
 			// Without any confirmed balance, preserve an honest unknown/error
@@ -54,6 +58,17 @@ func upstreamSupplierWallets(targets []*UpstreamTarget) []*UpstreamBalanceSnapsh
 		}
 	}
 	return wallets
+}
+
+// New API identifies the actual account wallet, independently of key names.
+// Never merge two users or two endpoint deployments sharing wallet_ref=default.
+func upstreamWalletScope(target *UpstreamTarget) string {
+	ref := upstreamWalletRef(target)
+	if target.NewAPIUserID <= 0 {
+		return ref
+	}
+	base, _ := upstreamUsageURL(target.Endpoint)
+	return fmt.Sprintf("%s\x00newapi:%s:%d", ref, base, target.NewAPIUserID)
 }
 
 func upstreamWalletRef(target *UpstreamTarget) string {
