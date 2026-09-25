@@ -204,7 +204,7 @@ func TestIntelligenceCustomSecondIntervalAndGenerationTimeoutBounds(t *testing.T
 			require.NoError(t, err)
 			require.Equal(t, seconds, plan.IntervalSeconds)
 			require.Equal(t, seconds, repo.saved.IntervalSeconds)
-			require.Equal(t, 900, plan.TimeoutSeconds)
+			require.Equal(t, 600, plan.TimeoutSeconds)
 			require.False(t, plan.Enabled)
 		}
 	}
@@ -216,7 +216,7 @@ func TestIntelligenceCustomSecondIntervalAndGenerationTimeoutBounds(t *testing.T
 			require.ErrorIs(t, err, ErrIntelligenceInvalid)
 		} else {
 			require.NoError(t, err)
-			require.Equal(t, 3600, plan.IntervalSeconds, "the default remains one hour")
+			require.Equal(t, 300, plan.IntervalSeconds, "new plans default to five minutes")
 			require.Equal(t, timeout, plan.TimeoutSeconds)
 		}
 	}

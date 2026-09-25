@@ -112,3 +112,28 @@ func TestIntelligenceMonitorPostgresLeaseCoversFifteenMinuteGeneration(t *testin
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM lease_until-started_at) FROM intelligence_monitor_runs WHERE id=$1`, third.ID).Scan(&leaseSeconds))
 	require.Equal(t, float64(240+service.IntelligenceMonitorLeaseGraceSeconds), leaseSeconds)
 }
+
+func TestIntelligenceMonitorPostgresCreationDefaultsPreserveExistingPlansAndRuns(t *testing.T) {
+	db, ctx := intelligenceMonitorTestDB(t)
+	var planID, runID int64
+	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO intelligence_monitor_plans(name,source_type,timeout_seconds,interval_seconds,enabled,created_by,next_run_at) VALUES('Existing custom plan','external',900,1800,true,1,'2026-09-25T00:00:00Z') RETURNING id`).Scan(&planID))
+	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO intelligence_monitor_runs(plan_id,plan_name,status,trigger,model,reasoning_effort,prompt,source_type,source_name,source_endpoint,api_mode,timeout_seconds) VALUES($1,'Existing custom plan','pending','manual','gpt-6-astra','high','fixed prompt','external','source','','responses',900) RETURNING id`, planID).Scan(&runID))
+	var beforePlan, beforeRun string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT to_jsonb(p)::text FROM intelligence_monitor_plans p WHERE id=$1`, planID).Scan(&beforePlan))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT to_jsonb(r)::text FROM intelligence_monitor_runs r WHERE id=$1`, runID).Scan(&beforeRun))
+	migration, err := migrations.FS.ReadFile("252_intelligence_monitor_creation_defaults.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.ExecContext(ctx, string(migration))
+		require.NoError(t, err)
+		var afterPlan, afterRun string
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT to_jsonb(p)::text FROM intelligence_monitor_plans p WHERE id=$1`, planID).Scan(&afterPlan))
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT to_jsonb(r)::text FROM intelligence_monitor_runs r WHERE id=$1`, runID).Scan(&afterRun))
+		require.JSONEq(t, beforePlan, afterPlan)
+		require.JSONEq(t, beforeRun, afterRun)
+	}
+	var interval, timeout int
+	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO intelligence_monitor_plans(name,source_type,created_by) VALUES('New plan','external',1) RETURNING interval_seconds,timeout_seconds`).Scan(&interval, &timeout))
+	require.Equal(t, 300, interval)
+	require.Equal(t, 600, timeout)
+}

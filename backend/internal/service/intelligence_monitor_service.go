@@ -125,7 +125,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 	if actorID <= 0 {
 		return nil, ErrIntelligenceInvalid
 	}
-	p := &IntelligenceMonitorPlan{SourceType: "external", APIMode: MonitorAPIModeResponses, IntervalSeconds: 3600, TimeoutSeconds: IntelligenceMonitorDefaultTimeoutSeconds, CreatedBy: actorID}
+	p := &IntelligenceMonitorPlan{SourceType: "external", APIMode: MonitorAPIModeResponses, IntervalSeconds: IntelligenceMonitorDefaultIntervalSeconds, TimeoutSeconds: IntelligenceMonitorDefaultTimeoutSeconds, CreatedBy: actorID}
 	var old *IntelligenceMonitorPlan
 	if id > 0 {
 		var err error

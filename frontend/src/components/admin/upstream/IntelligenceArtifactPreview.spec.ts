@@ -1,8 +1,10 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref, type Ref } from 'vue'
 import type { IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
 import PelicanLoadingScene from './PelicanLoadingScene.vue'
+import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
 
 const detail = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: { detail } }))
@@ -14,15 +16,15 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<
 } }) }))
 const run = (id: number, status: IntelligenceRun['status'], changes: Partial<IntelligenceRun> = {}): IntelligenceRun => ({ id, status, ...changes } as IntelligenceRun)
 let wrapper: VueWrapper | undefined
-function render(value: IntelligenceRun, large = false) {
-  wrapper = mount(IntelligenceArtifactPreview, { attachTo: document.body, props: { run: value, large }, global: { stubs: { Icon: true } } })
+function render(value: IntelligenceRun, large = false, panelActive?: Ref<boolean>) {
+  wrapper = mount(IntelligenceArtifactPreview, { attachTo: document.body, props: { run: value, large }, global: { stubs: { Icon: true }, provide: panelActive ? { [intelligencePanelActiveKey as symbol]: panelActive } : {} } })
   return wrapper
 }
 beforeEach(() => { vi.resetAllMocks(); vi.stubGlobal('IntersectionObserver', undefined) })
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.unstubAllGlobals() })
 
 describe('intelligence artifact preview states', () => {
-  it.each(['pending', 'running'] as const)('shows a cycling pelican with the actual %s status without fetching a result', async status => {
+  it.each(['pending', 'running'] as const)('shows a pelican with the actual %s status without fetching a result', async status => {
     const view = render(run(1, status))
     await flushPromises()
     expect(view.getComponent(PelicanLoadingScene).props()).toEqual({ label: `intelligenceMonitor.status.${status}`, queued: status === 'pending' })
@@ -137,5 +139,49 @@ describe('intelligence artifact preview states', () => {
     await view.get('button[title="intelligenceMonitor.reloadPreview"]').trigger('click')
     expect(view.get('iframe').element).not.toBe(frame)
     hidden.mockRestore()
+  })
+
+  it('reveals artwork only after its own frame confirms the expected fitted size', async () => {
+    const view = render(run(7, 'succeeded', { html: '<svg></svg>' }), true)
+    await flushPromises()
+    const frame = view.get('iframe').element as HTMLIFrameElement
+    const send = (width: unknown, height: unknown, source: unknown = frame.contentWindow) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'intelligence-preview-fitted', width, height }, source: source as Window }))
+    expect(frame.style.opacity).toBe('0')
+    send(960, 600, window)
+    send(560, 600)
+    send(NaN, 600)
+    await flushPromises()
+    expect(frame.style.opacity).toBe('0')
+    send(960, 600)
+    await flushPromises()
+    expect(frame.style.opacity).toBe('1')
+    expect(view.find('[role="status"]').exists()).toBe(false)
+    await view.setProps({ run: run(7, 'succeeded', { html: '<svg></svg>', duration_ms: 1500 }) })
+    expect(view.get('iframe').element).toBe(frame)
+    expect(frame.style.opacity).toBe('1')
+    await view.get('button[title="intelligenceMonitor.reloadPreview"]').trigger('click')
+    const replayed = view.get('iframe').element as HTMLIFrameElement
+    expect(replayed.style.opacity).toBe('0')
+    send(960, 600)
+    await flushPromises()
+    expect(replayed.style.opacity).toBe('0')
+  })
+
+  it('pauses a retained preview on tab hide and resumes without recreating it', async () => {
+    const active = ref(true)
+    const view = render(run(8, 'succeeded', { html: '<svg></svg>' }), true, active)
+    await flushPromises()
+    const frame = view.get('iframe').element as HTMLIFrameElement
+    const postMessage = vi.spyOn(frame.contentWindow!, 'postMessage')
+    await view.get('iframe').trigger('load')
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: true }, '*')
+    active.value = false
+    await flushPromises()
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: false }, '*')
+    active.value = true
+    await flushPromises()
+    expect(view.get('iframe').element).toBe(frame)
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: true }, '*')
+    expect(detail).not.toHaveBeenCalled()
   })
 })

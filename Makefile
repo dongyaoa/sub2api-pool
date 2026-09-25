@@ -9,6 +9,10 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/upstream/IntelligenceArtifactPreview.spec.ts \
 	src/components/admin/upstream/IntelligenceHistoryDialog.spec.ts \
 	src/components/admin/upstream/IntelligencePlanCard.spec.ts \
+	src/components/admin/upstream/IntelligenceMonitorPanel.spec.ts \
+	src/components/admin/upstream/IntelligencePlanDialog.spec.ts \
+	src/components/admin/upstream/UpstreamWallet.spec.ts \
+	src/views/admin/__tests__/UpstreamCenterView.order.spec.ts \
 	src/components/admin/upstream/intelligencePreview.spec.ts \
 	src/components/admin/upstream/intelligencePreviewRuntime.spec.ts \
 	src/stores/__tests__/app.spec.ts \

@@ -4,6 +4,33 @@ import UpstreamWallet from './UpstreamWallet.vue'
 import type { UpstreamBalanceSnapshot } from '@/api/admin/upstreamCenter'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { time?: string }) => `${key}${params?.time ? ` ${params.time}` : ''}` }) }))
 describe('upstream wallet sync failure', () => {
+  it.each([
+    { balance: 4.99, low: true },
+    { balance: 0, low: true },
+    { balance: -1, low: true },
+    { balance: 5, low: false },
+    { balance: 20, low: false },
+    { balance: null, low: false },
+    { balance: Number.NaN, low: false },
+    { balance: Number.POSITIVE_INFINITY, low: false },
+  ])('highlights a balance of $balance only when it is known and below five', ({ balance, low }) => {
+    const wallet: UpstreamBalanceSnapshot = { target_id: 7, wallet_ref: 'default', kind: 'wallet', balance, quota_remaining: null, today_used: null, total_used: null, currency: 'USD', status: 'ok', synced_at: null, error: '' }
+    const wrapper = mount(UpstreamWallet, { props: { wallets: [wallet] }, global: { stubs: { Icon: true } } })
+    expect(wrapper.get('[data-testid="wallet-balance"]').classes().includes('text-rose-600')).toBe(low)
+    wrapper.unmount()
+  })
+
+  it('uses the displayed quota for quota wallets, and keeps the warning on a stale known balance', async () => {
+    const wallet: UpstreamBalanceSnapshot = { target_id: 7, wallet_ref: 'default', kind: 'key_quota', balance: 100, quota_remaining: 3, today_used: null, total_used: null, currency: 'USD', status: 'ok', synced_at: null, error: '' }
+    const wrapper = mount(UpstreamWallet, { props: { wallets: [wallet] }, global: { stubs: { Icon: true } } })
+    expect(wrapper.get('[data-testid="wallet-balance"]').classes()).toContain('text-rose-600')
+    await wrapper.setProps({ wallets: [{ ...wallet, balance: 1, quota_remaining: 10 }] })
+    expect(wrapper.get('[data-testid="wallet-balance"]').classes()).not.toContain('text-rose-600')
+    await wrapper.setProps({ wallets: [{ ...wallet, kind: 'wallet', balance: 3, status: 'error' }] })
+    expect(wrapper.get('[data-testid="wallet-balance"]').classes()).toContain('text-rose-600')
+    wrapper.unmount()
+  })
+
   it('retains the known balance and distinguishes its last successful sync from the failed attempt', () => {
     const wallet: UpstreamBalanceSnapshot = { target_id: 7, wallet_ref: 'default', kind: 'wallet', balance: 42, quota_remaining: null, today_used: null, total_used: null, currency: 'USD', status: 'error', synced_at: '2026-09-22T01:00:00Z', last_attempt_at: '2026-09-23T01:00:00Z', error: 'Upstream connection timed out.' }
     const wrapper = mount(UpstreamWallet, { props: { wallets: [wallet] }, global: { stubs: { Icon: true } } })

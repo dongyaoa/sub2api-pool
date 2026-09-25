@@ -19,7 +19,21 @@
         <p id="intelligence-oauth-hint" class="text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.oauth.hint') }}</p><p v-if="accountError || accountSelectionError" role="alert" class="text-xs text-rose-500">{{ accountError || accountSelectionError }}</p>
       </div>
       <div v-else-if="form.source_type === 'upstream'">
-        <label for="intelligence-upstream" class="input-label">{{ t('intelligenceMonitor.form.selectUpstream') }}</label><Select id="intelligence-upstream" v-model="form.upstream_target_id" :options="upstreamOptions" :searchable="false" :placeholder="t('intelligenceMonitor.form.selectUpstream')" :aria-label="t('intelligenceMonitor.form.selectUpstream')"/>
+        <label for="intelligence-upstream" class="input-label">{{ t('intelligenceMonitor.form.selectUpstream') }}</label>
+        <Select id="intelligence-upstream" :model-value="form.upstream_target_id" :options="upstreamOptions" :searchable="false" :placeholder="t('intelligenceMonitor.form.selectUpstream')" :aria-label="t('intelligenceMonitor.form.selectUpstream')" @update:model-value="selectUpstream">
+          <template #selected="{ option }">
+            <span v-if="option" class="flex min-w-0 items-center gap-2"><span class="max-w-[35%] truncate text-xs text-gray-500 dark:text-dark-300">{{ option.supplierName }}</span><span class="text-gray-300 dark:text-dark-500">/</span><span class="min-w-0 truncate font-medium">{{ option.groupName }}</span><span class="ml-auto shrink-0 rounded-md bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">{{ option.rate }}</span></span>
+            <span v-else>{{ t('intelligenceMonitor.form.selectUpstream') }}</span>
+          </template>
+          <template #option="{ option, selected }">
+            <span v-if="option.kind === 'group'" class="intelligence-supplier-heading -mx-4 -my-2.5 flex min-w-0 flex-1 items-center gap-2.5 border-y border-primary-100/70 bg-primary-50/70 px-4 py-3 normal-case tracking-normal dark:border-primary-900/50 dark:bg-primary-950/40">
+              <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-primary-600 shadow-sm dark:bg-primary-900/60 dark:text-primary-300"><Icon name="server" size="sm"/></span><span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{{ option.label }}</span><span v-if="option.website" class="ml-auto max-w-[40%] truncate text-[11px] font-normal text-gray-500 dark:text-dark-400">{{ option.website }}</span>
+            </span>
+            <span v-else class="intelligence-upstream-option -mx-4 -my-2.5 flex min-w-0 flex-1 items-center gap-3 py-3 pl-7 pr-4" :class="selected && 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'">
+              <span aria-hidden="true" class="h-3.5 w-3 shrink-0 rounded-bl border-b border-l border-gray-300 dark:border-dark-500"/><span class="min-w-0 flex-1 truncate font-medium">{{ option.groupName }}</span><span class="shrink-0 rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-primary-700 dark:bg-dark-700 dark:text-primary-300">{{ option.rate }}</span><Icon v-if="selected" name="check" size="sm" class="shrink-0 text-emerald-600 dark:text-emerald-300"/>
+            </span>
+          </template>
+        </Select>
         <div v-if="selectedTarget" class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500"><span class="truncate">{{ domain(selectedTarget.endpoint) }}</span><span :class="selectedTarget.balance?.billing?.stale ? 'text-amber-600' : 'text-primary-600'">{{ t('intelligenceMonitor.rate') }} {{ upstreamRate(selectedTarget.id) }} · {{ t('intelligenceMonitor.autoRate') }}</span></div>
       </div>
       <div v-else-if="form.source_type === 'local_group'"><label for="intelligence-group" class="input-label">{{ t('intelligenceMonitor.form.selectGroup') }}</label><Select id="intelligence-group" v-model="form.group_id" :options="groupOptions" :searchable="false" :loading="groupsLoading" :disabled="groupsLoading" :placeholder="t(groupsLoading ? 'common.loading' : 'intelligenceMonitor.form.selectGroup')" :empty-text="t('intelligenceMonitor.form.noGroups')" :aria-label="t('intelligenceMonitor.form.selectGroup')"/><p class="mt-2 text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.form.sourceHint') }}</p><p v-if="groupError" role="alert" class="mt-1 text-xs text-rose-500">{{ groupError }}</p></div>
@@ -73,16 +87,23 @@ const timeoutOptions = computed(() => {
     : presets
 })
 const protocolOptions = [{ value: 'responses', label: 'Responses' }, { value: 'chat_completions', label: 'Chat Completions' }]
-const defaults = (): IntelligencePlanInput => ({ name:'',source_type:props.oauthOnly?'openai_oauth':'upstream',account_id:null,endpoint:'',api_key:'',upstream_target_id:null,group_id:null,supplier_note:'',group_note:'',rate_note:'',notes:'',api_mode:'responses',enabled:false,interval_seconds:3600,timeout_seconds:900 })
+const defaults = (): IntelligencePlanInput => ({ name:'',source_type:props.oauthOnly?'openai_oauth':'upstream',account_id:null,endpoint:'',api_key:'',upstream_target_id:null,group_id:null,supplier_note:'',group_note:'',rate_note:'',notes:'',api_mode:'responses',enabled:false,interval_seconds:300,timeout_seconds:600 })
 const form = reactive<IntelligencePlanInput>(defaults()), groups = ref<AdminGroup[]>([]), saving = ref(false), error = ref(''), groupError = ref(''), groupsLoading = ref(false)
-const intervalChoice = ref<number | 'custom'>(3600), customInterval = ref('3600'), intervalError = ref('')
+const intervalChoice = ref<number | 'custom'>(300), customInterval = ref('300'), intervalError = ref('')
 const eligibleSuppliers = computed(() => (props.overview?.suppliers || []).map(supplier => ({ ...supplier, targets: supplier.targets.filter(target => target.provider === 'openai') })).filter(supplier => supplier.targets.length))
 const selectedTarget = computed(() => eligibleSuppliers.value.flatMap(supplier => supplier.targets).find(target => target.id === form.upstream_target_id))
 function upstreamRate(id:number) { const billing = props.overview?.suppliers.flatMap(supplier => supplier.targets).find(target=>target.id===id)?.balance?.billing; return intelligenceRateLabel(billing as unknown as Record<string,unknown>) || t('intelligenceMonitor.rateUnknown') }
 const upstreamOptions = computed<SelectOption[]>(() => eligibleSuppliers.value.flatMap(supplier => [
-  { value: `supplier-${supplier.id}`, label: supplier.name, kind: 'group', disabled: true },
-  ...supplier.targets.map(target => ({ value: target.id, label: `${target.name} · ${upstreamRate(target.id)}` }))
+  { value: `supplier-${supplier.id}`, label: supplier.name, kind: 'group', disabled: true, website: supplier.website ? domain(supplier.website) : '' },
+  ...supplier.targets.map(target => ({ value: target.id, label: `${target.name} · ${upstreamRate(target.id)}`, groupName: target.name, supplierName: supplier.name, rate: upstreamRate(target.id) }))
 ]))
+function selectUpstream(value: string | number | boolean | null) {
+  const target = eligibleSuppliers.value.flatMap(supplier => supplier.targets).find(item => item.id === value)
+  if (!target || target.id === form.upstream_target_id) return
+  form.upstream_target_id = target.id
+  form.name = target.name
+  error.value = ''
+}
 const groupOptions = computed(() => groups.value.map(group => ({ value: group.id, label: `${group.name} · ${group.rate_multiplier}×` })))
 function durationLabel(seconds: number) {
   return seconds % 3600 === 0 ? t('intelligenceMonitor.hours', { count: seconds / 3600 })

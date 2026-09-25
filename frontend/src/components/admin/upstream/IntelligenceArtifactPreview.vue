@@ -2,11 +2,11 @@
   <div ref="container" class="relative isolate overflow-hidden bg-slate-50 dark:bg-dark-900" :class="large ? 'aspect-[16/10]' : 'min-h-[144px] flex-1'" :aria-busy="active || loading" @mouseenter="hovered = true" @mouseleave="hovered = false" @focusin="focused = true" @focusout="focused = false">
     <iframe v-if="preview && !active" ref="frame" :key="`${run?.id}-${replay}`" :srcdoc="preview" sandbox="allow-scripts" credentialless referrerpolicy="no-referrer" scrolling="no" :title="t('intelligenceMonitor.preview')" class="absolute origin-top-left border-0 bg-white" :style="canvasStyle" :class="!large && 'pointer-events-none'" @load="syncPreview" />
     <PelicanLoadingScene v-else-if="active" :label="t(`intelligenceMonitor.status.${run?.status}`)" :queued="run?.status === 'pending'" />
-    <div v-else-if="loading" class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6" role="status">
+    <div v-if="loading || (preview && !previewReady)" class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6" role="status">
       <div class="preview-skeleton relative h-10 w-16 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-dark-600 dark:bg-dark-800" aria-hidden="true"><div class="absolute bottom-2 left-2 right-2 h-1 rounded bg-slate-100 dark:bg-dark-600" /><div class="absolute left-2 top-2 h-2 w-2 rounded-full bg-slate-200 dark:bg-dark-600" /></div>
       <p class="text-[10px] font-medium text-slate-400 dark:text-dark-400">{{ t('intelligenceMonitor.loadingPreview') }}</p>
     </div>
-    <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
+    <div v-else-if="!preview && !active" class="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
       <svg class="text-slate-300 dark:text-dark-600" :class="large ? 'h-16 w-20' : 'h-9 w-12'" viewBox="0 0 96 72" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="24" cy="52" r="14"/><circle cx="74" cy="52" r="14"/><path d="M24 52l17-26 15 26H24l11-17h31l8 17M39 25h10M65 35l-5-13h10"/><path d="M42 32c-13-5-14-19-5-25 8-5 18 0 20 9l23 4-26 7-9-3-3 8Z"/><circle cx="48" cy="13" r="1.2" fill="currentColor"/><path d="m39 31 6 12-8 8M44 44l8 7"/></svg>
       <p class="line-clamp-2 font-medium" :class="[large ? 'text-xs' : 'text-[10px]', run?.status === 'failed' || error ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-dark-400']">{{ error || (run?.status === 'failed' ? t('intelligenceMonitor.status.failed') : run ? t('intelligenceMonitor.noHTML') : t('intelligenceMonitor.waiting')) }}</p>
       <p v-if="run?.status === 'failed' && run.error" class="max-w-full break-words text-[10px] leading-4 text-slate-400 dark:text-dark-400" :class="large ? 'line-clamp-4' : 'line-clamp-2'" :title="run.error">{{ run.error }}</p>
@@ -17,19 +17,22 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { intelligenceMonitorAPI, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { intelligencePreviewContent } from './intelligencePreview'
 import PelicanLoadingScene from './PelicanLoadingScene.vue'
+import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
 const props = withDefaults(defineProps<{ run: IntelligenceRun | null; large?: boolean }>(), { large: false })
 const emit = defineEmits<{ open: [] }>()
 const { t } = useI18n()
 const container = ref<HTMLElement | null>(null), visible = ref(false), loading = ref(false), error = ref(''), html = ref(''), replay = ref(0)
 const frame = ref<HTMLIFrameElement | null>(null)
+const previewReady = ref(false)
+const panelActive = inject(intelligencePanelActiveKey, ref(true))
 const hovered = ref(false), focused = ref(false), pageVisible = ref(!document.hidden)
-const playing = computed(() => pageVisible.value && (props.large || hovered.value || focused.value))
+const playing = computed(() => panelActive.value && pageVisible.value && (props.large || hovered.value || focused.value))
 const canvasWidth = 960
 const canvasHeight = 600
 const viewport = ref({ width: 0, height: 0 })
@@ -45,6 +48,8 @@ const canvasStyle = computed(() => {
   const scale = canvasScale.value
   return {
     width: `${canvasWidth}px`, height: `${canvasHeight}px`, transform: `scale(${scale})`,
+    opacity: previewReady.value ? 1 : 0,
+    pointerEvents: !previewReady.value || !props.large ? 'none' as const : 'auto' as const,
     left: `${(viewport.value.width - canvasWidth * scale) / 2}px`,
     top: `${(viewport.value.height - canvasHeight * scale) / 2}px`
   }
@@ -52,29 +57,58 @@ const canvasStyle = computed(() => {
 const active = computed(() => Boolean(props.run && ['pending', 'running'].includes(props.run.status)))
 const prepared = computed(() => html.value ? intelligencePreviewContent(html.value, { autoplay: props.large, fit: props.large ? 'contain' : 'cover' }) : null)
 const preview = computed(() => prepared.value?.document || '')
+const fittedViewport = computed(() => {
+  if (props.large) return { width: canvasWidth, height: canvasHeight }
+  const scale = canvasScale.value
+  return scale <= 0 ? null : { width: Math.min(canvasWidth, viewport.value.width / scale), height: Math.min(canvasHeight, viewport.value.height / scale) }
+})
+function onPreviewMessage(event: MessageEvent) {
+  if (!frame.value?.contentWindow || event.source !== frame.value.contentWindow || event.data?.type !== 'intelligence-preview-fitted') return
+  const expected = fittedViewport.value
+  const { width, height } = event.data
+  if (!expected || !Number.isFinite(width) || !Number.isFinite(height)) return
+  if (Math.abs(width - expected.width) > 0.01 || Math.abs(height - expected.height) > 0.01) return
+  previewReady.value = true
+}
 function syncPlayback() {
   frame.value?.contentWindow?.postMessage({ type: 'intelligence-preview-playback', playing: playing.value }, '*')
 }
 function syncViewport() {
-  const scale = canvasScale.value
-  if (props.large || scale <= 0) return
+  const expected = fittedViewport.value
+  if (!expected) return
   // This is the visible slice of the fixed canvas after the card's cover scale.
   // Fit the document to that slice, avoiding a second layer of letterboxing.
   frame.value?.contentWindow?.postMessage({
     type: 'intelligence-preview-viewport',
-    width: Math.min(canvasWidth, viewport.value.width / scale),
-    height: Math.min(canvasHeight, viewport.value.height / scale)
+    width: expected.width,
+    height: expected.height
   }, '*')
 }
 function syncPreview() { syncViewport(); syncPlayback() }
 function updatePageVisibility() { pageVisible.value = !document.hidden }
 watch(playing, syncPlayback)
-watch(viewport, syncViewport)
+watch(fittedViewport, (current, previous) => {
+  if (current && previous && (Math.abs(current.width - previous.width) > 0.01 || Math.abs(current.height - previous.height) > 0.01)) previewReady.value = false
+  syncViewport()
+})
+watch([preview, replay], () => { previewReady.value = false })
+watch(panelActive, async active => {
+  if (!active) { hovered.value = false; focused.value = false; return }
+  await nextTick()
+  measureViewport()
+  syncPreview()
+})
 let controller: AbortController | undefined, observer: IntersectionObserver | undefined, resizeObserver: ResizeObserver | undefined
 function measureViewport() {
   if (!container.value) return
   const { width, height } = container.value.getBoundingClientRect()
-  viewport.value = { width, height }
+  updateViewport(width, height)
+}
+function updateViewport(width: number, height: number) {
+  // A v-show tab reports zero when hidden. Preserve its last layout so opening
+  // the tab doesn't briefly collapse the already-fitted iframe to scale(0).
+  if (width <= 0 || height <= 0 || !Number.isFinite(width) || !Number.isFinite(height)) return
+  if (width !== viewport.value.width || height !== viewport.value.height) viewport.value = { width, height }
 }
 async function load() {
   controller?.abort(); html.value = ''; error.value = ''; loading.value = false
@@ -87,12 +121,13 @@ async function load() {
 }
 watch([() => props.run?.id, () => props.run?.status, () => props.run?.html, visible], () => void load())
 onMounted(() => {
+  window.addEventListener('message', onPreviewMessage)
   document.addEventListener('visibilitychange', updatePageVisibility)
   measureViewport()
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(entries => {
       const entry = entries.find(item => item.target === container.value)
-      if (entry) viewport.value = { width: entry.contentRect.width, height: entry.contentRect.height }
+      if (entry) updateViewport(entry.contentRect.width, entry.contentRect.height)
     })
     if (container.value) resizeObserver.observe(container.value)
   } else window.addEventListener('resize', measureViewport)
@@ -100,7 +135,7 @@ onMounted(() => {
   observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { visible.value = true; observer?.disconnect() } }, { rootMargin: '150px' })
   if (container.value) observer.observe(container.value)
 })
-onBeforeUnmount(() => { controller?.abort(); observer?.disconnect(); resizeObserver?.disconnect(); window.removeEventListener('resize', measureViewport); document.removeEventListener('visibilitychange', updatePageVisibility) })
+onBeforeUnmount(() => { controller?.abort(); observer?.disconnect(); resizeObserver?.disconnect(); window.removeEventListener('resize', measureViewport); window.removeEventListener('message', onPreviewMessage); document.removeEventListener('visibilitychange', updatePageVisibility) })
 </script>
 <style scoped>
 .preview-open-label { opacity: 0; transform: translateY(3px); transition: opacity .18s ease, transform .18s ease; }

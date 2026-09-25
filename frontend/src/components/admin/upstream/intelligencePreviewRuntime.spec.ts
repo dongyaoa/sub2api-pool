@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { JSDOM } from 'jsdom'
+import { flushPromises } from '@vue/test-utils'
 import { intelligencePreviewRuntime } from './intelligencePreviewRuntime'
 
 const openDocuments: JSDOM[] = []
@@ -10,13 +11,14 @@ afterEach(() => {
   }
 })
 
-function setup(autoplay: boolean, body = '<main><svg></svg><canvas></canvas></main>', fit: 'contain' | 'cover' = 'contain') {
+function setup(autoplay: boolean, body = '<main><svg></svg><canvas></canvas></main>', fit: 'contain' | 'cover' = 'contain', fontReady?: Promise<unknown>) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>${body}</body></html>`, { runScripts: 'outside-only', pretendToBeVisual: true })
   openDocuments.push(dom)
   const window = dom.window
   const controller = { postMessage: vi.fn() }
   Object.defineProperty(window, 'parent', { value: controller, configurable: true })
   Object.defineProperty(window.document, 'readyState', { value: 'complete', configurable: true })
+  if (fontReady) Object.defineProperty(window.document, 'fonts', { value: { ready: fontReady }, configurable: true })
   let clock = 0, handle = 0
   const frames = new Map<number, FrameRequestCallback>()
   const timers = new Map<number, { callback: () => void, at: number }>()
@@ -150,7 +152,7 @@ describe('intelligence preview runtime', () => {
   })
 
   it('contains a tall document without changing its logical viewport or accumulating transforms', () => {
-    const { window, frame, playback } = setup(false, '<header>Title</header><svg></svg>')
+    const { window, frame, observers } = setup(false, '<header>Title</header><svg></svg>')
     const { document } = window
     Object.defineProperties(document.documentElement, { scrollWidth: { value: 960 }, scrollHeight: { value: 1040 } })
     Object.defineProperties(document.body, { scrollWidth: { value: 960 }, scrollHeight: { value: 1040 } })
@@ -162,7 +164,7 @@ describe('intelligence preview runtime', () => {
     const expectedScale = 600 / 1040
     expect(document.documentElement.style.transform).toBe(`translate(${(960 - 960 * expectedScale) / 2}px, 0px) scale(${expectedScale})`)
     const initial = document.documentElement.style.transform
-    playback(true)
+    observers[0].callback([], {} as ResizeObserver)
     frame()
     expect(document.documentElement.style.transform).toBe(initial)
     expect(rect).toHaveBeenCalledTimes(2)
@@ -238,5 +240,147 @@ describe('intelligence preview runtime', () => {
     await Promise.resolve()
     expect(initialObserver.disconnect).toHaveBeenCalledTimes(2)
     frame()
+  })
+
+  it('keeps cover artwork hidden until warmup and its first valid viewport fit, then reacknowledges without refitting', () => {
+    const { window, advance, frame, viewport, playback, controller } = setup(false, '<svg></svg>', 'cover')
+    const root = window.document.documentElement
+    const measure = vi.spyOn(window.document.body, 'getBoundingClientRect')
+    const fittedCalls = () => controller.postMessage.mock.calls.filter(call => call[0].type === 'intelligence-preview-fitted')
+    expect(root.style.visibility).toBe('hidden')
+    frame()
+    advance(120)
+    frame()
+    expect(root.style.visibility).toBe('hidden')
+    expect(fittedCalls()).toHaveLength(0)
+    viewport(560, 600, {})
+    frame()
+    expect(root.style.visibility).toBe('hidden')
+    viewport(560, 600)
+    expect(root.style.visibility).toBe('hidden')
+    frame()
+    expect(root.style.visibility).toBe('visible')
+    expect(fittedCalls().at(-1)).toEqual([{ type: 'intelligence-preview-fitted', width: 560, height: 600 }, '*'])
+    const measurements = measure.mock.calls.length
+    const fittedCount = fittedCalls().length
+    playback(true)
+    playback(false)
+    frame()
+    expect(measure).toHaveBeenCalledTimes(measurements)
+    expect(fittedCalls()).toHaveLength(fittedCount)
+    viewport(560, 600)
+    expect(fittedCalls()).toHaveLength(fittedCount + 1)
+    frame()
+    expect(measure).toHaveBeenCalledTimes(measurements)
+    viewport(800, 600)
+    expect(fittedCalls()).toHaveLength(fittedCount + 1)
+    frame()
+    expect(fittedCalls().at(-1)).toEqual([{ type: 'intelligence-preview-fitted', width: 800, height: 600 }, '*'])
+  })
+
+  it('waits for fonts and suppresses generated root transitions before revealing the fitted detail view', async () => {
+    let resolveFonts: () => void = () => undefined
+    const fontReady = new Promise<void>(resolve => { resolveFonts = resolve })
+    const { window, advance, frame, controller } = setup(true, '<svg></svg>', 'contain', fontReady)
+    const root = window.document.documentElement
+    root.style.setProperty('transition', 'all 2s ease', 'important')
+    const measure = vi.spyOn(window.document.body, 'getBoundingClientRect').mockImplementation(() => {
+      expect(root.style.transition).toBe('none')
+      expect(root.style.getPropertyPriority('transition')).toBe('important')
+      return { left: 0, top: 0, right: 960, bottom: 1040, width: 960, height: 1040, x: 0, y: 0, toJSON: () => ({}) }
+    })
+    advance(120)
+    frame()
+    expect(root.style.visibility).toBe('hidden')
+    expect(controller.postMessage.mock.calls.some(call => call[0].type === 'intelligence-preview-fitted')).toBe(false)
+    const measurementsBeforeFonts = measure.mock.calls.length
+    resolveFonts()
+    await flushPromises()
+    frame()
+    expect(root.style.visibility).toBe('visible')
+    expect(measure).toHaveBeenCalledTimes(measurementsBeforeFonts + 1)
+    expect(controller.postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-fitted', width: 960, height: 600 }, '*')
+  })
+
+  it('reveals the fitted CSS/SVG artwork even when font readiness rejects', async () => {
+    const { window, advance, frame, controller } = setup(false, '<svg></svg>', 'contain', Promise.reject(new Error('Font failed')))
+    await flushPromises()
+    advance(120)
+    frame()
+    expect(window.document.documentElement.style.visibility).toBe('visible')
+    expect(controller.postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-fitted', width: 960, height: 600 }, '*')
+  })
+
+  it('finishes initial fitting without RAF progress and cancels the competing callback after readiness', () => {
+    const { window, advance, frame, viewport, controller, frames, timers } = setup(false, '<svg></svg>', 'cover')
+    const measure = vi.spyOn(window.document.body, 'getBoundingClientRect')
+    viewport(560, 600)
+    advance(119)
+    expect(window.document.documentElement.style.visibility).toBe('hidden')
+    advance(51)
+    expect(window.document.documentElement.style.visibility).toBe('visible')
+    expect(frames.size).toBe(0)
+    expect(timers.size).toBe(0)
+    const measurementCount = measure.mock.calls.length
+    const fittedCalls = () => controller.postMessage.mock.calls.filter(call => call[0].type === 'intelligence-preview-fitted')
+    expect(fittedCalls()).toHaveLength(1)
+    frame()
+    expect(measure).toHaveBeenCalledTimes(measurementCount)
+    expect(fittedCalls()).toHaveLength(1)
+    viewport(800, 600)
+    expect(timers.size).toBe(0)
+    advance(100)
+    expect(measure).toHaveBeenCalledTimes(measurementCount)
+    frame()
+    expect(fittedCalls()).toHaveLength(2)
+  })
+
+  it('cancels an initial fallback after RAF wins and clears all fit callbacks on teardown', () => {
+    const { window, frame, advance, frames, timers } = setup(false)
+    const measure = vi.spyOn(window.document.body, 'getBoundingClientRect')
+    frame()
+    expect(measure).toHaveBeenCalledOnce()
+    advance(50)
+    expect(measure).toHaveBeenCalledOnce()
+    // The warmup schedules one final initial fit; teardown must remove both
+    // its animation callback and timeout fallback before either can execute.
+    advance(54)
+    expect(frames.size).toBe(1)
+    expect(timers.size).toBe(1)
+    window.dispatchEvent(new window.Event('pagehide'))
+    expect(frames.size).toBe(0)
+    expect(timers.size).toBe(0)
+    advance(100)
+    frame()
+    expect(measure).toHaveBeenCalledOnce()
+  })
+
+  it('draws one initial canvas frame before timeout reveal when all browser RAF callbacks were withheld', () => {
+    const { window, advance, frame, viewport, playback } = setup(false, '<canvas></canvas>', 'cover')
+    const drawing = vi.fn()
+    const canceled = vi.fn()
+    let canceledHandle = 0
+    const draw = (timestamp: number) => {
+      drawing(timestamp)
+      window.document.querySelector('canvas')!.dataset.drawn = 'yes'
+      window.cancelAnimationFrame(canceledHandle)
+      window.requestAnimationFrame(draw)
+    }
+    window.requestAnimationFrame(draw)
+    canceledHandle = window.requestAnimationFrame(canceled)
+    viewport(560, 600)
+    advance(170)
+    expect(window.document.documentElement.style.visibility).toBe('visible')
+    expect(window.document.querySelector('canvas')!.dataset.drawn).toBe('yes')
+    expect(drawing).toHaveBeenCalledOnce()
+    expect(canceled).not.toHaveBeenCalled()
+    const firstTimestamp = drawing.mock.calls[0][0]
+    advance(1000)
+    frame()
+    expect(drawing).toHaveBeenCalledOnce()
+    playback(true)
+    frame()
+    expect(drawing).toHaveBeenCalledTimes(2)
+    expect(drawing.mock.calls[1][0]).toBeGreaterThanOrEqual(firstTimestamp)
   })
 })

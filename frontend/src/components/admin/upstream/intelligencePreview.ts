@@ -68,6 +68,12 @@ export function intelligencePreviewContent(html: string, options: { autoplay?: b
   csp.setAttribute('http-equiv', 'Content-Security-Policy')
   csp.setAttribute('content', INTELLIGENCE_PREVIEW_CSP)
   doc.head.replaceChildren(csp)
+  // This precedes generated styles/scripts, so the unscaled page cannot paint
+  // before its fixed viewport and fonts have settled. Visibility preserves layout.
+  const initialStyle = doc.createElement('style')
+  if (nonce) initialStyle.setAttribute('nonce', nonce)
+  initialStyle.textContent = 'html{visibility:hidden!important;transition:none!important}'
+  doc.head.append(initialStyle)
   const runtime = doc.createElement('script')
   if (nonce) runtime.setAttribute('nonce', nonce)
   runtime.textContent = intelligencePreviewRuntime(options.autoplay ?? false, options.fit ?? 'contain')
@@ -110,7 +116,7 @@ export function intelligencePreviewContent(html: string, options: { autoplay?: b
   relay.textContent = `(() => {
     const frame = document.querySelector('iframe');
     let playing = ${options.autoplay ? 'true' : 'false'};
-    let viewport = null;
+    let viewport = null, readySynced = false;
     const sync = () => {
       if (viewport) frame.contentWindow?.postMessage(viewport, '*');
       frame.contentWindow?.postMessage({type:'intelligence-preview-playback',playing}, '*');
@@ -122,7 +128,14 @@ export function intelligencePreviewContent(html: string, options: { autoplay?: b
         const {width, height} = event.data;
         if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || width > 960 || height > 600) return;
         viewport = {type:'intelligence-preview-viewport',width,height}; sync();
-      } else if (event.source === frame.contentWindow && event.data?.type === 'intelligence-preview-ready') sync();
+      } else if (event.source === frame.contentWindow && event.data?.type === 'intelligence-preview-ready' && !readySynced) {
+        readySynced = true; sync();
+      }
+      else if (event.source === frame.contentWindow && event.data?.type === 'intelligence-preview-fitted') {
+        const {width, height} = event.data;
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || width > 960 || height > 600) return;
+        parent.postMessage({type:'intelligence-preview-fitted',width,height}, '*');
+      }
     });
     frame.addEventListener('load', sync);
   })();`

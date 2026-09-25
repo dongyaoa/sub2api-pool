@@ -2,7 +2,7 @@
   <div class="rounded-xl bg-gray-50 p-3.5 dark:bg-dark-900/60">
     <template v-if="wallets.length">
       <div v-for="(wallet, index) in wallets" :key="`${wallet.target_id}-${wallet.wallet_ref}`" :class="index && 'mt-3 border-t border-gray-200/60 pt-3 dark:border-dark-700'">
-        <div class="flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-[11px] text-gray-500 dark:text-dark-400">{{ t(wallet.kind === 'key_quota' ? 'upstreamCenter.wallet.quota' : wallet.kind === 'subscription' ? 'upstreamCenter.wallet.subscription' : 'upstreamCenter.wallet.title') }}<span v-if="wallets.length > 1" class="ml-1">· {{ wallet.wallet_ref }}</span></p><strong class="mt-1 block text-xl font-semibold tabular-nums tracking-tight text-gray-900 dark:text-gray-100">{{ money(wallet.kind === 'wallet' ? wallet.balance : wallet.quota_remaining ?? wallet.balance, wallet.currency) }}</strong></div><button v-if="syncable" type="button" class="rounded-lg p-2 text-gray-400 hover:bg-white hover:text-primary-600 disabled:opacity-50 dark:hover:bg-dark-800" :disabled="busy" :aria-label="t('upstreamCenter.syncBalance')" :title="t('upstreamCenter.syncBalance')" @click="emit('sync', wallet.target_id)"><Icon name="refresh" size="sm" :class="busy && 'animate-spin'" /></button></div>
+        <div class="flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-[11px] text-gray-500 dark:text-dark-400">{{ t(wallet.kind === 'key_quota' ? 'upstreamCenter.wallet.quota' : wallet.kind === 'subscription' ? 'upstreamCenter.wallet.subscription' : 'upstreamCenter.wallet.title') }}<span v-if="wallets.length > 1" class="ml-1">· {{ wallet.wallet_ref }}</span></p><strong class="mt-1 block text-xl font-semibold tabular-nums tracking-tight" :class="isLowBalance(wallet) ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-gray-100'" data-testid="wallet-balance">{{ money(walletAmount(wallet), wallet.currency) }}</strong></div><button v-if="syncable" type="button" class="rounded-lg p-2 text-gray-400 hover:bg-white hover:text-primary-600 disabled:opacity-50 dark:hover:bg-dark-800" :disabled="busy" :aria-label="t('upstreamCenter.syncBalance')" :title="t('upstreamCenter.syncBalance')" @click="emit('sync', wallet.target_id)"><Icon name="refresh" size="sm" :class="busy && 'animate-spin'" /></button></div>
         <p v-if="wallet.status !== 'ok'" class="mt-1.5 text-[11px] leading-4" :class="wallet.status === 'error' ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-dark-400'" :title="wallet.error">{{ t(wallet.status === 'unsupported' ? 'upstreamCenter.wallet.unsupported' : wallet.status === 'error' ? 'upstreamCenter.wallet.error' : 'upstreamCenter.wallet.pending') }}</p>
         <p v-if="wallet.status === 'error' && wallet.error" class="mt-1 break-words text-[11px] leading-4 text-amber-600/90 dark:text-amber-400">{{ wallet.error }}</p>
         <p v-if="wallet.synced_at" class="mt-1 text-[10px] text-gray-400 dark:text-dark-400">{{ t('upstreamCenter.wallet.syncedAt', { time: dateTime(wallet.synced_at) }) }}</p>
@@ -30,4 +30,9 @@ const keyWallet = computed(() => props.targetId ? props.wallets.find(wallet => w
 const emit = defineEmits<{ sync: [id: number] }>()
 const { t } = useI18n()
 const multiplier = (value: number | null) => value == null ? '—' : `${value}×`
+const walletAmount = (wallet: UpstreamBalanceSnapshot) => wallet.kind === 'wallet' ? wallet.balance : wallet.quota_remaining ?? wallet.balance
+const isLowBalance = (wallet: UpstreamBalanceSnapshot) => {
+  const amount = walletAmount(wallet)
+  return typeof amount === 'number' && Number.isFinite(amount) && amount < 5
+}
 </script>

@@ -15,6 +15,7 @@ export default {
     import: { title: '从账号管理导入 API Key', hint: '直接选择已有账号，每个账号生成一个 Key 分组；地址和密钥由服务端读取。也可以不选账号，先添加上游。', selected: '已选择 {count} 个', loading: '加载中…', groups: '将导入的 Key 分组', modelHint: '默认使用 gpt-5.6-sol，每 30 秒检测一次。模型和间隔均可修改；多个模型用逗号分隔，最多 8 个。', done: '已导入', retryHint: '上游已创建，已成功的分组将保留。修改失败项后可继续导入，不会重复创建上游或成功分组。', retry: '继续导入', save: '添加并导入账号', partial: '部分账号导入失败，请查看各分组的原因，修改后重试。', chooseExisting: '检测到多个同名同网址上游，请明确选择要继续导入的上游。', choosePlaceholder: '选择已有上游' },
     title: '上游中心', description: '每一条上游的稳定性与经营表现，清晰可见。',
     tabs: { suppliers: '上游管理', monitors: '监控中心', intelligence: '智商监控' },
+    quickSwitch: '快速切换上游', allSuppliers: '全部上游',
     addSupplier: '添加上游', addMonitor: '添加监控', addGroup: '添加 Key 分组', editSupplier: '编辑上游', editGroup: '编辑 Key 分组', editMonitor: '编辑监控',
     search: '搜索名称、网址、模型…', refresh: '刷新', updated: '更新于 {time}', refreshHint: '每 30 秒自动刷新',
     loadFailed: '加载上游中心失败', retry: '重试', saveFailed: '保存失败', saved: '已保存',

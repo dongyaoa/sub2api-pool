@@ -141,11 +141,12 @@ describe('intelligence preview isolation', () => {
     expect(wrapper.get('iframe').element).toBe(frame)
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
     postMessage.mockClear()
+    const fittedTransform = frame.style.transform
     await resizeTo(0, 0)
     expect(frame.style.height).toBe('600px')
-    expect(frame.style.transform).toBe('scale(0)')
+    expect(frame.style.transform).toBe(fittedTransform)
     await resizeTo(0, 144)
-    expect(frame.style.transform).toBe('scale(0)')
+    expect(frame.style.transform).toBe(fittedTransform)
     expect(postMessage).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -171,6 +172,9 @@ describe('intelligence preview isolation', () => {
       for (const script of [...shell.querySelectorAll('script'), ...inner.querySelectorAll('script')]) expect(script.getAttribute('nonce')).toBe('host-page-nonce')
       expect(shell.querySelector('meta')?.getAttribute('content')).not.toContain('nonce-')
       expect(inner.head.firstElementChild?.getAttribute('http-equiv')).toBe('Content-Security-Policy')
+      expect(inner.head.children[1].tagName).toBe('STYLE')
+      expect(inner.head.children[1].textContent).toContain('visibility:hidden!important;transition:none!important')
+      expect(inner.head.children[1].getAttribute('nonce')).toBe('host-page-nonce')
       expect(inner.head.querySelector('script')?.textContent).toContain('intelligence-preview-playback')
     } finally { hostScript.remove() }
   })
@@ -216,10 +220,37 @@ describe('intelligence preview isolation', () => {
       send({ type: 'intelligence-preview-ready' }, child)
       expect(postMessage.mock.calls).toEqual([[viewport, '*'], [{ type: 'intelligence-preview-playback', playing: false }, '*']])
       postMessage.mockClear()
+      send({ type: 'intelligence-preview-ready' }, child)
       send(viewport, {})
       for (const width of [NaN, Infinity, -1, 0, 961, '560']) send({ ...viewport, width })
       send({ ...viewport, height: 601 })
       expect(postMessage).not.toHaveBeenCalled()
+    } finally { dom.window.close() }
+  })
+
+  it('forwards only bounded fitted messages from the artwork without feeding a relay loop', () => {
+    const content = intelligencePreviewContent('<svg></svg>', { fit: 'cover' })
+    const dom = new JSDOM(content.document, { runScripts: 'outside-only' })
+    try {
+      const shell = dom.window
+      const parent = { postMessage: vi.fn() }
+      Object.defineProperty(shell, 'parent', { value: parent, configurable: true })
+      const child = shell.document.querySelector('iframe')!.contentWindow!
+      const postToChild = vi.spyOn(child, 'postMessage').mockImplementation(() => undefined)
+      shell.eval(shell.document.body.querySelector('script')!.textContent!)
+      const send = (data: unknown, source: unknown = child) => shell.dispatchEvent(new shell.MessageEvent('message', { data, source }))
+      const fitted = { type: 'intelligence-preview-fitted', width: 560, height: 600 }
+      send({ ...fitted, unrelated: 'drop this field' })
+      expect(parent.postMessage).toHaveBeenCalledOnce()
+      expect(parent.postMessage).toHaveBeenCalledWith(fitted, '*')
+      expect(postToChild).not.toHaveBeenCalled()
+      parent.postMessage.mockClear()
+      send(fitted, parent)
+      send(fitted, {})
+      for (const width of [NaN, Infinity, -1, 0, 961, '560']) send({ ...fitted, width })
+      send({ ...fitted, height: 601 })
+      expect(parent.postMessage).not.toHaveBeenCalled()
+      expect(postToChild).not.toHaveBeenCalled()
     } finally { dom.window.close() }
   })
 })

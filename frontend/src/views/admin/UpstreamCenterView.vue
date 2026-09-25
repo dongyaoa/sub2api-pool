@@ -7,11 +7,21 @@
       </div>
       <div v-if="error" role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-900 dark:bg-rose-500/10 dark:text-rose-400"><span>{{ error }}</span><button type="button" class="font-medium underline" @click="reload()">{{ t('upstreamCenter.retry') }}</button></div>
       <div id="upstream-panel" role="tabpanel" :aria-labelledby="`upstream-tab-${tab}`" :aria-busy="loading" class="space-y-4">
-        <IntelligenceMonitorPanel v-if="tab === 'intelligence' || tab === 'oauth'" :key="tab" :oauth-only="tab === 'oauth'" :overview="overview" />
-        <template v-else>
+        <IntelligenceMonitorPanel v-if="visitedMonitorTabs.intelligence" v-show="tab === 'intelligence'" :hidden="tab !== 'intelligence'" :active="tab === 'intelligence'" :overview="overview" />
+        <IntelligenceMonitorPanel v-if="visitedMonitorTabs.oauth" v-show="tab === 'oauth'" :hidden="tab !== 'oauth'" :active="tab === 'oauth'" oauth-only :overview="overview" />
+        <template v-if="tab === 'suppliers' || tab === 'monitors'">
           <section v-if="overview" class="grid grid-cols-2 gap-3 lg:grid-cols-4" :aria-label="t(tab === 'suppliers' ? 'upstreamCenter.finance.title' : 'upstreamCenter.tabs.monitors')">
             <div v-for="metric in tab === 'suppliers' ? supplierMetrics : monitorMetrics" :key="metric.key" class="card flex min-w-0 items-center gap-3 px-3 py-3 sm:px-4"><div class="shrink-0 rounded-lg bg-primary-50 p-2 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400"><Icon :name="metric.icon" size="md" :stroke-width="2" /></div><div class="min-w-0"><p class="text-[11px] font-medium text-gray-500 dark:text-dark-400">{{ t(metric.key) }}</p><p class="mt-0.5 truncate text-xl font-bold tabular-nums text-gray-900 dark:text-white" :class="metric.color">{{ metric.value }}</p><p v-if="metric.note" class="mt-0.5 truncate text-[10px] text-gray-400 dark:text-dark-400">{{ metric.note }}</p></div></div>
           </section>
+          <div v-if="tab === 'suppliers' && overview?.suppliers.length" class="rounded-xl border border-gray-200/80 bg-white p-1.5 dark:border-dark-700 dark:bg-dark-800">
+            <div class="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist" :aria-label="t('upstreamCenter.quickSwitch')" data-testid="supplier-quick-tabs" @keydown="navigateSupplierTabs">
+              <button v-for="item in supplierTabs" :id="`supplier-filter-${item.id ?? 'all'}`" :key="item.id ?? 'all'" type="button" role="tab" :aria-selected="selectedSupplierId === item.id" :tabindex="selectedSupplierId === item.id ? 0 : -1" aria-controls="supplier-results" :title="item.name" class="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500" :class="selectedSupplierId === item.id ? 'bg-primary-50 font-semibold text-primary-700 dark:bg-primary-500/15 dark:text-primary-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-700 dark:hover:text-white'" @click="selectedSupplierId = item.id">
+                <Icon v-if="item.id === null" name="server" size="sm" />
+                <span class="max-w-[180px] truncate">{{ item.name }}</span>
+                <span class="rounded-md px-1.5 py-0.5 text-[10px] font-medium tabular-nums" :class="selectedSupplierId === item.id ? 'bg-primary-100/70 text-primary-700 dark:bg-primary-500/20 dark:text-primary-300' : 'bg-gray-100 text-gray-400 dark:bg-dark-700 dark:text-dark-400'">{{ item.count }}</span>
+              </button>
+            </div>
+          </div>
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="relative w-full sm:max-w-[280px]"><Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input v-model="search" class="input !py-2 !pl-9 !text-xs" :aria-label="t('upstreamCenter.search')" :placeholder="t('upstreamCenter.search')" /></div>
             <div class="flex w-full flex-wrap items-center justify-between gap-3 sm:w-auto">
@@ -24,12 +34,12 @@
             </div>
           </div>
           <div v-if="!overview && loading" class="space-y-3"><div v-for="n in 2" :key="n" class="card grid animate-pulse gap-6 p-5 lg:grid-cols-[220px_1fr]"><div class="h-28 rounded-lg bg-gray-100 dark:bg-dark-700"></div><div class="space-y-3"><div class="h-12 rounded-lg bg-gray-100 dark:bg-dark-700"></div><div class="h-12 rounded-lg bg-gray-100 dark:bg-dark-700"></div></div></div></div>
-          <template v-else-if="overview">
+          <div v-else-if="overview" :id="tab === 'suppliers' ? 'supplier-results' : undefined" :role="tab === 'suppliers' ? 'tabpanel' : undefined" :aria-labelledby="tab === 'suppliers' ? `supplier-filter-${selectedSupplierId ?? 'all'}` : undefined">
             <div v-if="tab === 'suppliers' && filteredSuppliers.length" class="space-y-4"><UpstreamSupplierCard v-for="supplier in filteredSuppliers" :key="supplier.id" :supplier="supplier" :busy-ids="busyIds" :running-ids="runningIds" @edit="openSupplier" @delete="confirmSupplierDelete" @add-target="supplier => openTarget(null, supplier)" @order-groups="openGroupOrder" @edit-target="item => openTarget(item)" @delete-target="confirmTargetDelete" @target-details="showTargetDetails" @finance="showSupplierDetails" @run="runTarget" @toggle="toggleTarget" @sync="syncBalance" /></div>
             <div v-else-if="tab === 'monitors' && filteredMonitors.length" class="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3"><UpstreamTargetCard v-for="target in filteredMonitors" :key="target.id" :target="target" :busy="busyIds.has(target.id)" :running="runningIds.has(target.id)" @edit="item => openTarget(item)" @delete="confirmTargetDelete" @details="showTargetDetails" @run="runTarget" @toggle="toggleTarget" /></div>
             <EmptyState v-else-if="search" class="card py-12" :title="t('upstreamCenter.noMatches')" />
             <EmptyState v-else class="card py-12" :title="t(tab === 'suppliers' ? 'upstreamCenter.emptySuppliers' : 'upstreamCenter.emptyMonitors')" :description="t(tab === 'suppliers' ? 'upstreamCenter.emptySuppliersHint' : 'upstreamCenter.emptyMonitorsHint')" :action-text="t(tab === 'suppliers' ? 'upstreamCenter.addSupplier' : 'upstreamCenter.addMonitor')" @action="tab === 'suppliers' ? openSupplier() : openTarget()"><template #icon><Icon :name="tab === 'suppliers' ? 'server' : 'chart'" size="xl" class="text-primary-500" /></template></EmptyState>
-          </template>
+          </div>
           <p v-if="overview && tab === 'suppliers'" class="text-[10px] leading-5 text-gray-400 dark:text-dark-400">{{ t('upstreamCenter.finance.note') }}<span class="ml-1">{{ t('upstreamCenter.finance.accountingDate', { from: dateTime(overview.summary.from), to: dateTime(overview.summary.to) }) }}</span></p>
           <p v-else-if="overview" class="text-[10px] leading-5 text-gray-400 dark:text-dark-400">{{ t('upstreamCenter.latencyHint') }}</p>
         </template>
@@ -65,13 +75,40 @@ const app = useAppStore()
 const tabs = ['suppliers', 'monitors', 'intelligence', 'oauth'] as const
 const windows: UpstreamWindow[] = ['24h', '7d', '30d']
 const tab = ref<typeof tabs[number]>('suppliers'), window = ref<UpstreamWindow>('24h'), search = ref('')
+const visitedMonitorTabs = ref({ intelligence: false, oauth: false })
+watch(tab, value => {
+  if (value === 'intelligence' || value === 'oauth') visitedMonitorTabs.value[value] = true
+})
 const overview = ref<UpstreamOverview | null>(null), loading = ref(false), error = ref(''), updatedAt = ref('')
+const selectedSupplierId = ref<number | null>(null)
+const supplierTabs = computed(() => [
+  { id: null as number | null, name: t('upstreamCenter.allSuppliers'), count: overview.value?.suppliers.length || 0 },
+  ...(overview.value?.suppliers.map(supplier => ({ id: supplier.id, name: supplier.name, count: supplier.targets.length })) || []),
+])
+function navigateSupplierTabs(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  const buttons = Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+  const index = buttons.indexOf(event.target as HTMLButtonElement)
+  if (index < 0) return
+  event.preventDefault()
+  const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length
+  const next = buttons[nextIndex]
+  next?.click()
+  next?.focus({ preventScroll: true })
+  next?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+}
+watch(() => overview.value?.suppliers, suppliers => {
+  if (suppliers && selectedSupplierId.value !== null && !suppliers.some(supplier => supplier.id === selectedSupplierId.value)) selectedSupplierId.value = null
+})
 const busyIds = ref(new Set<number>()), runningIds = ref(new Set<number>())
 const allGroups = computed(() => overview.value?.suppliers.flatMap(supplier => supplier.targets) || [])
 const allTargets = computed(() => [...allGroups.value, ...(overview.value?.monitors || [])])
 const match = (value: string) => value.toLowerCase().includes(search.value.toLowerCase().trim())
 const matchesTarget = (target: UpstreamTarget) => match(`${target.name} ${target.endpoint} ${target.models.join(' ')}`)
-const filteredSuppliers = computed(() => overview.value?.suppliers.filter(supplier => match(`${supplier.name} ${supplier.website}`) || supplier.targets.some(matchesTarget)) || [])
+const filteredSuppliers = computed(() => overview.value?.suppliers.filter(supplier =>
+  (selectedSupplierId.value === null || supplier.id === selectedSupplierId.value) &&
+  (match(`${supplier.name} ${supplier.website}`) || supplier.targets.some(matchesTarget)),
+) || [])
 const filteredMonitors = computed(() => overview.value?.monitors.filter(matchesTarget) || [])
 const ordering = ref<{ scope: 'suppliers' | 'monitors' | 'groups'; supplierId?: number; supplierName?: string } | null>(null)
 const canOrder = computed(() => ((tab.value === 'suppliers' ? overview.value?.suppliers.length : overview.value?.monitors.length) ?? 0) > 1)

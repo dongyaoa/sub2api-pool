@@ -1,8 +1,10 @@
-import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { defineComponent, ref } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import IntelligencePlanCard from './IntelligencePlanCard.vue'
+import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
+import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: { count?: number }) => values?.count === undefined ? key : `${key}:${values.count}` }) }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: { detail: vi.fn() } }))
@@ -14,6 +16,44 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it('pauses filtered artwork and keeps its iframe while respecting the parent panel visibility', async () => {
+    const panelActive = ref(true)
+    const completed = { ...run(91), html: '<svg></svg>' }
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const view = mount(IntelligencePlanCard, {
+      attachTo: document.body,
+      props: { plan: plan({ latest_run: completed, recent_runs: [completed] }), overview: null, busy: false },
+      global: { stubs: { Icon: true }, provide: { [intelligencePanelActiveKey as symbol]: panelActive } }
+    })
+    try {
+      await flushPromises()
+      const artwork = view.getComponent(IntelligenceArtifactPreview)
+      const frame = artwork.get('iframe').element as HTMLIFrameElement
+      const postMessage = vi.spyOn(frame.contentWindow!, 'postMessage')
+      await artwork.trigger('mouseenter')
+      expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: true }, '*')
+
+      await view.setProps({ visible: false })
+      expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: false }, '*')
+      await view.setProps({ visible: true })
+      await artwork.trigger('mouseenter')
+      expect(artwork.get('iframe').element).toBe(frame)
+      expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: true }, '*')
+
+      panelActive.value = false
+      await flushPromises()
+      expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: false }, '*')
+      await view.setProps({ visible: false })
+      await view.setProps({ visible: true })
+      await artwork.trigger('mouseenter')
+      expect(postMessage).toHaveBeenLastCalledWith({ type: 'intelligence-preview-playback', playing: false }, '*')
+      expect(artwork.get('iframe').element).toBe(frame)
+    } finally {
+      view.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('places completed artwork duration at the right end of the model and reasoning row', () => {
     const completed = { ...run(91), duration_ms: 14500 }
     const view = render(plan({ recent_runs: [completed], latest_run: completed }))
@@ -139,6 +179,17 @@ describe('intelligence plan schedule countdown', () => {
     view?.unmount()
     view = undefined
     vi.useRealTimers()
+  })
+
+  it('stops hidden card countdowns and restores the current deadline when shown again', async () => {
+    view = render(plan({ enabled: true, next_run_at: '2026-09-24T00:05:00Z' }))
+    expect(vi.getTimerCount()).toBe(1)
+    await view.setProps({ visible: false })
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(60000)
+    await view.setProps({ visible: true })
+    expect(view.get('[data-testid="intelligence-countdown"]').text()).toBe('00:04:00')
+    expect(vi.getTimerCount()).toBe(1)
   })
 
   it('counts down to the server deadline across polling and browser timer delays', async () => {

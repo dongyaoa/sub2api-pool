@@ -11,7 +11,8 @@ const IntelligenceMonitorModel = "gpt-6-astra"
 const IntelligenceMonitorReasoning = "high"
 const IntelligenceMonitorPrompt = "创建一个 HTML，内容是用 SVG 绘制一个鹈鹕骑自行车的 2D 动画。你不需要任何测试。"
 const IntelligenceMonitorRetainedRuns = 20
-const IntelligenceMonitorDefaultTimeoutSeconds = 900
+const IntelligenceMonitorDefaultTimeoutSeconds = 600
+const IntelligenceMonitorDefaultIntervalSeconds = 300
 const IntelligenceMonitorMinTimeoutSeconds = 180
 const IntelligenceMonitorMaxTimeoutSeconds = 900
 

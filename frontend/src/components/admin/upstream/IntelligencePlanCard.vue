@@ -44,7 +44,7 @@
   </article>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { IntelligencePlan, IntelligenceRate, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
@@ -52,10 +52,15 @@ import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
 import { intelligenceRateLabel } from './intelligencePreview'
 import { intelligenceDurationLabel } from './intelligenceDuration'
+import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
 import { dateTime } from './format'
-const props = defineProps<{ plan: IntelligencePlan; overview: UpstreamOverview | null; busy: boolean }>()
+const props = withDefaults(defineProps<{ plan: IntelligencePlan; overview: UpstreamOverview | null; busy: boolean; visible?: boolean }>(), { visible: true })
 const emit = defineEmits<{ run: []; toggle: []; edit: []; archive: []; history: [runID?: number] }>()
 const { t } = useI18n()
+const panelActive = inject(intelligencePanelActiveKey, ref(true))
+const cardActive = computed(() => panelActive.value && props.visible)
+// Filtered cards retain their artwork DOM; hidden cards must pause playback.
+provide(intelligencePanelActiveKey, cardActive)
 const oauth = computed(() => props.plan.source_type === 'openai_oauth')
 const supplier = computed(() => props.overview?.suppliers.find(item => item.targets.some(target => target.id === props.plan.upstream_target_id)))
 const target = computed(() => supplier.value?.targets.find(item => item.id === props.plan.upstream_target_id))
@@ -81,10 +86,10 @@ function stopCountdown() {
   countdownTimer = undefined
 }
 // Active runs only have a provisional next_run_at; completion sets the actual deadline.
-watch([() => props.plan.enabled, active, nextRunTime], () => {
+watch([() => props.plan.enabled, active, nextRunTime, cardActive], () => {
   stopCountdown()
   now.value = Date.now()
-  if (!props.plan.enabled || active.value || !remainingSeconds.value) return
+  if (!cardActive.value || !props.plan.enabled || active.value || !remainingSeconds.value) return
   countdownTimer = setInterval(() => {
     now.value = Date.now()
     if (!remainingSeconds.value) stopCountdown()

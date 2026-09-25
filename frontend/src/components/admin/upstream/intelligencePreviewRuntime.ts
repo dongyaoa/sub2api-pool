@@ -10,6 +10,9 @@ export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | '
   const WIDTH = 960, HEIGHT = 600, MAX_EXTENT = 8192;
   const cover = ${JSON.stringify(fit === 'cover')};
   let visibleWidth = WIDTH, visibleHeight = HEIGHT;
+  let viewportReceived = !cover, initialized = false, fontsReady = false, fitted = false, initialFitComplete = false;
+  document.documentElement.style.setProperty('visibility', 'hidden', 'important');
+  document.documentElement.style.setProperty('transition', 'none', 'important');
   const nativeFrame = window.requestAnimationFrame.bind(window);
   const nativeCancelFrame = window.cancelAnimationFrame.bind(window);
   const nativeTimeout = window.setTimeout.bind(window);
@@ -19,21 +22,26 @@ export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | '
     ? window.reportError.bind(window)
     : error => nativeTimeout(() => { throw error; }, 0);
   const frameCallbacks = new Map(), timers = new Map(), pausedAnimations = new Set();
-  let nextHandle = 1, pendingFrame = null, pendingFit = null;
+  let generatedFrameDrawn = false;
+  let nextHandle = 1, pendingFrame = null, pendingFit = null, pendingFitTimer = null;
   let playing = ${JSON.stringify(autoplay)}, warming = true, active = true, disposed = false;
   let pausedAt = 0, pausedDuration = 0, resizeObserver = null, mutationObserver = null;
 
+  function dispatchFrames(timestamp) {
+    const callbacks = Array.from(frameCallbacks.entries());
+    for (const [handle, callback] of callbacks) {
+      if (!frameCallbacks.has(handle)) continue;
+      frameCallbacks.delete(handle);
+      generatedFrameDrawn = true;
+      try { callback(timestamp); } catch (error) { reportError(error); }
+    }
+  }
   function scheduleFrames() {
     if (disposed || !active || pendingFrame !== null || !frameCallbacks.size) return;
     pendingFrame = nativeFrame(timestamp => {
       pendingFrame = null;
       if (!active) return;
-      const callbacks = Array.from(frameCallbacks.entries());
-      for (const [handle, callback] of callbacks) {
-        if (!frameCallbacks.has(handle)) continue;
-        frameCallbacks.delete(handle);
-        try { callback(timestamp - pausedDuration); } catch (error) { reportError(error); }
-      }
+      dispatchFrames(timestamp - pausedDuration);
       scheduleFrames();
     });
   }
@@ -88,7 +96,9 @@ export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | '
     root.toggleAttribute('data-intelligence-preview-paused', !active);
     for (const svg of document.querySelectorAll('svg')) {
       const method = active ? 'unpauseAnimations' : 'pauseAnimations';
-      if (typeof svg[method] === 'function') svg[method]();
+      if (typeof svg[method] === 'function') {
+        try { svg[method](); } catch (error) { reportError(error); }
+      }
     }
     if (active) {
       for (const animation of pausedAnimations) {
@@ -140,27 +150,44 @@ export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | '
       const { width, height } = event.data;
       if (!cover || !Number.isFinite(width) || !Number.isFinite(height) ||
           width <= 0 || height <= 0 || width > WIDTH || height > HEIGHT) return;
-      if (width !== visibleWidth || height !== visibleHeight) {
-        visibleWidth = width; visibleHeight = height; scheduleFit();
-      }
+      const changed = !viewportReceived || width !== visibleWidth || height !== visibleHeight;
+      viewportReceived = true;
+      if (changed) {
+        visibleWidth = width; visibleHeight = height; fitted = false; scheduleFit();
+      } else if (fitted && pendingFit === null) acknowledgeFit();
       return;
     }
     if (event.data.type !== 'intelligence-preview-playback' || typeof event.data.playing !== 'boolean') return;
     playing = event.data.playing;
     reconcilePlayback();
-    scheduleFit();
   });
+
+  function acknowledgeFit() {
+    window.parent.postMessage({ type: 'intelligence-preview-fitted', width: visibleWidth, height: visibleHeight }, '*');
+  }
 
   function finite(value, fallback) {
     return Number.isFinite(value) ? Math.max(-MAX_EXTENT, Math.min(MAX_EXTENT, value)) : fallback;
   }
   function fitDocument() {
+    if (pendingFit !== null) nativeCancelFrame(pendingFit);
+    if (pendingFitTimer !== null) nativeClearTimeout(pendingFitTimer);
     pendingFit = null;
+    pendingFitTimer = null;
+    if (disposed) return;
+    // If the browser withheld every RAF while this thumbnail was masked, its
+    // canvas still needs one drawing callback before reveal. Reuse the normal
+    // one-frame dispatch; recursive requests remain queued while paused.
+    if (!initialFitComplete && initialized && !warming && fontsReady && viewportReceived &&
+        !active && !generatedFrameDrawn && frameCallbacks.size) dispatchFrames(pausedAt - pausedDuration);
     const root = document.documentElement, body = document.body;
     if (!root || !body) return;
     // Read natural dimensions at the same fixed viewport every time. Changing
     // iframe height or CSS zoom would feed viewport-relative layouts back into
     // the next measurement and repeatedly enlarge or shrink the artwork.
+    // Generated pages may use transition:all. Our measurement/reset must be
+    // immediate or each repeated fit would visibly animate through scale(1).
+    root.style.setProperty('transition', 'none', 'important');
     root.style.setProperty('transform', 'none', 'important');
     root.style.setProperty('transform-origin', '0 0', 'important');
     root.style.setProperty('overflow', 'visible', 'important');
@@ -185,9 +212,19 @@ export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | '
     const x = (WIDTH - width * scale) / 2 - left * scale;
     const y = (HEIGHT - height * scale) / 2 - top * scale;
     root.style.setProperty('transform', 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')', 'important');
+    if (initialized && !warming && fontsReady && viewportReceived) {
+      root.style.setProperty('visibility', 'visible', 'important');
+      fitted = true; initialFitComplete = true;
+      acknowledgeFit();
+    }
   }
   function scheduleFit() {
-    if (!disposed && pendingFit === null) pendingFit = nativeFrame(fitDocument);
+    if (disposed || pendingFit !== null) return;
+    pendingFit = nativeFrame(fitDocument);
+    // Some browsers throttle rendering callbacks for a masked cross-origin
+    // iframe. Initial readiness must not depend on an already-visible frame.
+    // The first callback cancels the other; fitted artwork uses RAF only.
+    if (!initialFitComplete) pendingFitTimer = nativeTimeout(fitDocument, 50);
   }
   function observeLayout() {
     if (disposed || !resizeObserver || !document.body) return;
@@ -198,6 +235,7 @@ export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | '
     }
   }
   function initialize() {
+    initialized = true;
     const style = document.createElement('style');
     style.textContent = '[data-intelligence-preview-paused], [data-intelligence-preview-paused] *, [data-intelligence-preview-paused] *::before, [data-intelligence-preview-paused] *::after{animation-play-state:paused!important}';
     document.head.append(style);
@@ -209,11 +247,19 @@ export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | '
     });
     mutationObserver.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     document.addEventListener('load', scheduleFit, true);
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
+    const settleFonts = () => { if (!disposed) { fontsReady = true; scheduleFit(); } };
+    try {
+      if (document.fonts && document.fonts.ready) Promise.resolve(document.fonts.ready).then(settleFonts, settleFonts);
+      else fontsReady = true;
+    } catch { fontsReady = true; }
     scheduleFit();
     // Let self-contained canvas artwork draw its first frame before pausing a
     // thumbnail. This short warm-up also runs DOM-ready initialization timers.
-    nativeTimeout(() => { if (!disposed) { warming = false; reconcilePlayback(); scheduleFit(); } }, 120);
+    nativeTimeout(() => {
+      if (disposed) return;
+      warming = false;
+      try { reconcilePlayback(); } finally { scheduleFit(); }
+    }, 120);
     window.parent.postMessage({ type: 'intelligence-preview-ready' }, '*');
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
@@ -222,6 +268,7 @@ export function intelligencePreviewRuntime(autoplay: boolean, fit: 'contain' | '
     disposed = true;
     if (pendingFrame !== null) nativeCancelFrame(pendingFrame);
     if (pendingFit !== null) nativeCancelFrame(pendingFit);
+    if (pendingFitTimer !== null) nativeClearTimeout(pendingFitTimer);
     for (const timer of timers.values()) if (timer.nativeHandle !== null) nativeClearTimeout(timer.nativeHandle);
     frameCallbacks.clear(); timers.clear(); pausedAnimations.clear();
     if (resizeObserver) resizeObserver.disconnect();

@@ -1,6 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IntelligencePlan, IntelligenceSource } from '@/api/admin/intelligenceMonitor'
+import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import IntelligenceMonitorPanel from './IntelligenceMonitorPanel.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -13,7 +14,7 @@ vi.mock('@/api/admin/intelligenceMonitor', () => ({
   intelligenceMonitorAPI: mocks, PELICAN_MODEL: 'gpt-6-astra', PELICAN_PROMPT: 'Pelican animation',
 }))
 vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
-  name: 'IntelligencePlanCard', props: ['plan', 'overview', 'busy'],
+  name: 'IntelligencePlanCard', props: ['plan', 'overview', 'busy', 'visible'],
   template: '<div data-testid="plan-card" :data-id="plan.id">{{ plan.name }}</div>',
 } }))
 vi.mock('./IntelligencePlanDialog.vue', () => ({ default: { name: 'IntelligencePlanDialog', template: '<div />' } }))
@@ -43,12 +44,104 @@ function render(oauthOnly = false) {
 }
 function orderButton(view: VueWrapper) { return view.findAll('button').find(button => button.text() === 'upstreamCenter.order.open')! }
 function refreshButton(view: VueWrapper) { return view.findAll('button').find(button => button.text() === 'intelligenceMonitor.refresh')! }
-function cardIDs(view: VueWrapper) { return view.findAll('[data-testid="plan-card"]').map(card => Number(card.attributes('data-id'))) }
+function cardIDs(view: VueWrapper) { return view.findAll('[data-testid="plan-card"]').filter(card => card.attributes('hidden') === undefined).map(card => Number(card.attributes('data-id'))) }
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers()
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
   mocks.plans.mockResolvedValue({ items: original() })
+})
+
+describe('intelligence monitoring site tabs', () => {
+  const items = () => [
+    { ...plan(1, 'Alpha premium', 'upstream'), upstream_target_id: 11 },
+    { ...plan(2, 'Alpha standard', 'upstream'), upstream_target_id: 12 },
+    { ...plan(3, 'Beta premium', 'upstream'), upstream_target_id: 21 },
+    { ...plan(4, 'External A'), endpoint: 'https://relay.example/v1/responses' },
+    { ...plan(5, 'External B'), endpoint: 'https://relay.example/v1' },
+    { ...plan(6, 'Local A', 'local_group'), group_id: 1 },
+    { ...plan(7, 'Local B', 'local_group'), group_id: 2 },
+    { ...plan(8, 'Noted A'), endpoint: 'https://first.example/v1', supplier_note: 'Named relay' },
+    { ...plan(9, 'Noted B'), endpoint: 'https://second.example/v1', supplier_note: 'Named relay' },
+  ]
+  async function renderSites() {
+    mocks.plans.mockResolvedValue({ items: items() })
+    const view = render()
+    await view.setProps({ overview: { suppliers: [
+      { id: 1, name: 'Alpha relay', targets: [{ id: 11 }, { id: 12 }] },
+      { id: 2, name: 'Beta relay', targets: [{ id: 21 }] },
+    ] } as UpstreamOverview })
+    await flushPromises()
+    return view
+  }
+  const site = (view: VueWrapper, key: string) => view.get(`[data-site="${key}"]`)
+
+  it('groups plans by supplier, external provider note or origin, and local site with plan counts', async () => {
+    const view = await renderSites()
+    const tabs = view.findAll('[data-testid="intelligence-site-tabs"] [role="tab"]')
+    expect(tabs.map(tab => tab.text())).toEqual(['intelligenceMonitor.allSites9', 'Alpha relay2', 'Beta relay1', 'relay.example2', 'intelligenceMonitor.source.local_group2', 'Named relay2'])
+    await site(view, 'upstream:1').trigger('click')
+    expect(cardIDs(view)).toEqual([1, 2])
+    await site(view, 'external:https://relay.example').trigger('click')
+    expect(cardIDs(view)).toEqual([4, 5])
+    await site(view, 'external:note:Named relay').trigger('click')
+    expect(cardIDs(view)).toEqual([8, 9])
+    await site(view, 'local').trigger('click')
+    expect(cardIDs(view)).toEqual([6, 7])
+  })
+
+  it('keeps the same cards while filtering, refreshing or leaving the panel, and retains the selected site', async () => {
+    const view = await renderSites()
+    const firstCard = view.get('[data-id="1"]').element
+    await site(view, 'upstream:1').trigger('click')
+    expect(view.findAllComponents({ name: 'IntelligencePlanCard' }).find(card => card.props('plan').id === 3)?.props('visible')).toBe(false)
+    await view.get('[aria-label="intelligenceMonitor.search"]').setValue('premium')
+    expect(cardIDs(view)).toEqual([1])
+    await view.get('[data-testid="source-filter"]').setValue('external')
+    expect(cardIDs(view)).toEqual([])
+    expect(view.text()).toContain('intelligenceMonitor.noMatches')
+    expect(view.get('[data-id="1"]').element).toBe(firstCard)
+    await view.get('[data-testid="source-filter"]').setValue('')
+    await view.get('[aria-label="intelligenceMonitor.search"]').setValue('')
+    await view.setProps({ active: false })
+    await view.setProps({ active: true })
+    await flushPromises()
+    expect(site(view, 'upstream:1').attributes('aria-selected')).toBe('true')
+    expect(cardIDs(view)).toEqual([1, 2])
+    expect(view.get('[data-id="1"]').element).toBe(firstCard)
+    expect(orderButton(view).attributes('disabled')).toBeUndefined()
+  })
+
+  it('follows saved plan order and falls back to all sites when the selected site has no remaining plans', async () => {
+    const view = await renderSites()
+    await site(view, 'upstream:1').trigger('click')
+    mocks.plans.mockResolvedValue({ items: items().filter(item => ![1, 2].includes(item.id)).reverse() })
+    await refreshButton(view).trigger('click')
+    await flushPromises()
+    expect(site(view, 'all').attributes('aria-selected')).toBe('true')
+    expect(view.find('[data-site="upstream:1"]').exists()).toBe(false)
+    expect(cardIDs(view)).toEqual([9, 8, 7, 6, 5, 4, 3])
+    expect(view.findAll('[role="tab"]')[1].text()).toBe('Named relay2')
+  })
+
+  it('supports keyboard tab switching and labels the corresponding results', async () => {
+    const view = await renderSites()
+    await site(view, 'all').trigger('keydown', { key: 'ArrowRight' })
+    expect(cardIDs(view)).toEqual([1, 2])
+    expect(site(view, 'upstream:1').attributes('tabindex')).toBe('0')
+    expect(view.get('#intelligence-site-results').attributes('aria-labelledby')).toBe(site(view, 'upstream:1').attributes('id'))
+    await site(view, 'upstream:1').trigger('keydown', { key: 'End' })
+    expect(cardIDs(view)).toEqual([8, 9])
+    await site(view, 'external:note:Named relay').trigger('keydown', { key: 'Home' })
+    expect(cardIDs(view)).toHaveLength(9)
+  })
+
+  it('does not add site tabs to the OAuth account panel', async () => {
+    const view = render(true)
+    await flushPromises()
+    expect(view.find('[data-testid="intelligence-site-tabs"]').exists()).toBe(false)
+    expect(cardIDs(view)).toEqual([4, 5])
+  })
 })
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.restoreAllMocks(); vi.useRealTimers() })
 
@@ -131,5 +224,35 @@ describe('intelligence monitoring manual order', () => {
     expect(mocks.showSuccess).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(5000)
     expect(mocks.plans).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains cards and pauses background reads when a tab is hidden, then refreshes in place', async () => {
+    const view = render()
+    await flushPromises()
+    const firstCard = view.get('[data-testid="plan-card"]').element
+    await view.setProps({ active: false })
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(mocks.plans).toHaveBeenCalledTimes(1)
+    expect(view.get('[data-testid="plan-card"]').element).toBe(firstCard)
+    await view.setProps({ active: true })
+    await flushPromises()
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+    expect(view.get('[data-testid="plan-card"]').element).toBe(firstCard)
+    expect(cardIDs(view)).toEqual([1, 2, 3])
+  })
+
+  it('aborts a pending read on hide and ignores its late response', async () => {
+    const view = render()
+    await flushPromises()
+    let resolveOld!: (value: { items: IntelligencePlan[] }) => void
+    mocks.plans.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+    await refreshButton(view).trigger('click')
+    const signal = mocks.plans.mock.calls.at(-1)![0] as AbortSignal
+    await view.setProps({ active: false })
+    expect(signal.aborted).toBe(true)
+    resolveOld({ items: [] })
+    await flushPromises()
+    expect(cardIDs(view)).toEqual([1, 2, 3])
+    expect(refreshButton(view).attributes('disabled')).toBeUndefined()
   })
 })

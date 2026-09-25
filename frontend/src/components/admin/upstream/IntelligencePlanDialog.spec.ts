@@ -71,7 +71,7 @@ describe('OAuth intelligence plan dialog', () => {
     await trigger.trigger('click')
     await view.get('form').trigger('submit')
     await flushPromises()
-    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'openai_oauth', account_id: 7, name: '', enabled: false, interval_seconds: 3600, timeout_seconds: 900, api_mode: 'responses', endpoint: undefined, api_key: undefined, upstream_target_id: null, group_id: null }))
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'openai_oauth', account_id: 7, name: '', enabled: false, interval_seconds: 300, timeout_seconds: 600, api_mode: 'responses', endpoint: undefined, api_key: undefined, upstream_target_id: null, group_id: null }))
     expect(view.emitted('saved')).toHaveLength(1)
     expect(view.emitted('close')).toHaveLength(1)
   })
@@ -235,6 +235,48 @@ describe('OAuth intelligence plan dialog', () => {
 })
 
 describe('intelligence plan choices and interval validation', () => {
+  const upstreamOverview = { suppliers: [
+    { id: 1, name: 'North Relay', website: 'https://north.example', targets: [{ id: 11, name: 'Primary GPT', provider: 'openai', endpoint: 'https://north.example' }] },
+    { id: 2, name: 'South Relay', website: 'https://south.example', targets: [{ id: 21, name: 'Backup GPT', provider: 'openai', endpoint: 'https://south.example' }] }
+  ] } as UpstreamOverview
+
+  it('names a new plan after the chosen upstream group and allows a final custom name', async () => {
+    const view = render({ oauthOnly: false, overview: upstreamOverview })
+    await flushPromises()
+    await selectOption(view, '#intelligence-upstream', 'Primary GPT')
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Primary GPT')
+    expect(view.get('#intelligence-upstream').text()).toContain('North Relay')
+    await view.get('#intelligence-name').setValue('My custom test')
+    await selectOption(view, '#intelligence-upstream', 'Primary GPT')
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('My custom test')
+    await selectOption(view, '#intelligence-upstream', 'Backup GPT')
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Backup GPT')
+    expect(view.get('#intelligence-upstream').text()).toContain('South Relay')
+    await view.get('#intelligence-name').setValue('Evening comparison')
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Evening comparison', source_type: 'upstream', upstream_target_id: 21, interval_seconds: 300, timeout_seconds: 600 }))
+  })
+
+  it('preserves an existing upstream plan name and timing until its group is changed', async () => {
+    const plan = savedPlan({ name: 'Keep my custom name', source_type: 'upstream', upstream_target_id: 11, account_id: null, interval_seconds: 1800, timeout_seconds: 900 })
+    const view = render({ oauthOnly: false, overview: upstreamOverview, plan })
+    await flushPromises()
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Keep my custom name')
+    expect(view.get('[data-interval="1800"]').attributes('aria-pressed')).toBe('true')
+    expect(view.get('[data-timeout="900"]').attributes('aria-pressed')).toBe('true')
+    await view.setProps({ overview: { ...upstreamOverview, suppliers: [...upstreamOverview.suppliers] } })
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(3, expect.objectContaining({ name: 'Keep my custom name', interval_seconds: 1800, timeout_seconds: 900 }))
+    await selectOption(view, '#intelligence-upstream', 'Backup GPT')
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Backup GPT')
+    await view.setProps({ show: false })
+    await view.setProps({ show: true })
+    await flushPromises()
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Keep my custom name')
+  })
+
   it('uses shared non-searchable selects and disabled supplier group headers', async () => {
     mocks.groups.mockResolvedValue([{ id: 5, name: 'Local GPT', platform: 'openai', rate_multiplier: 1.2 }])
     const overview = { suppliers: [{ id: 1, name: 'Supplier One', targets: [{ id: 11, name: 'GPT Key', provider: 'openai', endpoint: 'https://relay.example' }, { id: 12, name: 'Claude Key', provider: 'anthropic' }] }] } as UpstreamOverview
@@ -246,7 +288,8 @@ describe('intelligence plan choices and interval validation', () => {
     await view.get('#intelligence-upstream').trigger('click')
     await flushPromises()
     const header = document.body.querySelector<HTMLElement>('.select-option-group')!
-    expect(header.textContent).toBe('Supplier One')
+    expect(header.textContent?.trim()).toBe('Supplier One')
+    expect(header.querySelector('.intelligence-supplier-heading')).not.toBeNull()
     expect(header.getAttribute('aria-disabled')).toBe('true')
     header.click()
     await flushPromises()
@@ -264,12 +307,12 @@ describe('intelligence plan choices and interval validation', () => {
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'local_group', group_id: 5, api_mode: 'chat_completions' }))
   })
 
-  it('defaults to 15 minutes and selects minute timeout presets while submitting seconds', async () => {
+  it('defaults to a 10-minute wait and 5-minute interval while preserving all minute presets', async () => {
     const view = render()
     await flushPromises()
     await selectOAuth(view)
     expect(view.find('#intelligence-timeout').exists()).toBe(false)
-    expect(view.get('[data-timeout="900"]').attributes('aria-pressed')).toBe('true')
+    expect(view.get('[data-timeout="600"]').attributes('aria-pressed')).toBe('true')
     expect(view.find('[data-timeout="180"]').exists()).toBe(false)
     expect(view.find('[data-timeout="240"]').exists()).toBe(false)
     for (const seconds of [300, 600, 900]) {
@@ -278,7 +321,7 @@ describe('intelligence plan choices and interval validation', () => {
       expect(view.get(`[data-timeout="${seconds}"]`).text()).toBe(`intelligenceMonitor.minutes:${seconds / 60}`)
     }
     await view.get('#intelligence-enabled').trigger('click')
-    expect(view.get('[data-interval="3600"]').attributes('aria-pressed')).toBe('true')
+    expect(view.get('[data-interval="300"]').attributes('aria-pressed')).toBe('true')
     await view.get('[data-interval="300"]').trigger('click')
     expect(view.get('[data-interval="300"]').text()).toBe('intelligenceMonitor.minutes:5')
     await view.get('form').trigger('submit')
