@@ -51,7 +51,7 @@ async function load() {
   try {
     const result = await upstreamCenterAPI.finance({ supplier_id: props.supplier?.id, target_id: props.target?.id || (targetId.value ? Number(targetId.value) : undefined), from: fromDate.value ? new Date(`${fromDate.value}T00:00:00`).toISOString() : undefined, to: to?.toISOString(), page: page.value, page_size: 50 }, current.signal)
     if (!current.signal.aborted) data.value = result
-  } catch (err) { if (!current.signal.aborted) error.value = extractApiErrorMessage(err, t('upstreamCenter.loadFailed')) }
+  } catch (err) { if (!current.signal.aborted) error.value = extractApiErrorMessage(err, t('upstreamCenter.loadFailed'), { UPSTREAM_FINANCE_ARCHIVED_RANGE: t('upstreamCenter.storage.archivedFinanceRange') }) }
   finally { if (!current.signal.aborted) loading.value = false }
 }
 watch([() => props.supplier?.id, () => props.target?.id], () => { data.value = null; page.value = 1; targetId.value = ''; fromDate.value = ''; toDate.value = ''; void load() }, { immediate: true })

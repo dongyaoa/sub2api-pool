@@ -7,12 +7,14 @@ import IntelligenceMonitorPanel from './IntelligenceMonitorPanel.vue'
 const mocks = vi.hoisted(() => ({
   plans: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), run: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
+  purge: vi.fn(),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: mocks.showSuccess, showError: mocks.showError }) }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({
   intelligenceMonitorAPI: mocks, PELICAN_MODEL: 'gpt-6-astra', PELICAN_PROMPT: 'Pelican animation',
 }))
+vi.mock('@/api/admin/upstreamCenter', () => ({ upstreamCenterAPI: { purge: mocks.purge } }))
 vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
   name: 'IntelligencePlanCard', props: ['plan', 'overview', 'busy', 'visible'],
   template: '<div data-testid="plan-card" :data-id="plan.id">{{ plan.name }}</div>',
@@ -146,6 +148,17 @@ describe('intelligence monitoring site tabs', () => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('intelligence monitoring manual order', () => {
+  it.each(['archive', 'purge'] as const)('supports %s for an OAuth monitor without removing its source account', async mode => {
+    const view = render(true); await flushPromises()
+    view.findAllComponents({ name: 'IntelligencePlanCard' })[0]!.vm.$emit('archive')
+    await flushPromises()
+    const removal = view.getComponent({ name: 'UpstreamDeleteDialog' })
+    expect(removal.props('item')).toEqual({ kind: 'intelligence', id: 4, name: 'OAuth A' })
+    removal.vm.$emit('confirm', mode); await flushPromises()
+    if (mode === 'purge') { expect(mocks.purge).toHaveBeenCalledWith({ kind: 'intelligence', id: 4, confirm_name: 'OAuth A' }); expect(mocks.archive).not.toHaveBeenCalled() }
+    else { expect(mocks.archive).toHaveBeenCalledWith(4); expect(mocks.purge).not.toHaveBeenCalled() }
+    expect(removal.props('show')).toBe(false)
+  })
   it.each([{ oauthOnly: false, scope: 'intelligence', ids: [1, 2, 3] }, { oauthOnly: true, scope: 'oauth', ids: [4, 5] }])('opens the full $scope list with an independent scope', async ({ oauthOnly, scope, ids }) => {
     const view = render(oauthOnly)
     await flushPromises()

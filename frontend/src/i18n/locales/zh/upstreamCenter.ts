@@ -1,5 +1,24 @@
 export default {
   upstreamCenter: {
+    storage: {
+      title: '数据管理', description: '设置监控数据保留期限，清理过期记录，管理已归档的上游与监控。历史财务账本、汇总和源账号不删除；清理后空间可复用，磁盘文件不一定立即缩小。',
+      archivedFinanceRange: '此时间段的历史费用已按小时汇总，请改用整小时边界或完整日期范围查询。',
+      policy: '自动保留策略', policyHint: '保留最近的数据，定期清理更早的记录。', enabled: '启用自动清理',
+      historyRetention: '监测记录保留', historyHint: '适用于上游与监控中心的检测明细。', snapshotRetention: '余额与倍率快照保留', snapshotHint: '仅清理过期快照，当前最新状态仍保留。', days: '{days} 天',
+      unsaved: '有未保存的修改，请先保存策略。', automaticOn: '自动清理已开启', automaticOff: '自动清理已关闭', save: '保存策略', saved: '保留策略已保存',
+      lastCleanup: '最近一次清理', neverCleaned: '尚未执行清理', cleanup: '按策略清理', continueCleanup: '继续清理',
+      refreshAfterCleanupFailed: '清理已完成，但最近清理时间刷新失败；重新打开数据管理可刷新状态。',
+      cleanupHint: '按已保存的保留天数清理过期记录，每次分批处理；操作不可撤销。关闭自动清理后仍可手动执行。', hasMore: '本批清理已完成，仍有过期数据。可继续清理，或等待下次自动清理。',
+      historyDeleted: '监测记录', balanceDeleted: '余额快照', billingDeleted: '倍率快照', cleaned: '本批过期数据清理完成',
+      archives: '已归档项目', archivesHint: '归档后停止监控，历史记录按保留策略管理；可在此永久删除。', emptyArchives: '暂无归档项目', archiveLimit: '当前展示 {count} / {total} 个归档项目，删除后可继续查看其余项目。',
+      kinds: { supplier: '上游', target: 'Key / 监控', intelligence: '智商监控', oauth: 'OAuth 监控' },
+      removeTitle: '移除项目', removeMode: '移除方式', archive: '归档保留历史', archiveShort: '停止监控，保留历史记录', purge: '永久删除', purgeShort: '删除配置和对应监控数据',
+      archiveHint: '归档后不再显示在活动列表中，也不再执行定时监控。历史记录仍保留并受保留策略管理，可在「数据管理」中进一步清理。',
+      purgeUpstreamHint: '永久删除配置、Key、监控记录及余额/倍率快照；上游下的分组一并删除。依赖这些 Key 的智商监控会暂停并断开来源，已有作品保留。独立历史财务汇总和源账号不删除。此操作不可撤销。',
+      purgeIntelligenceHint: '永久删除此监控计划及全部作品和运行记录。账号管理中的源账号与上游 Key 不删除。此操作不可撤销。',
+      confirmName: '请输入完整名称「{name}」确认永久删除', purged: '项目已永久删除', archived: '项目已归档',
+      loadFailed: '数据管理信息加载失败，请重试。', actionFailed: '操作未完成，请重试；正在检测的项目需等待完成后再删除。',
+    },
     localBadge: '站内', localBadgeHint: '包含已关联站内 API Key 账号的分组',
     newapi: {
       authorization: '余额与倍率授权',

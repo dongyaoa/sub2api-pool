@@ -1,5 +1,24 @@
 export default {
   upstreamCenter: {
+    storage: {
+      title: 'Data management', description: 'Set monitoring retention, clean expired records and manage archived items. Financial ledgers, summaries and source accounts are retained. Freed database space is reusable; disk files may not shrink immediately.',
+      archivedFinanceRange: 'Historical costs in this period are summarized hourly. Use whole-hour boundaries or a complete date range.',
+      policy: 'Automatic retention', policyHint: 'Keep recent data and periodically remove older records.', enabled: 'Enable automatic cleanup',
+      historyRetention: 'Check history retention', historyHint: 'Applies to check details in upstream and independent monitoring.', snapshotRetention: 'Balance and rate snapshot retention', snapshotHint: 'Removes expired snapshots while keeping the latest state.', days: '{days} days',
+      unsaved: 'You have unsaved changes. Save the policy first.', automaticOn: 'Automatic cleanup enabled', automaticOff: 'Automatic cleanup disabled', save: 'Save policy', saved: 'Retention policy saved',
+      lastCleanup: 'Last cleanup', neverCleaned: 'No cleanup yet', cleanup: 'Clean using policy', continueCleanup: 'Continue cleanup',
+      refreshAfterCleanupFailed: 'Cleanup completed, but the latest cleanup time could not be refreshed. Reopen Data management to refresh its status.',
+      cleanupHint: 'Deletes expired records using the saved retention policy in bounded batches. This cannot be undone. Manual cleanup remains available when automatic cleanup is disabled.', hasMore: 'This batch is complete and expired data remains. Continue cleanup or wait for the next automatic run.',
+      historyDeleted: 'Check records', balanceDeleted: 'Balance snapshots', billingDeleted: 'Rate snapshots', cleaned: 'This cleanup batch is complete',
+      archives: 'Archived items', archivesHint: 'Archived items stop monitoring; their history follows the retention policy. Permanently delete them here when needed.', emptyArchives: 'No archived items', archiveLimit: 'Showing {count} of {total} archived items. Remove items to reveal the rest.',
+      kinds: { supplier: 'Upstream', target: 'Key / monitor', intelligence: 'Intelligence monitor', oauth: 'OAuth monitor' },
+      removeTitle: 'Remove item', removeMode: 'Removal method', archive: 'Archive and keep history', archiveShort: 'Stop monitoring and keep history', purge: 'Delete permanently', purgeShort: 'Remove configuration and monitoring data',
+      archiveHint: 'The item leaves the active list and scheduled checks stop. History is retained under the retention policy and can be cleaned in Data management.',
+      purgeUpstreamHint: 'Permanently deletes configuration, keys, check history and balance/rate snapshots, including an upstream’s groups. Intelligence plans using these keys are paused and disconnected, while their artwork is retained. Independent financial summaries and source accounts remain. This cannot be undone.',
+      purgeIntelligenceHint: 'Permanently deletes this plan, all artwork and run history. Source accounts and upstream keys remain. This cannot be undone.',
+      confirmName: 'Type the exact name “{name}” to confirm permanent deletion', purged: 'Item permanently deleted', archived: 'Item archived',
+      loadFailed: 'Unable to load data management. Try again.', actionFailed: 'The action could not complete. Try again; an active check must finish before its item can be deleted.',
+    },
     localBadge: 'Local', localBadgeHint: 'Includes groups linked to local API key accounts',
     newapi: {
       authorization: 'Balance & rate authorization',

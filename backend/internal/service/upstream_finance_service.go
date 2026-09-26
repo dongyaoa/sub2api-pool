@@ -104,6 +104,9 @@ func (s *UpstreamFinanceService) Details(ctx context.Context, query UpstreamFina
 	return &UpstreamFinancePage{Summary: summary, Items: items, Total: total, Page: q.Page, PageSize: q.PageSize}, nil
 }
 
+// UpstreamBalanceIdentity lets retention use exactly the same credential scope.
+func UpstreamBalanceIdentity(t *UpstreamFinanceTarget) string { return upstreamBalanceIdentity(t) }
+
 func upstreamBalanceIdentity(t *UpstreamFinanceTarget) string {
 	supplier := ""
 	if t.SupplierID != nil {

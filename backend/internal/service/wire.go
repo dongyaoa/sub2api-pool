@@ -994,8 +994,10 @@ func ProvideUpstreamCenterService(
 	encryptor SecretEncryptor,
 	accountRepo AccountRepository,
 	finance *UpstreamFinanceService,
+	apiKeys *APIKeyService,
 ) *UpstreamCenterService {
 	svc := NewUpstreamCenterService(repo, encryptor, accountRepo, finance)
+	svc.storageKeys = apiKeys
 	svc.Start()
 	return svc
 }

@@ -5,8 +5,15 @@ import type { UpstreamSupplier } from '@/api/admin/upstreamCenter'
 const finance = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin/upstreamCenter', () => ({ upstreamCenterAPI: { finance } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-beforeEach(() => finance.mockReset())
+beforeEach(() => { finance.mockReset() })
 describe('upstream finance unknown-cost state', () => {
+  it('explains the required date boundary when historical finance has been rolled up hourly', async () => {
+    finance.mockRejectedValue({ code: 'UPSTREAM_FINANCE_ARCHIVED_RANGE', message: 'raw technical error' })
+    const wrapper = mount(UpstreamFinancePanel, { props: { supplier: null, target: null }, global: { stubs: { Pagination: true, Icon: true } } })
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('upstreamCenter.storage.archivedFinanceRange')
+    wrapper.unmount()
+  })
   it('shows incomplete costs instead of a fabricated zero profit and uses the backend default date window', async () => {
     finance.mockResolvedValue({ summary: { revenue: 12, business_cost: 4, monitor_cost: null, profit: null, request_count: 2, cost_source: 'estimated', currency: 'USD', from: '2026-09-23T00:00:00Z', to: '2026-09-24T00:00:00Z', remote_used: null, reconciliation_delta: null, unpriced_monitor_count: 3 }, items: [], total: 0, page: 1, page_size: 50 })
     const wrapper = mount(UpstreamFinancePanel, { props: { supplier: { id: 2, targets: [] } as unknown as UpstreamSupplier, target: null }, global: { stubs: { Pagination: true, Icon: true } } })

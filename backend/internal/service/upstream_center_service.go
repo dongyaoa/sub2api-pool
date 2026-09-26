@@ -21,22 +21,24 @@ import (
 )
 
 type UpstreamCenterService struct {
-	repo         UpstreamCenterRepository
-	encryptor    SecretEncryptor
-	accounts     AccountRepository
-	finance      *UpstreamFinanceService
-	ctx          context.Context
-	cancel       context.CancelFunc
-	startOnce    sync.Once
-	stopOnce     sync.Once
-	wg           sync.WaitGroup
-	lifecycleMu  sync.Mutex
-	stopped      bool
-	manualChecks sync.WaitGroup
-	slots        chan struct{}
-	modelsClient *http.Client
-	probeClient  *http.Client
-	checkModel   func(context.Context, string, string, string, string, *CheckOptions) *CheckResult
+	repo             UpstreamCenterRepository
+	encryptor        SecretEncryptor
+	accounts         AccountRepository
+	finance          *UpstreamFinanceService
+	storageKeys      *APIKeyService
+	storageCleanupMu sync.Mutex
+	ctx              context.Context
+	cancel           context.CancelFunc
+	startOnce        sync.Once
+	stopOnce         sync.Once
+	wg               sync.WaitGroup
+	lifecycleMu      sync.Mutex
+	stopped          bool
+	manualChecks     sync.WaitGroup
+	slots            chan struct{}
+	modelsClient     *http.Client
+	probeClient      *http.Client
+	checkModel       func(context.Context, string, string, string, string, *CheckOptions) *CheckResult
 }
 
 func NewUpstreamCenterService(repo UpstreamCenterRepository, encryptor SecretEncryptor, accountRepo AccountRepository, financeSvc *UpstreamFinanceService) *UpstreamCenterService {
@@ -700,6 +702,10 @@ func (s *UpstreamCenterService) Start() {
 		}
 		s.wg.Add(1)
 		go s.scheduleLoop()
+		if _, ok := s.repo.(UpstreamStorageRepository); ok {
+			s.wg.Add(1)
+			go s.storageLoop()
+		}
 		if s.finance != nil {
 			s.wg.Add(1)
 			go s.balanceLoop()

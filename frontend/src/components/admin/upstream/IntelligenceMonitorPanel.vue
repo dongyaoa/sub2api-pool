@@ -23,17 +23,17 @@
     <IntelligencePlanDialog :show="editor" :plan="editing" :overview="overview" :oauth-only="oauthOnly" @close="editor=false" @saved="saved"/>
     <IntelligenceHistoryDialog :show="history" :plan="selectedPlan" :initial-run-id="selectedRunID" @close="history=false"/>
     <UpstreamOrderDialog :show="orderDialog" :scope="oauthOnly ? 'oauth' : 'intelligence'" @close="orderDialog=false" @saved="savedOrder"/>
-    <BaseDialog :show="!!archiving" :title="t('intelligenceMonitor.archiveTitle')" width="narrow" :show-close-button="!deleting" :close-on-escape="!deleting" @close="!deleting&&(archiving=null)"><p class="text-sm leading-6 text-gray-600 dark:text-gray-300">{{ t('intelligenceMonitor.archiveHint',{name:archiving?.name||''}) }}</p><template #footer><div class="flex justify-end gap-3"><button class="btn btn-secondary" :disabled="deleting" @click="archiving=null">{{ t('common.cancel') }}</button><button class="btn bg-rose-600 text-white hover:bg-rose-700" :disabled="deleting" @click="archive">{{ t('intelligenceMonitor.archive') }}</button></div></template></BaseDialog>
+    <UpstreamDeleteDialog :show="!!archiving" :item="archiving ? { kind: 'intelligence', id: archiving.id, name: archiving.name } : null" :busy="deleting" :error="deleteError" @close="archiving = null" @confirm="archive" />
   </div>
 </template>
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import BaseDialog from '@/components/common/BaseDialog.vue'
+import UpstreamDeleteDialog from './UpstreamDeleteDialog.vue'
 import Select from '@/components/common/Select.vue'
 import { intelligenceMonitorAPI, PELICAN_MODEL, PELICAN_PROMPT, type IntelligencePlan } from '@/api/admin/intelligenceMonitor'
-import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
+import { upstreamCenterAPI, type UpstreamOverview } from '@/api/admin/upstreamCenter'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import IntelligencePlanCard from './IntelligencePlanCard.vue'
@@ -42,7 +42,7 @@ import IntelligenceHistoryDialog from './IntelligenceHistoryDialog.vue'
 import UpstreamOrderDialog from './UpstreamOrderDialog.vue'
 import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
 import { safeWebsite } from './safeWebsite'
-const props=withDefaults(defineProps<{overview:UpstreamOverview|null;oauthOnly?:boolean;active?:boolean}>(),{oauthOnly:false,active:true})
+const props=withDefaults(defineProps<{overview:UpstreamOverview|null;oauthOnly?:boolean;active?:boolean;refreshKey?:number}>(),{oauthOnly:false,active:true,refreshKey:0})
 provide(intelligencePanelActiveKey, computed(() => props.active))
 const {t}=useI18n(),app=useAppStore()
 const plans=ref<IntelligencePlan[]>([]),loading=ref(false),loaded=ref(false),error=ref(''),search=ref(''),sourceFilter=ref(''),busy=ref(new Set<number>())
@@ -50,6 +50,8 @@ const sources=['upstream','local_group','external']
 const sourceOptions=computed(()=>[{value:'',label:t('intelligenceMonitor.allSources')},...sources.map(value=>({value,label:t(`intelligenceMonitor.source.${value}`)}))])
 const editor=ref(false),editing=ref<IntelligencePlan|null>(null),history=ref(false),selectedID=ref<number|null>(null),selectedRunID=ref<number|null>(null),archiving=ref<IntelligencePlan|null>(null),deleting=ref(false)
 const orderDialog=ref(false)
+const deleteError=ref('')
+watch(archiving, () => { deleteError.value = '' })
 const selectedPlan=computed(()=>plans.value.find(plan=>plan.id===selectedID.value)||null)
 const scopePlans=computed(()=>plans.value.filter(plan=>props.oauthOnly ? plan.source_type==='openai_oauth' : plan.source_type!=='openai_oauth'))
 const selectedSite = ref('all')
@@ -103,7 +105,8 @@ function savedOrder(){orderDialog.value=false;void load()}
 async function action(id:number,callback:()=>Promise<unknown>){if(busy.value.has(id))return;busy.value=new Set([...busy.value,id]);try{await callback();if(!disposed&&props.active)await load()}catch(err){app.showError(extractApiErrorMessage(err,t('intelligenceMonitor.actionFailed')))}finally{const ids=new Set(busy.value);ids.delete(id);busy.value=ids}}
 function run(plan:IntelligencePlan){void action(plan.id,async()=>{await intelligenceMonitorAPI.run(plan.id);app.showSuccess(t('intelligenceMonitor.queued'))})}
 function toggle(plan:IntelligencePlan){void action(plan.id,()=>intelligenceMonitorAPI.update(plan.id,{enabled:!plan.enabled}))}
-async function archive(){if(!archiving.value||deleting.value)return;deleting.value=true;try{await intelligenceMonitorAPI.archive(archiving.value.id);archiving.value=null;app.showSuccess(t('intelligenceMonitor.archived'));await load()}catch(err){app.showError(extractApiErrorMessage(err,t('intelligenceMonitor.actionFailed')))}finally{deleting.value=false}}
+async function archive(mode:'archive'|'purge'){if(!archiving.value||deleting.value)return;const item=archiving.value;deleting.value=true;deleteError.value='';try{if(mode==='purge')await upstreamCenterAPI.purge({kind:'intelligence',id:item.id,confirm_name:item.name});else await intelligenceMonitorAPI.archive(item.id);if(disposed)return;archiving.value=null;app.showSuccess(t(mode==='purge'?'upstreamCenter.storage.purged':'intelligenceMonitor.archived'));if(props.active)await load()}catch(err){if(!disposed)deleteError.value=extractApiErrorMessage(err,t('upstreamCenter.storage.actionFailed'))}finally{deleting.value=false}}
+watch(() => props.refreshKey, () => { if(props.active)void load() })
 watch(() => props.active, active => {
   if (active) { void load(); return }
   controller?.abort()

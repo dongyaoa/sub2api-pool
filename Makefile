@@ -5,6 +5,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/client.spec.ts \
 	src/api/__tests__/tokenRefresh.spec.ts \
 	src/api/__tests__/admin.system.poolUpdate.spec.ts \
+	src/api/__tests__/admin.upstreamCenter.storage.spec.ts \
 	src/components/common/__tests__/VersionBadge.spec.ts \
 	src/components/admin/upstream/IntelligenceArtifactPreview.spec.ts \
 	src/components/admin/upstream/IntelligenceHistoryDialog.spec.ts \
@@ -14,6 +15,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/upstream/UpstreamWallet.spec.ts \
 	src/components/admin/upstream/UpstreamRateBadge.spec.ts \
 	src/components/admin/upstream/UpstreamTargetDialog.spec.ts \
+	src/components/admin/upstream/UpstreamDeleteDialog.spec.ts \
+	src/components/admin/upstream/UpstreamStorageDialog.spec.ts \
+	src/components/admin/upstream/UpstreamFinancePanel.spec.ts \
 	src/components/admin/upstream/newapi.spec.ts \
 	src/components/admin/upstream/format.spec.ts \
 	src/views/admin/__tests__/UpstreamCenterView.order.spec.ts \

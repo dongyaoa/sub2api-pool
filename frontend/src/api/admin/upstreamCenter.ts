@@ -155,9 +155,49 @@ export interface UpstreamFinanceRow {
 export interface UpstreamPage<T> { items: T[]; total: number; page: number; page_size: number }
 export interface UpstreamFinancePage extends UpstreamPage<UpstreamFinanceRow> { summary: UpstreamFinanceSummary }
 export interface UpstreamPageQuery { page?: number; page_size?: number; from?: string; to?: string }
+export interface UpstreamCleanupResult {
+  history_deleted: number
+  balance_deleted: number
+  billing_deleted: number
+  has_more: boolean
+}
+export interface UpstreamStoragePolicyInput {
+  enabled: boolean
+  history_retention_days: number
+  snapshot_retention_days: number
+}
+export interface UpstreamStoragePolicy extends UpstreamStoragePolicyInput {
+  last_cleanup_at: string | null
+  last_result: UpstreamCleanupResult | null
+}
+export type UpstreamArchiveKind = 'supplier' | 'target' | 'intelligence'
+export interface UpstreamArchiveItem {
+  kind: UpstreamArchiveKind
+  id: number
+  name: string
+  deleted_at: string
+  source_type: string
+  supplier_name: string
+}
+export interface UpstreamPurgeInput { kind: UpstreamArchiveKind; id: number; confirm_name: string }
 const base = '/admin/upstream-center'
 
 export const upstreamCenterAPI = {
+  async storage(signal?: AbortSignal): Promise<UpstreamStoragePolicy> {
+    return (await apiClient.get<UpstreamStoragePolicy>(`${base}/storage`, { signal })).data
+  },
+  async updateStorage(input: UpstreamStoragePolicyInput): Promise<UpstreamStoragePolicy> {
+    return (await apiClient.put<UpstreamStoragePolicy>(`${base}/storage`, input)).data
+  },
+  async cleanupStorage(): Promise<UpstreamCleanupResult> {
+    return (await apiClient.post<UpstreamCleanupResult>(`${base}/storage/cleanup`, undefined, { timeout: 60000 })).data
+  },
+  async archives(signal?: AbortSignal): Promise<{ items: UpstreamArchiveItem[]; total: number }> {
+    return (await apiClient.get<{ items: UpstreamArchiveItem[]; total: number }>(`${base}/storage/archives`, { signal })).data
+  },
+  async purge(input: UpstreamPurgeInput): Promise<void> {
+    await apiClient.post(`${base}/storage/purge`, input, { timeout: 60000 })
+  },
   async reorder(input: UpstreamOrderInput): Promise<void> {
     await apiClient.put(`${base}/order`, input)
   },

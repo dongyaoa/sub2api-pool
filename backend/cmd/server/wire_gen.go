@@ -270,7 +270,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	upstreamCenterRepository := repository.NewUpstreamCenterRepository(db)
 	upstreamFinanceRepository := repository.NewUpstreamFinanceRepository(db)
 	upstreamFinanceService := service.NewUpstreamFinanceService(upstreamFinanceRepository, secretEncryptor, billingService, channelService, accountRepository)
-	upstreamCenterService := service.ProvideUpstreamCenterService(upstreamCenterRepository, secretEncryptor, accountRepository, upstreamFinanceService)
+	upstreamCenterService := service.ProvideUpstreamCenterService(upstreamCenterRepository, secretEncryptor, accountRepository, upstreamFinanceService, apiKeyService)
 	upstreamCenterHandler := admin.NewUpstreamCenterHandler(upstreamCenterService, upstreamFinanceService)
 	intelligenceMonitorRepository := repository.NewIntelligenceMonitorRepository(db)
 	intelligenceMonitorService := service.ProvideIntelligenceMonitorService(intelligenceMonitorRepository, secretEncryptor, upstreamCenterRepository, groupRepository, apiKeyService, upstreamFinanceService, configConfig, accountRepository, openAIGatewayService, concurrencyService)

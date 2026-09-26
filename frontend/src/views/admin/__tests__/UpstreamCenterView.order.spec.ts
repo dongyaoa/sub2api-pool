@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import UpstreamCenterView from '../UpstreamCenterView.vue'
 import type { UpstreamOverview, UpstreamSupplier, UpstreamTarget } from '@/api/admin/upstreamCenter'
 
-const mocks = vi.hoisted(() => ({ overview: vi.fn(), showSuccess: vi.fn() }))
-vi.mock('@/api/admin/upstreamCenter', () => ({ upstreamCenterAPI: { overview: mocks.overview } }))
+const mocks = vi.hoisted(() => ({ overview: vi.fn(), showSuccess: vi.fn(), deleteSupplier: vi.fn(), deleteTarget: vi.fn(), purge: vi.fn() }))
+vi.mock('@/api/admin/upstreamCenter', () => ({ upstreamCenterAPI: { overview: mocks.overview, deleteSupplier: mocks.deleteSupplier, deleteTarget: mocks.deleteTarget, purge: mocks.purge } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: mocks.showSuccess }) }))
 vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
-const supplierCard = defineComponent({ props: ['supplier'], emits: ['order-groups'], template: '<article data-supplier><h2>{{ supplier.name }}</h2><button data-group-order @click="$emit(\'order-groups\',supplier)">groups</button></article>' })
+const supplierCard = defineComponent({ props: ['supplier'], emits: ['order-groups', 'delete'], template: '<article data-supplier><h2>{{ supplier.name }}</h2><button data-group-order @click="$emit(\'order-groups\',supplier)">groups</button></article>' })
 const targetCard = defineComponent({ props: ['target'], template: '<article data-monitor>{{ target.name }}</article>' })
 const orderDialog = defineComponent({ name: 'UpstreamOrderDialog', props: ['show','scope','supplierId','supplierName'], emits: ['close','saved'], template: '<div v-if="show" data-order-dialog><button data-cancel-order @click="$emit(\'close\')">cancel</button><button data-save-order @click="$emit(\'saved\')">save</button></div>' })
 const target = (id: number, name: string) => ({ id, name, endpoint: 'https://example.com', models: ['model'], statistics: [] } as unknown as UpstreamTarget)
@@ -19,7 +19,7 @@ function render() {
   wrapper = mount(UpstreamCenterView, { global: { stubs: {
     AppLayout: { template: '<div><slot /></div>' }, Icon: true, BaseDialog: true, EmptyState: true,
     IntelligenceMonitorPanel: true, UpstreamSupplierCard: supplierCard, UpstreamTargetCard: targetCard,
-    UpstreamOrderDialog: orderDialog, UpstreamSupplierDialog: true, UpstreamTargetDialog: true, UpstreamDetailDialog: true,
+    UpstreamOrderDialog: orderDialog, UpstreamSupplierDialog: true, UpstreamTargetDialog: true, UpstreamDetailDialog: true, UpstreamStorageDialog: true,
   } } })
   return wrapper
 }
@@ -27,6 +27,38 @@ beforeEach(() => { vi.resetAllMocks(); vi.useFakeTimers({ toFake: ['setInterval'
 afterEach(() => { wrapper?.unmount(); wrapper=undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('upstream center manual ordering', () => {
+  it('opens storage from every tab and refreshes retained intelligence panels after a storage change', async () => {
+    const view = render(); await flushPromises()
+    await view.get('#upstream-tab-intelligence').trigger('click')
+    await view.get('[data-testid="upstream-storage"]').trigger('click')
+    const storage = view.getComponent({ name: 'UpstreamStorageDialog' })
+    expect(storage.props('show')).toBe(true)
+    storage.vm.$emit('changed'); await flushPromises()
+    expect(mocks.overview).toHaveBeenCalledTimes(2)
+    expect(view.getComponent({ name: 'IntelligenceMonitorPanel' }).props('refreshKey')).toBe(1)
+  })
+  it.each(['archive', 'purge'] as const)('dispatches supplier %s through the explicit removal choice', async mode => {
+    const view = render(); await flushPromises()
+    view.findAllComponents(supplierCard)[0]!.vm.$emit('delete', supplier(1, 'Alpha'))
+    await flushPromises()
+    const removal = view.getComponent({ name: 'UpstreamDeleteDialog' })
+    expect(removal.props('item')).toEqual({ kind: 'supplier', id: 1, name: 'Alpha' })
+    removal.vm.$emit('confirm', mode); await flushPromises()
+    if (mode === 'purge') { expect(mocks.purge).toHaveBeenCalledWith({ kind: 'supplier', id: 1, confirm_name: 'Alpha' }); expect(mocks.deleteSupplier).not.toHaveBeenCalled() }
+    else { expect(mocks.deleteSupplier).toHaveBeenCalledWith(1); expect(mocks.purge).not.toHaveBeenCalled() }
+  })
+  it('keeps a failed permanent deletion open for review and retry', async () => {
+    mocks.purge.mockRejectedValue({ status: 409, message: 'An active check is running.' })
+    const view = render(); await flushPromises()
+    await view.get('#upstream-tab-monitors').trigger('click')
+    view.findAllComponents(targetCard)[0]!.vm.$emit('delete', target(3, 'Monitor A')); await flushPromises()
+    const removal = view.getComponent({ name: 'UpstreamDeleteDialog' })
+    removal.vm.$emit('confirm', 'purge'); await flushPromises()
+    expect(removal.props('show')).toBe(true)
+    expect(removal.props('error')).toBe('An active check is running.')
+    expect(removal.props('busy')).toBe(false)
+    expect(mocks.purge).toHaveBeenCalledWith({ kind: 'target', id: 3, confirm_name: 'Monitor A' })
+  })
   it('lazily opens intelligence tabs and retains each panel DOM when switching away and back', async () => {
     const view = render()
     await flushPromises()

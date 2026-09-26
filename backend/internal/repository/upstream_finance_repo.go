@@ -34,7 +34,14 @@ func (r *upstreamFinanceRepository) Summary(ctx context.Context, q service.Upstr
  CASE WHEN COUNT(*) FILTER (WHERE l.total_tokens IS NULL)=0 THEN COALESCE(SUM(l.total_tokens),0) END AS tokens,
  COUNT(*) FILTER (WHERE l.total_tokens IS NULL) AS unknown_tokens
  ` + upstreamFinanceLedgerSQL + `
-), monitoring AS (
+), archived AS (
+ SELECT r.* FROM upstream_monitor_cost_rollups r
+ WHERE r.hour_start < $2 AND r.hour_start + INTERVAL '1 hour' > $1
+ AND r.first_sample_at < $2 AND r.last_sample_at >= $1
+ AND ($4::bigint IS NOT NULL OR r.supplier_id IS NOT NULL)
+ AND ($3::bigint IS NULL OR r.supplier_id = $3)
+ AND ($4::bigint IS NULL OR r.target_id = $4)
+), monitor_sources AS (
  SELECT COALESCE(SUM(h.cost),0) AS cost,
  COUNT(*) FILTER (WHERE h.cost IS NULL OR h.cost_source = 'unknown') AS unpriced,
  COUNT(*) FILTER (WHERE h.cost IS NOT NULL AND h.cost_source = 'reported') AS reported,
@@ -44,16 +51,28 @@ func (r *upstreamFinanceRepository) Summary(ctx context.Context, q service.Upstr
  AND ($4::bigint IS NOT NULL OR h.supplier_id IS NOT NULL)
  AND ($3::bigint IS NULL OR h.supplier_id = $3)
  AND ($4::bigint IS NULL OR h.target_id = $4)
+ UNION ALL
+ SELECT COALESCE(SUM(cost),0),COALESCE(SUM(unpriced_count),0),
+ COALESCE(SUM(reported_count),0),COALESCE(SUM(estimated_count),0)
+ FROM archived
+), monitoring AS (
+ SELECT SUM(cost) AS cost,SUM(unpriced) AS unpriced,SUM(reported) AS reported,SUM(estimated) AS estimated
+ FROM monitor_sources
 )
  SELECT b.revenue,b.cost,b.requests,m.cost,m.unpriced,m.reported,m.estimated,
- b.tokens,b.unknown_tokens
+ b.tokens,b.unknown_tokens,
+ EXISTS(SELECT 1 FROM archived WHERE first_sample_at < $1 OR last_sample_at >= $2)
  FROM business b CROSS JOIN monitoring m`
 	summary := &service.UpstreamFinanceSummary{Currency: "USD", From: q.From, To: q.To, CostSource: "estimated"}
 	var monitorCost float64
 	var reported, estimated int64
-	err := r.db.QueryRowContext(ctx, query, upstreamFinanceArgs(q)...).Scan(&summary.Revenue, &summary.BusinessCost, &summary.RequestCount, &monitorCost, &summary.UnpricedMonitorCount, &reported, &estimated, &summary.TotalTokens, &summary.UnknownTokenRequests)
+	var partialArchivedHour bool
+	err := r.db.QueryRowContext(ctx, query, upstreamFinanceArgs(q)...).Scan(&summary.Revenue, &summary.BusinessCost, &summary.RequestCount, &monitorCost, &summary.UnpricedMonitorCount, &reported, &estimated, &summary.TotalTokens, &summary.UnknownTokenRequests, &partialArchivedHour)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate upstream finance: %w", err)
+	}
+	if partialArchivedHour {
+		return nil, service.ErrUpstreamFinanceArchivedRange
 	}
 	// The ledger captures the same historical account billing formula as the
 	// account statistics page, independently from the user's actual_cost.
