@@ -63,11 +63,18 @@ func (r *upstreamFinanceRepository) Summary(ctx context.Context, q service.Upstr
  b.tokens,b.unknown_tokens,
  EXISTS(SELECT 1 FROM archived WHERE first_sample_at < $1 OR last_sample_at >= $2)
  FROM business b CROSS JOIN monitoring m`
+	return scanUpstreamFinanceSummary(r.db.QueryRowContext(ctx, query, upstreamFinanceArgs(q)...), q)
+}
+
+// Batch overview and the individual detail endpoint share all money/unknown
+// semantics. Extra scan destinations let batch rows carry their scope first.
+func scanUpstreamFinanceSummary(row upstreamScanner, q service.UpstreamFinanceQuery, prefix ...any) (*service.UpstreamFinanceSummary, error) {
 	summary := &service.UpstreamFinanceSummary{Currency: "USD", From: q.From, To: q.To, CostSource: "estimated"}
 	var monitorCost float64
 	var reported, estimated int64
 	var partialArchivedHour bool
-	err := r.db.QueryRowContext(ctx, query, upstreamFinanceArgs(q)...).Scan(&summary.Revenue, &summary.BusinessCost, &summary.RequestCount, &monitorCost, &summary.UnpricedMonitorCount, &reported, &estimated, &summary.TotalTokens, &summary.UnknownTokenRequests, &partialArchivedHour)
+	args := append(prefix, &summary.Revenue, &summary.BusinessCost, &summary.RequestCount, &monitorCost, &summary.UnpricedMonitorCount, &reported, &estimated, &summary.TotalTokens, &summary.UnknownTokenRequests, &partialArchivedHour)
+	err := row.Scan(args...)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate upstream finance: %w", err)
 	}
@@ -140,8 +147,7 @@ func (r *upstreamFinanceRepository) GetTarget(ctx context.Context, id int64) (*s
 }
 
 func (r *upstreamFinanceRepository) LatestBalance(ctx context.Context, id int64, identity string) (*service.UpstreamBalanceSnapshot, error) {
-	s := &service.UpstreamBalanceSnapshot{}
-	err := r.db.QueryRowContext(ctx, `WITH latest AS (
+	s, err := scanUpstreamBalanceSnapshot(r.db.QueryRowContext(ctx, `WITH latest AS (
  SELECT * FROM upstream_balance_snapshots WHERE target_id=$1 AND identity_hash=$2 ORDER BY synced_at DESC,id DESC LIMIT 1
 ), good AS (
  SELECT * FROM upstream_balance_snapshots WHERE target_id=$1 AND identity_hash=$2 AND status='ok' ORDER BY synced_at DESC,id DESC LIMIT 1
@@ -156,12 +162,9 @@ SELECT l.target_id,l.wallet_ref,
  CASE WHEN l.status='ok' OR g.id IS NULL THEN l.currency ELSE g.currency END,
  CASE WHEN l.status='ok' OR g.id IS NULL THEN l.currency_source ELSE g.currency_source END,
  l.status,CASE WHEN l.status='ok' THEN l.synced_at ELSE g.synced_at END,l.error,l.synced_at
- FROM latest l LEFT JOIN good g ON TRUE`, id, identity).Scan(&s.TargetID, &s.WalletRef, &s.Kind, &s.Balance, &s.QuotaRemaining, &s.TodayUsed, &s.TotalUsed, &s.UnlimitedQuota, &s.Currency, &s.CurrencySource, &s.Status, &s.SyncedAt, &s.Error, &s.LastAttemptAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load upstream balance snapshot: %w", err)
+ FROM latest l LEFT JOIN good g ON TRUE`, id, identity))
+	if err != nil || s == nil {
+		return s, err
 	}
 	s.Billing, err = r.latestRemoteBilling(ctx, id, identity)
 	if err != nil {
@@ -170,17 +173,33 @@ SELECT l.target_id,l.wallet_ref,
 	return s, nil
 }
 
+func scanUpstreamBalanceSnapshot(row upstreamScanner) (*service.UpstreamBalanceSnapshot, error) {
+	s := &service.UpstreamBalanceSnapshot{}
+	err := row.Scan(&s.TargetID, &s.WalletRef, &s.Kind, &s.Balance, &s.QuotaRemaining, &s.TodayUsed, &s.TotalUsed, &s.UnlimitedQuota, &s.Currency, &s.CurrencySource, &s.Status, &s.SyncedAt, &s.Error, &s.LastAttemptAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load upstream balance snapshot: %w", err)
+	}
+	return s, nil
+}
+
 func (r *upstreamFinanceRepository) latestRemoteBilling(ctx context.Context, id int64, identity string) (*service.UpstreamRemoteBillingSnapshot, error) {
-	var data []byte
-	var status, errorCode string
-	var attemptedAt time.Time
-	err := r.db.QueryRowContext(ctx, `WITH latest AS (
+	return scanUpstreamRemoteBilling(r.db.QueryRowContext(ctx, `WITH latest AS (
  SELECT * FROM upstream_billing_snapshots WHERE target_id=$1 AND identity_hash=$2 ORDER BY attempted_at DESC,id DESC LIMIT 1
 ), good AS (
  SELECT * FROM upstream_billing_snapshots WHERE target_id=$1 AND identity_hash=$2 AND status='ok' ORDER BY attempted_at DESC,id DESC LIMIT 1
 )
  SELECT COALESCE(g.data,l.data),l.status,l.attempted_at,COALESCE(l.data->>'error','')
- FROM latest l LEFT JOIN good g ON TRUE`, id, identity).Scan(&data, &status, &attemptedAt, &errorCode)
+ FROM latest l LEFT JOIN good g ON TRUE`, id, identity))
+}
+
+func scanUpstreamRemoteBilling(row upstreamScanner, prefix ...any) (*service.UpstreamRemoteBillingSnapshot, error) {
+	var data []byte
+	var status, errorCode string
+	var attemptedAt time.Time
+	err := row.Scan(append(prefix, &data, &status, &attemptedAt, &errorCode)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

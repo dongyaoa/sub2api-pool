@@ -62,7 +62,7 @@ export default {
     tabs: { suppliers: '上游管理', monitors: '监控中心', intelligence: '智商监控' },
     quickSwitch: '快速切换上游', allSuppliers: '全部上游',
     addSupplier: '添加上游', addMonitor: '添加监控', addGroup: '添加 Key 分组', editSupplier: '编辑上游', editGroup: '编辑 Key 分组', editMonitor: '编辑监控',
-    search: '搜索名称、网址、模型…', refresh: '刷新', updated: '更新于 {time}', refreshHint: '每 30 秒自动刷新',
+    search: '搜索名称、网址、模型…', refresh: '刷新', updated: '更新于 {time}', refreshHint: '当前列表每 5 秒自动刷新',
     loadFailed: '加载上游中心失败', retry: '重试', saveFailed: '保存失败', saved: '已保存',
     emptySuppliers: '把上游集中管理起来', emptySuppliersHint: '添加一家上游，再为它配置 Key 分组，开始记录稳定性与收支。',
     emptyMonitors: '从一次检测开始', emptyMonitorsHint: '填写网址、Key 和模型，保存后即开始持续监控。', noMatches: '没有匹配的结果',

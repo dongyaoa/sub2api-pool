@@ -1,10 +1,11 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
 import type { IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
 import PelicanLoadingScene from './PelicanLoadingScene.vue'
-import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
+import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
+import { clearIntelligenceArtworkCache } from './intelligenceArtworkLoader'
 
 const detail = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: { detail } }))
@@ -16,14 +17,159 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<
 } }) }))
 const run = (id: number, status: IntelligenceRun['status'], changes: Partial<IntelligenceRun> = {}): IntelligenceRun => ({ id, status, ...changes } as IntelligenceRun)
 let wrapper: VueWrapper | undefined
-function render(value: IntelligenceRun, large = false, panelActive?: Ref<boolean>) {
-  wrapper = mount(IntelligenceArtifactPreview, { attachTo: document.body, props: { run: value, large }, global: { stubs: { Icon: true }, provide: panelActive ? { [intelligencePanelActiveKey as symbol]: panelActive } : {} } })
+function render(value: IntelligenceRun, large = false, panelActive = ref(true), refresh = ref(0)) {
+  wrapper = mount(IntelligenceArtifactPreview, { attachTo: document.body, props: { run: value, large }, global: { stubs: { Icon: true }, provide: { [intelligencePanelActiveKey as symbol]: panelActive, [intelligencePreviewRefreshKey as symbol]: refresh } } })
   return wrapper
 }
-beforeEach(() => { vi.resetAllMocks(); vi.stubGlobal('IntersectionObserver', undefined) })
+beforeEach(() => { vi.resetAllMocks(); clearIntelligenceArtworkCache(); vi.stubGlobal('IntersectionObserver', undefined) })
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.unstubAllGlobals() })
 
 describe('intelligence artifact preview states', () => {
+  it('retries a detail canceled by token rotation without leaving the preview empty', async () => {
+    localStorage.setItem('auth_token', 'before-preview-refresh')
+    detail.mockImplementationOnce(async () => {
+      localStorage.setItem('auth_token', 'after-preview-refresh')
+      return run(105, 'succeeded', { html: '<svg>discarded-session</svg>' })
+    }).mockResolvedValueOnce(run(105, 'succeeded', { html: '<svg>refreshed-artwork</svg>' }))
+    const view = render(run(105, 'succeeded'))
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(2)
+    expect(view.get('iframe').attributes('srcdoc')).toContain('refreshed-artwork')
+    expect(view.get('iframe').attributes('srcdoc')).not.toContain('discarded-session')
+    expect(view.attributes('aria-busy')).toBe('false')
+  })
+
+  it('bounds authorization recovery and leaves a retry action after repeated session changes', async () => {
+    localStorage.setItem('auth_token', 'preview-session-0')
+    let rotations = 0
+    detail.mockImplementation(async () => {
+      localStorage.setItem('auth_token', `preview-session-${++rotations}`)
+      return run(106, 'succeeded', { html: '<svg>stale-session</svg>' })
+    })
+    const view = render(run(106, 'succeeded'))
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(2)
+    expect(view.find('iframe').exists()).toBe(false)
+    expect(view.text()).toContain('intelligenceMonitor.loadFailed')
+    expect(view.attributes('aria-busy')).toBe('false')
+    detail.mockResolvedValue(run(106, 'succeeded', { html: '<svg>recovered-artwork</svg>' }))
+    await view.get('button').trigger('click')
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(3)
+    expect(view.get('iframe').attributes('srcdoc')).toContain('recovered-artwork')
+  })
+
+  it('waits for the viewport and active panel, cancels hidden loads, retries on return and retains successful art', async () => {
+    let intersection!: IntersectionObserverCallback
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { intersection = callback }
+      observe() {}
+      disconnect() {}
+    })
+    let resolveDetail!: (value: IntelligenceRun) => void
+    detail.mockImplementation((_id: number, signal: AbortSignal) => new Promise((resolve, reject) => {
+      resolveDetail = resolve
+      signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true })
+    }))
+    const panel = ref(false)
+    const view = render(run(101, 'succeeded'), false, panel)
+    const intersect = (visible: boolean) => intersection([{ target: view.element, isIntersecting: visible } as IntersectionObserverEntry], {} as IntersectionObserver)
+    await flushPromises()
+    expect(detail).not.toHaveBeenCalled()
+    intersect(true)
+    await flushPromises()
+    expect(detail).not.toHaveBeenCalled()
+    panel.value = true
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(1)
+    intersect(false)
+    await flushPromises()
+    expect((detail.mock.calls[0]![1] as AbortSignal).aborted).toBe(true)
+    expect(view.attributes('aria-busy')).toBe('false')
+    intersect(true)
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(2)
+    panel.value = false
+    await flushPromises()
+    expect((detail.mock.calls[1]![1] as AbortSignal).aborted).toBe(true)
+    panel.value = true
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(3)
+    resolveDetail(run(101, 'succeeded', { html: '<svg></svg>' }))
+    await flushPromises()
+    const frame = view.get('iframe').element
+    intersect(false)
+    await flushPromises()
+    intersect(true)
+    await flushPromises()
+    expect(view.get('iframe').element).toBe(frame)
+    expect(detail).toHaveBeenCalledTimes(3)
+  })
+
+  it('allows a manual refresh to retry missing HTML while completed artwork stays intact', async () => {
+    detail.mockResolvedValueOnce(run(102, 'succeeded', { html: '' })).mockResolvedValueOnce(run(102, 'succeeded', { html: '<svg></svg>' }))
+    const refresh = ref(0)
+    const view = render(run(102, 'succeeded', { html: '' }), false, ref(true), refresh)
+    await flushPromises()
+    expect(view.text()).toContain('intelligenceMonitor.loadFailed')
+    refresh.value++
+    await flushPromises()
+    const frame = view.get('iframe').element
+    refresh.value++
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(2)
+    expect(view.get('iframe').element).toBe(frame)
+  })
+
+  it('restarts an unfinished detail on manual refresh and ignores a late old response', async () => {
+    let resolveOld!: (value: IntelligenceRun) => void
+    let resolveFresh!: (value: IntelligenceRun) => void
+    detail.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { resolveFresh = resolve }))
+    const refresh = ref(0)
+    const view = render(run(104, 'succeeded'), false, ref(true), refresh)
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(1)
+    const oldSignal = detail.mock.calls[0]![1] as AbortSignal
+    refresh.value++
+    await flushPromises()
+    expect(oldSignal.aborted).toBe(true)
+    expect(detail).toHaveBeenCalledTimes(2)
+    expect(view.attributes('aria-busy')).toBe('true')
+    resolveFresh(run(104, 'succeeded', { html: '<svg>fresh-artwork</svg>' }))
+    await flushPromises()
+    const frame = view.get('iframe').element
+    expect(view.get('iframe').attributes('srcdoc')).toContain('fresh-artwork')
+    resolveOld(run(104, 'succeeded', { html: '<svg>obsolete-artwork</svg>' }))
+    await flushPromises()
+    expect(view.get('iframe').element).toBe(frame)
+    expect(view.get('iframe').attributes('srcdoc')).toContain('fresh-artwork')
+    expect(view.get('iframe').attributes('srcdoc')).not.toContain('obsolete-artwork')
+    refresh.value++
+    await flushPromises()
+    expect(detail).toHaveBeenCalledTimes(2)
+    expect(view.get('iframe').element).toBe(frame)
+  })
+
+  it('cancels unfinished work when the page becomes hidden and retries once visible', async () => {
+    detail.mockImplementationOnce((_id: number, signal: AbortSignal) => new Promise((_, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true })
+    })).mockResolvedValueOnce(run(103, 'succeeded', { html: '<svg></svg>' }))
+    const view = render(run(103, 'succeeded'))
+    await flushPromises()
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    try {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await flushPromises()
+      expect((detail.mock.calls[0]![1] as AbortSignal).aborted).toBe(true)
+      hidden.mockReturnValue(false)
+      document.dispatchEvent(new Event('visibilitychange'))
+      await flushPromises()
+      expect(detail).toHaveBeenCalledTimes(2)
+      expect(view.find('iframe').exists()).toBe(true)
+    } finally { hidden.mockRestore() }
+  })
+
   it.each(['pending', 'running'] as const)('shows a pelican with the actual %s status without fetching a result', async status => {
     const view = render(run(1, status))
     await flushPromises()

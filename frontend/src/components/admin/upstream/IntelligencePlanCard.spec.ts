@@ -16,6 +16,31 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it('replaces a stale recent record with the completed latest run of the same ID', () => {
+    const latest = { ...run(91), html: '<svg>completed</svg>' }
+    const view = render(plan({ latest_run: latest, recent_runs: [run(91, 'pending'), run(90)] }))
+    expect(view.findAllComponents(preview).map(child => child.props('run'))).toEqual([latest, run(90)])
+    expect(view.text()).toContain('2/20')
+    view.unmount()
+  })
+
+  it('returns the artwork strip to the newest active run while preserving user scroll on ordinary polls', async () => {
+    const previous = run(90)
+    const view = render(plan({ latest_run: previous, recent_runs: [previous] }))
+    const scroller = view.get('[aria-label="intelligenceMonitor.recentWorks"]').element as HTMLElement
+    scroller.scrollLeft = 400
+    await view.setProps({ plan: plan({ latest_run: { ...previous }, recent_runs: [previous] }) })
+    expect(scroller.scrollLeft).toBe(400)
+    await view.setProps({ plan: plan({ latest_run: run(91, 'running'), recent_runs: [previous] }) })
+    await flushPromises()
+    expect(scroller.scrollLeft).toBe(0)
+    expect(view.findAllComponents(preview)[0]!.props('run').id).toBe(91)
+    scroller.scrollLeft = 176
+    await view.setProps({ plan: plan({ latest_run: run(91, 'running'), recent_runs: [previous] }) })
+    expect(scroller.scrollLeft).toBe(176)
+    view.unmount()
+  })
+
   it('pauses filtered artwork and keeps its iframe while respecting the parent panel visibility', async () => {
     const panelActive = ref(true)
     const completed = { ...run(91), html: '<svg></svg>' }

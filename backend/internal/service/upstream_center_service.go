@@ -78,29 +78,27 @@ func (s *UpstreamCenterService) Overview(ctx context.Context, window string) (*U
 	}
 	from, to := timezone.Today(), timezone.Today().AddDate(0, 0, 1)
 	out := &UpstreamOverview{Suppliers: suppliers, Monitors: []*UpstreamTarget{}}
+	var finance *UpstreamFinanceOverviewData
+	if s.finance != nil {
+		finance, err = s.finance.OverviewFinance(ctx, suppliers, targets, from, to)
+		if err != nil {
+			return nil, err
+		}
+		out.Summary = finance.Summary
+	}
 	byID := map[int64]*UpstreamSupplier{}
 	for _, v := range suppliers {
 		v.Targets = []*UpstreamTarget{}
 		v.Wallets = []*UpstreamBalanceSnapshot{}
 		byID[v.ID] = v
-		if s.finance != nil {
-			v.Finance, err = s.finance.Summary(ctx, &v.ID, nil, from, to)
-			if err != nil {
-				return nil, err
-			}
+		if finance != nil {
+			v.Finance = finance.Suppliers[v.ID]
 		}
 	}
 	for _, t := range targets {
 		s.maskTarget(t)
-		if s.finance != nil {
-			t.Finance, err = s.finance.Summary(ctx, t.SupplierID, &t.ID, from, to)
-			if err != nil {
-				return nil, err
-			}
-			t.Balance, err = s.finance.LatestBalance(ctx, t.ID)
-			if err != nil {
-				return nil, err
-			}
+		if finance != nil {
+			t.Finance, t.Balance = finance.Targets[t.ID], finance.Balances[t.ID]
 		}
 		if t.SupplierID == nil {
 			out.Monitors = append(out.Monitors, t)
@@ -114,12 +112,6 @@ func (s *UpstreamCenterService) Overview(ctx context.Context, window string) (*U
 	}
 	for _, supplier := range suppliers {
 		supplier.Wallets = upstreamSupplierWallets(supplier.Targets)
-	}
-	if s.finance != nil {
-		out.Summary, err = s.finance.Summary(ctx, nil, nil, from, to)
-		if err != nil {
-			return nil, err
-		}
 	}
 	return out, nil
 }

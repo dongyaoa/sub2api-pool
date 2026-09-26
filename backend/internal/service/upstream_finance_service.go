@@ -131,14 +131,7 @@ func (s *UpstreamFinanceService) LatestBalance(ctx context.Context, targetID int
 	if err != nil {
 		return nil, err
 	}
-	if snapshot == nil {
-		snapshot = &UpstreamBalanceSnapshot{TargetID: targetID, WalletRef: target.WalletRef, Kind: "unknown", Status: "pending"}
-	}
-	if snapshot.Billing == nil {
-		snapshot.Billing = pendingUpstreamRemoteBilling()
-	}
-	markUpstreamRemoteBillingStale(snapshot.Billing, s.now())
-	return snapshot, nil
+	return completeUpstreamBalanceSnapshot(snapshot, target, s.now()), nil
 }
 
 func (s *UpstreamFinanceService) SyncBalance(ctx context.Context, targetID int64) (*UpstreamBalanceSnapshot, error) {

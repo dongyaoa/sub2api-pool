@@ -1,6 +1,6 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { IntelligencePlan, IntelligenceSource } from '@/api/admin/intelligenceMonitor'
+import type { IntelligencePlan, IntelligenceRun, IntelligenceSource } from '@/api/admin/intelligenceMonitor'
 import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import IntelligenceMonitorPanel from './IntelligenceMonitorPanel.vue'
 
@@ -148,6 +148,36 @@ describe('intelligence monitoring site tabs', () => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('intelligence monitoring manual order', () => {
+  it('refreshes live generations every two seconds and immediately retries an outstanding manual refresh', async () => {
+    const running = { ...plan(1, 'Live'), latest_run: { id: 10, plan_id: 1, status: 'running' } as IntelligenceRun }
+    mocks.plans.mockResolvedValue({ items: [running] })
+    const view = render(); await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+    let resolveOld!: (value: { items: IntelligencePlan[] }) => void
+    mocks.plans.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+    await refreshButton(view).trigger('click')
+    const oldSignal = mocks.plans.mock.calls.at(-1)![0] as AbortSignal
+    const completed = { ...running, latest_run: { ...running.latest_run!, status: 'succeeded' } as IntelligenceRun }
+    mocks.plans.mockResolvedValue({ items: [completed] })
+    expect(refreshButton(view).attributes('disabled')).toBeUndefined()
+    await refreshButton(view).trigger('click'); await flushPromises()
+    expect(oldSignal.aborted).toBe(true)
+    expect(view.emitted('refreshOverview')).toHaveLength(2)
+    resolveOld({ items: [running] }); await flushPromises()
+    expect(view.getComponent({ name: 'IntelligencePlanCard' }).props('plan').latest_run.status).toBe('succeeded')
+  })
+
+  it('shows the accepted queued run even if the follow-up list request fails', async () => {
+    const view = render(); await flushPromises()
+    const queued = { id: 101, plan_id: 1, status: 'pending' } as IntelligenceRun
+    mocks.run.mockResolvedValue(queued)
+    mocks.plans.mockRejectedValue(new Error('temporary network failure'))
+    view.findAllComponents({ name: 'IntelligencePlanCard' })[0]!.vm.$emit('run')
+    await flushPromises()
+    expect(view.getComponent({ name: 'IntelligencePlanCard' }).props('plan').latest_run).toEqual(queued)
+    expect(view.get('[role="alert"]').text()).toBeTruthy()
+  })
   it.each(['archive', 'purge'] as const)('supports %s for an OAuth monitor without removing its source account', async mode => {
     const view = render(true); await flushPromises()
     view.findAllComponents({ name: 'IntelligencePlanCard' })[0]!.vm.$emit('archive')

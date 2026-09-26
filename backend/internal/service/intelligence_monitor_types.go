@@ -119,6 +119,19 @@ type IntelligenceMonitorRunPage struct {
 	Page     int                       `json:"page"`
 	PageSize int                       `json:"page_size"`
 }
+
+// Optional batched read capability for the frequently refreshed plan gallery.
+// SourceNames contains only existing, non-deleted source records. Runs contains
+// at most twenty terminal runs and one active run per requested plan.
+type IntelligenceMonitorPlanListData struct {
+	Runs        map[int64][]*IntelligenceMonitorRun
+	SourceNames map[int64]string
+}
+
+type IntelligenceMonitorListRepository interface {
+	LoadPlanListData(context.Context, []int64) (*IntelligenceMonitorPlanListData, error)
+}
+
 type IntelligenceMonitorRepository interface {
 	SaveOrder(context.Context, IntelligenceOrderInput) error
 	ListPlans(context.Context) ([]*IntelligenceMonitorPlan, error)

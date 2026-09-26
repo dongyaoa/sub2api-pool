@@ -27,6 +27,24 @@ beforeEach(() => { vi.resetAllMocks(); vi.useFakeTimers({ toFake: ['setInterval'
 afterEach(() => { wrapper?.unmount(); wrapper=undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('upstream center manual ordering', () => {
+  it('updates current monitor data after five seconds and lets manual refresh replace a slow request', async () => {
+    const view = render(); await flushPromises()
+    const updated = overview(); updated.suppliers[0].name = 'Updated supplier'
+    mocks.overview.mockResolvedValue(updated)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(view.findAll('[data-supplier] h2')[0].text()).toBe('Updated supplier')
+    let resolveOld!: (value: UpstreamOverview) => void
+    mocks.overview.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+    await view.get('[data-testid="upstream-refresh"]').trigger('click')
+    const oldSignal = mocks.overview.mock.calls.at(-1)![1] as AbortSignal
+    const newest = overview(); newest.suppliers[0].name = 'Latest supplier'
+    mocks.overview.mockResolvedValue(newest)
+    expect(view.get('[data-testid="upstream-refresh"]').attributes('disabled')).toBeUndefined()
+    await view.get('[data-testid="upstream-refresh"]').trigger('click'); await flushPromises()
+    expect(oldSignal.aborted).toBe(true)
+    resolveOld(updated); await flushPromises()
+    expect(view.findAll('[data-supplier] h2')[0].text()).toBe('Latest supplier')
+  })
   it('opens storage from every tab and refreshes retained intelligence panels after a storage change', async () => {
     const view = render(); await flushPromises()
     await view.get('#upstream-tab-intelligence').trigger('click')

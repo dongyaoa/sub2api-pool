@@ -64,7 +64,11 @@ func (r *upstreamCenterRepository) SaveSupplier(ctx context.Context, s *service.
 		if err = lockManualOrderMembership(ctx, tx); err != nil {
 			return err
 		}
-		if err = tx.QueryRowContext(ctx, `INSERT INTO upstream_suppliers(name,website,notes) VALUES($1,$2,$3) RETURNING id,created_at,updated_at`, s.Name, s.Website, s.Notes).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		// The membership lock serializes creation with other inserts and manual
+		// reordering. Prepend without changing existing suppliers' relative order.
+		if err = tx.QueryRowContext(ctx, `INSERT INTO upstream_suppliers(name,website,notes,sort_order)
+ SELECT $1,$2,$3,COALESCE(MIN(sort_order),0)-1 FROM upstream_suppliers WHERE deleted_at IS NULL
+ RETURNING id,created_at,updated_at`, s.Name, s.Website, s.Notes).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return err
 		}
 		return tx.Commit()

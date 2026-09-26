@@ -17,6 +17,7 @@ func NewIntelligenceMonitorHandler(svc *service.IntelligenceMonitorService) *Int
 	return &IntelligenceMonitorHandler{svc: svc}
 }
 func (h *IntelligenceMonitorHandler) ListPlans(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	items, err := h.svc.ListPlans(c.Request.Context())
 	if response.ErrorFrom(c, err) {
 		return
@@ -79,6 +80,7 @@ func (h *IntelligenceMonitorHandler) Run(c *gin.Context) {
 	response.Accepted(c, run)
 }
 func (h *IntelligenceMonitorHandler) ListRuns(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	var planID *int64
 	if raw := c.Query("plan_id"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
@@ -96,6 +98,7 @@ func (h *IntelligenceMonitorHandler) ListRuns(c *gin.Context) {
 	response.Success(c, runs)
 }
 func (h *IntelligenceMonitorHandler) GetRun(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	id, ok := parseIntelligenceID(c)
 	if !ok {
 		return
@@ -104,7 +107,6 @@ func (h *IntelligenceMonitorHandler) GetRun(c *gin.Context) {
 	if response.ErrorFrom(c, err) {
 		return
 	}
-	c.Header("Cache-Control", "no-store")
 	response.Success(c, run)
 }
 func parseIntelligenceID(c *gin.Context) (int64, bool) {

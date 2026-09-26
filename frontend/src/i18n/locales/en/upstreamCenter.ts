@@ -62,7 +62,7 @@ export default {
     tabs: { suppliers: 'Upstreams', monitors: 'Monitoring', intelligence: 'Intelligence monitoring' },
     quickSwitch: 'Switch upstream', allSuppliers: 'All upstreams',
     addSupplier: 'Add upstream', addMonitor: 'Add monitor', addGroup: 'Add key group', editSupplier: 'Edit upstream', editGroup: 'Edit key group', editMonitor: 'Edit monitor',
-    search: 'Search names, URLs, models…', refresh: 'Refresh', updated: 'Updated {time}', refreshHint: 'Refreshes every 30 seconds',
+    search: 'Search names, URLs, models…', refresh: 'Refresh', updated: 'Updated {time}', refreshHint: 'Active list refreshes every 5 seconds',
     loadFailed: 'Unable to load upstream center', retry: 'Retry', saveFailed: 'Unable to save', saved: 'Saved',
     emptySuppliers: 'Your upstreams, in one place', emptySuppliersHint: 'Add an upstream and its key groups to start tracking reliability and costs.',
     emptyMonitors: 'Start with a single check', emptyMonitorsHint: 'Enter a URL, key and model. Monitoring begins after saving.', noMatches: 'No matching results',

@@ -15,6 +15,7 @@ describe('upstream check history strip', () => {
     const wrapper = mount(UpstreamHistoryBar, { props: { records: [record] }, global: { stubs: { Icon: true } } })
     expect(wrapper.findAll('[data-status]')).toHaveLength(60)
     expect(wrapper.findAll('[data-status="unknown"]')).toHaveLength(59)
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull()
     const bar = wrapper.get('[data-status="error"]')
     expect(bar.classes()).toContain('history-bar--failure')
     await bar.trigger('click')
@@ -33,6 +34,8 @@ describe('upstream check history strip', () => {
     expect(copy.mock.calls[0]?.[0]).toContain('test-model')
     expect(copy.mock.calls[0]?.[0]).toContain('1,234 ms')
     expect(copy.mock.calls[0]?.[0]).toContain(record.message)
+    await trigger.trigger('mouseleave')
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull()
     wrapper.unmount()
   })
 

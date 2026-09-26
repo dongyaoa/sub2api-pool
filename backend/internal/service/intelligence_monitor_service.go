@@ -59,46 +59,41 @@ func (s *IntelligenceMonitorService) ListPlans(ctx context.Context) ([]*Intellig
 	if err != nil {
 		return nil, err
 	}
+	data, err := s.loadPlanListData(ctx, plans)
+	if err != nil {
+		return nil, err
+	}
 	for _, p := range plans {
 		s.decoratePlan(p)
-		// A plan has at most one active run. Fetch one extra so the gallery can
-		// show twenty completed works while latest_run still shows live status.
-		page, e := s.repo.ListRuns(ctx, IntelligenceMonitorRunQuery{PlanID: &p.ID, Page: 1, PageSize: IntelligenceMonitorRetainedRuns + 1})
-		if e != nil {
-			return nil, e
-		}
-		if len(page.Items) > 0 {
-			p.LatestRun = page.Items[0]
+		p.LatestRun, p.RateSnapshot, p.SourceName = nil, nil, ""
+		runs := data.Runs[p.ID]
+		if len(runs) > 0 {
+			p.LatestRun = runs[0]
+			// An active run remains visible even if its creation timestamp is
+			// older than completed records (for example after a clock change).
+			for _, run := range runs {
+				if run.Status == "pending" || run.Status == "running" {
+					p.LatestRun = run
+					break
+				}
+			}
 			p.RateSnapshot = p.LatestRun.RateSnapshot
 			p.SourceName = p.LatestRun.SourceName
 		}
 		p.RecentRuns = make([]*IntelligenceMonitorRun, 0, IntelligenceMonitorRetainedRuns)
-		for _, run := range page.Items {
+		for _, run := range runs {
 			if (run.Status == "succeeded" || run.Status == "failed") && len(p.RecentRuns) < IntelligenceMonitorRetainedRuns {
 				p.RecentRuns = append(p.RecentRuns, run)
 			}
 		}
-		if p.SourceType == "openai_oauth" && p.AccountID != nil && s.accounts != nil {
-			if account, e := s.accounts.GetByID(ctx, *p.AccountID); e == nil {
-				p.Name, p.SourceName = account.Name, account.Name
-			}
+		currentName, hasSource := data.SourceNames[p.ID]
+		if p.SourceType == "openai_oauth" && hasSource {
+			p.Name, p.SourceName = currentName, currentName
 		}
 		if p.SourceName == "" {
 			switch p.SourceType {
-			case "upstream":
-				if p.UpstreamTargetID != nil {
-					t, e := s.upstreams.GetTarget(ctx, *p.UpstreamTargetID)
-					if e == nil {
-						p.SourceName = t.Name
-					}
-				}
-			case "local_group":
-				if p.GroupID != nil {
-					g, e := s.groups.GetByID(ctx, *p.GroupID)
-					if e == nil {
-						p.SourceName = g.Name
-					}
-				}
+			case "upstream", "local_group":
+				p.SourceName = currentName
 			default:
 				p.SourceName = p.Name
 			}

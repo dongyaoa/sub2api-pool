@@ -31,7 +31,7 @@
     </aside>
     <section class="flex min-w-0 flex-col px-4 py-3">
       <div class="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2"><div class="flex items-center gap-2"><span class="text-xs font-medium text-gray-700 dark:text-gray-200">{{ t('intelligenceMonitor.recentWorks') }}</span><span class="text-[10px] text-gray-400">{{ t('intelligenceMonitor.newestFirst') }}</span></div><button type="button" class="text-[11px] text-primary-600 dark:text-primary-400" @click="emit('history')">{{ t('intelligenceMonitor.history') }}<span class="ml-1 text-gray-400">{{ completedWorks.length }}/20</span></button></div>
-      <div v-if="works.length" class="flex min-h-0 flex-1 snap-x items-stretch gap-3 overflow-x-auto" :aria-label="t('intelligenceMonitor.recentWorks')">
+      <div v-if="works.length" ref="worksScroller" class="flex min-h-0 flex-1 snap-x items-stretch gap-3 overflow-x-auto" :aria-label="t('intelligenceMonitor.recentWorks')">
         <div v-for="(work, index) in works" :key="work.id" class="flex w-[176px] shrink-0 snap-start flex-col overflow-hidden rounded-xl border" :class="index === 0 ? 'border-primary-200 dark:border-primary-600/40' : 'border-gray-100 dark:border-dark-700'">
           <IntelligenceArtifactPreview :run="work" @open="emit('history', work.id)" />
           <button type="button" class="w-full shrink-0 p-2.5 text-left hover:bg-gray-50 dark:hover:bg-dark-700/50" @click="emit('history', work.id)">
@@ -49,7 +49,7 @@
   </article>
 </template>
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { IntelligencePlan, IntelligenceRate, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
@@ -91,6 +91,7 @@ const countdownLabel = computed(() => {
   const seconds = remainingSeconds.value ?? 0
   return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60].map(value => String(value).padStart(2, '0')).join(':')
 })
+const worksScroller = ref<HTMLElement | null>(null)
 let countdownTimer: ReturnType<typeof setInterval> | undefined
 function stopCountdown() {
   clearInterval(countdownTimer)
@@ -110,7 +111,12 @@ onBeforeUnmount(stopCountdown)
 const completedWorks = computed(() => {
   const recent = props.plan.recent_runs || []
   const latest = props.plan.latest_run
-  const candidates = latest && !isActive(latest) && !recent.some(run => run.id === latest.id) ? [latest, ...recent] : recent
+  const candidates = [...recent]
+  if (latest && !isActive(latest)) {
+    const existing = candidates.findIndex(run => run.id === latest.id)
+    if (existing >= 0) candidates[existing] = latest
+    else candidates.unshift(latest)
+  }
   const seen = new Set<number>()
   return candidates.filter(run => {
     if (isActive(run) || seen.has(run.id) || (active.value && run.id === latest?.id)) return false
@@ -119,6 +125,11 @@ const completedWorks = computed(() => {
   }).slice(0, 20)
 })
 const works = computed(() => active.value && props.plan.latest_run ? [props.plan.latest_run, ...completedWorks.value] : completedWorks.value)
+watch(() => props.plan.latest_run?.id, async () => {
+  if (!active.value) return
+  await nextTick()
+  if (worksScroller.value) worksScroller.value.scrollLeft = 0
+})
 const intervalLabel = computed(() => {
   const seconds = props.plan.interval_seconds
   if (seconds % 3600 === 0) return t('intelligenceMonitor.hours', { count: seconds / 3600 })

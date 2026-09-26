@@ -4,9 +4,9 @@
       <span>{{ t('upstreamCenter.history.recent') }}</span>
       <span class="tabular-nums" :title="dateTime(lastChecked)" data-testid="upstream-last-updated">{{ updatedLabel }}</span>
     </div>
-    <div class="history-strip" :aria-label="t('upstreamCenter.history.recent')">
+    <div v-memo="[bars, locale]" class="history-strip" :aria-label="t('upstreamCenter.history.recent')">
       <template v-for="(record, index) in bars" :key="record?.id ?? `empty-${index}`">
-        <HelpTooltip v-if="record" class="!ml-0 min-w-0 !items-stretch" width-class="w-72 max-w-[calc(100vw-2rem)]">
+        <HelpTooltip v-if="record" lazy class="!ml-0 min-w-0 !items-stretch" width-class="w-72 max-w-[calc(100vw-2rem)]">
           <template #trigger>
             <button type="button" class="history-bar cursor-help transition-transform hover:scale-y-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500" :class="barClass(record)" :data-status="record.status" :aria-label="recordLabel(record)" @click="emit('select', record)"></button>
           </template>
@@ -36,7 +36,7 @@ import type { UpstreamHistoryRecord } from '@/api/admin/upstreamCenter'
 import { dateTime, latency, recentHistory } from './format'
 const props = withDefaults(defineProps<{ records?: UpstreamHistoryRecord[]; lastCheckedAt?: string | null; legend?: boolean }>(), { records: () => [], lastCheckedAt: null, legend: false })
 const emit = defineEmits<{ select: [record: UpstreamHistoryRecord] }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { copyToClipboard } = useClipboard()
 const bars = computed(() => recentHistory(props.records))
 const lastChecked = computed(() => props.lastCheckedAt || bars.value[bars.value.length - 1]?.checked_at)

@@ -23,6 +23,7 @@ func NewUpstreamCenterHandler(svc *service.UpstreamCenterService, financeSvc *se
 }
 
 func (h *UpstreamCenterHandler) Overview(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	result, err := h.svc.Overview(c.Request.Context(), c.DefaultQuery("window", "24h"))
 	if response.ErrorFrom(c, err) {
 		return
@@ -112,6 +113,7 @@ func (h *UpstreamCenterHandler) Run(c *gin.Context) {
 	response.Success(c, result)
 }
 func (h *UpstreamCenterHandler) History(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	id, ok := parseUpstreamID(c)
 	if !ok {
 		return

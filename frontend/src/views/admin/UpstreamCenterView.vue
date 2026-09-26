@@ -7,8 +7,8 @@
       </div>
       <div v-if="error" role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-900 dark:bg-rose-500/10 dark:text-rose-400"><span>{{ error }}</span><button type="button" class="font-medium underline" @click="reload()">{{ t('upstreamCenter.retry') }}</button></div>
       <div id="upstream-panel" role="tabpanel" :aria-labelledby="`upstream-tab-${tab}`" :aria-busy="loading" class="space-y-4">
-        <IntelligenceMonitorPanel v-if="visitedMonitorTabs.intelligence" v-show="tab === 'intelligence'" :hidden="tab !== 'intelligence'" :active="tab === 'intelligence'" :overview="overview" :refresh-key="storageRevision" />
-        <IntelligenceMonitorPanel v-if="visitedMonitorTabs.oauth" v-show="tab === 'oauth'" :hidden="tab !== 'oauth'" :active="tab === 'oauth'" oauth-only :overview="overview" :refresh-key="storageRevision" />
+        <IntelligenceMonitorPanel v-if="visitedMonitorTabs.intelligence" v-show="tab === 'intelligence'" :hidden="tab !== 'intelligence'" :active="tab === 'intelligence'" :overview="overview" :refresh-key="storageRevision" @refresh-overview="reload()" />
+        <IntelligenceMonitorPanel v-if="visitedMonitorTabs.oauth" v-show="tab === 'oauth'" :hidden="tab !== 'oauth'" :active="tab === 'oauth'" oauth-only :overview="overview" :refresh-key="storageRevision" @refresh-overview="reload()" />
         <template v-if="tab === 'suppliers' || tab === 'monitors'">
           <section v-if="overview" class="grid grid-cols-2 gap-3 lg:grid-cols-4" :aria-label="t(tab === 'suppliers' ? 'upstreamCenter.finance.title' : 'upstreamCenter.tabs.monitors')">
             <div v-for="metric in tab === 'suppliers' ? supplierMetrics : monitorMetrics" :key="metric.key" class="card flex min-w-0 items-center gap-3 px-3 py-3 sm:px-4"><div class="shrink-0 rounded-lg bg-primary-50 p-2 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400"><Icon :name="metric.icon" size="md" :stroke-width="2" /></div><div class="min-w-0"><p class="text-[11px] font-medium text-gray-500 dark:text-dark-400">{{ t(metric.key) }}</p><p class="mt-0.5 truncate text-xl font-bold tabular-nums text-gray-900 dark:text-white" :class="metric.color">{{ metric.value }}</p><p v-if="metric.note" class="mt-0.5 truncate text-[10px] text-gray-400 dark:text-dark-400">{{ metric.note }}</p></div></div>
@@ -29,7 +29,7 @@
               <div class="flex items-center gap-2 text-[10px] text-gray-400 dark:text-dark-400">
                 <span class="hidden xl:inline" :title="t('upstreamCenter.refreshHint')">{{ updatedAt ? t('upstreamCenter.updated', { time: shortTime(updatedAt) }) : t('upstreamCenter.refreshHint') }}</span>
                 <button type="button" class="btn btn-secondary btn-sm" data-testid="upstream-order" :disabled="!canOrder" @click="openOrder()"><Icon name="menu" size="sm" class="mr-1.5" />{{ t('upstreamCenter.order.open') }}</button>
-                <button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs text-gray-500 hover:bg-gray-100 hover:text-primary-600 disabled:opacity-50 dark:text-dark-400 dark:hover:bg-dark-800" :disabled="loading" @click="reload()"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />{{ t('upstreamCenter.refresh') }}</button>
+                <button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs text-gray-500 hover:bg-gray-100 hover:text-primary-600 disabled:opacity-50 dark:text-dark-400 dark:hover:bg-dark-800" :aria-busy="loading" data-testid="upstream-refresh" @click="reload()"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />{{ t('upstreamCenter.refresh') }}</button>
               </div>
             </div>
           </div>
@@ -54,7 +54,7 @@
   </AppLayout>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -72,6 +72,8 @@ import { upstreamCenterAPI, type UpstreamHistoryRecord, type UpstreamOverview, t
 import { dateTime, money, shortTime, overallTargetStatus } from '@/components/admin/upstream/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { useAppStore } from '@/stores/app'
+import { useMonitorRefresh } from '@/composables/useMonitorRefresh'
+import { reconcileMonitorData } from '@/components/admin/upstream/monitorReconcile'
 const { t } = useI18n()
 const app = useAppStore()
 const tabs = ['suppliers', 'monitors', 'intelligence', 'oauth'] as const
@@ -81,7 +83,7 @@ const visitedMonitorTabs = ref({ intelligence: false, oauth: false })
 watch(tab, value => {
   if (value === 'intelligence' || value === 'oauth') visitedMonitorTabs.value[value] = true
 })
-const overview = ref<UpstreamOverview | null>(null), loading = ref(false), error = ref(''), updatedAt = ref('')
+const overview = ref<UpstreamOverview | null>(null), error = ref(''), updatedAt = ref('')
 const selectedSupplierId = ref<number | null>(null)
 const supplierTabs = computed(() => [
   { id: null as number | null, name: t('upstreamCenter.allSuppliers'), count: overview.value?.suppliers.length || 0 },
@@ -139,21 +141,20 @@ const monitorMetrics = computed(() => {
     { key: 'upstreamCenter.status.error', value: monitors.filter(item => ['failed', 'error'].includes(overallTargetStatus(item))).length, icon: 'xCircle' as const, note: '', color: '!text-rose-600 dark:!text-rose-400' },
   ]
 })
-let controller: AbortController | undefined
-let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
-async function reload(silent = false) {
-  if (silent && (loading.value || ordering.value)) return
-  controller?.abort(); const current = new AbortController(); controller = current
-  loading.value = true
-  try {
-    const result = await upstreamCenterAPI.overview(window.value, current.signal)
-    if (!current.signal.aborted) { overview.value = result; updatedAt.value = new Date().toISOString(); error.value = '' }
-  } catch (err) { if (!current.signal.aborted && !silent) error.value = extractApiErrorMessage(err, t('upstreamCenter.loadFailed')) }
-  finally { if (!current.signal.aborted) loading.value = false }
-}
+const { loading, refresh: reload } = useMonitorRefresh({
+  paused: () => !!ordering.value,
+  // Artwork tabs need source/rate metadata less often than the live monitors.
+  intervalMs: () => tab.value === 'suppliers' || tab.value === 'monitors' ? 5000 : 30000,
+  request: signal => upstreamCenterAPI.overview(window.value, signal),
+  apply: result => { overview.value = reconcileMonitorData(overview.value, result); updatedAt.value = new Date().toISOString(); error.value = '' },
+  onError: err => { error.value = extractApiErrorMessage(err, t('upstreamCenter.loadFailed')) },
+})
 watch(window, () => void reload())
-watch(tab, () => { search.value = '' })
+watch(tab, (value, previous) => {
+  search.value = ''
+  if ((value === 'suppliers' || value === 'monitors') && (previous === 'intelligence' || previous === 'oauth')) void reload()
+})
 const supplierDialog = ref(false), targetDialog = ref(false), editingSupplier = ref<UpstreamSupplier | null>(null), editingTarget = ref<UpstreamTarget | null>(null), targetSupplier = ref<UpstreamSupplier | null>(null)
 function openSupplier(supplier: UpstreamSupplier | null = null) { editingSupplier.value = supplier; supplierDialog.value = true }
 function openTarget(target: UpstreamTarget | null = null, supplier: UpstreamSupplier | null = null) { editingTarget.value = target; targetSupplier.value = supplier || overview.value?.suppliers.find(item => item.id === target?.supplier_id) || null; targetDialog.value = true }
@@ -196,7 +197,5 @@ async function deleteConfirmed(mode: 'archive' | 'purge') {
   } catch (err) { if (!disposed) deleteError.value = extractApiErrorMessage(err, t('upstreamCenter.storage.actionFailed')) }
   finally { deleting.value = false }
 }
-function visibilityChanged() { if (!document.hidden) void reload(true) }
-onMounted(() => { void reload(); timer = setInterval(() => { if (!document.hidden) void reload(true) }, 30000); document.addEventListener('visibilitychange', visibilityChanged) })
-onBeforeUnmount(() => { disposed = true; controller?.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', visibilityChanged) })
+onBeforeUnmount(() => { disposed = true })
 </script>

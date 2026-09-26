@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, useTemplateRef, nextTick } from 'vue'
+import { onBeforeUnmount, onMounted, ref, useTemplateRef, nextTick, watch } from 'vue'
 
 const props = withDefaults(defineProps<{
   content?: string
   trigger?: 'hover' | 'click'
   widthClass?: string
+  lazy?: boolean
 }>(), {
   trigger: 'hover',
   widthClass: 'w-64',
+  lazy: false,
 })
 
 const show = ref(false)
@@ -94,19 +96,27 @@ function updatePosition() {
   arrowLeft.value = `calc(50% + ${rect.left + rect.width / 2 - center}px)`
 }
 
-onMounted(() => {
+let listening = false
+function listen() {
+  if (listening) return
+  listening = true
   document.addEventListener('click', onDocumentClick, true)
   document.addEventListener('keydown', onDocumentKeydown)
   window.addEventListener('resize', onViewportChange)
   window.addEventListener('scroll', onViewportChange, true)
-})
+}
 
-onBeforeUnmount(() => {
+function unlisten() {
+  if (!listening) return
+  listening = false
   document.removeEventListener('click', onDocumentClick, true)
   document.removeEventListener('keydown', onDocumentKeydown)
   window.removeEventListener('resize', onViewportChange)
   window.removeEventListener('scroll', onViewportChange, true)
-})
+}
+watch(show, visible => { if (props.lazy) { if (visible) listen(); else unlisten() } })
+onMounted(() => { if (!props.lazy || show.value) listen() })
+onBeforeUnmount(unlisten)
 </script>
 
 <template>
@@ -135,7 +145,7 @@ onBeforeUnmount(() => {
     </slot>
 
     <!-- Teleport to body to escape modal overflow clipping -->
-    <Teleport to="body">
+    <Teleport v-if="!props.lazy || show" to="body">
       <!-- before: 伪元素向下延伸一段透明区域，盖住提示框与触发图标之间的空隙，让指针能连续移入提示框。 -->
       <div
         ref="tooltip"

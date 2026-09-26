@@ -20,10 +20,11 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { intelligenceMonitorAPI, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
+import type { IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { intelligencePreviewContent } from './intelligencePreview'
 import PelicanLoadingScene from './PelicanLoadingScene.vue'
-import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
+import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
+import { loadIntelligenceArtwork } from './intelligenceArtworkLoader'
 const props = withDefaults(defineProps<{ run: IntelligenceRun | null; large?: boolean }>(), { large: false })
 const emit = defineEmits<{ open: [] }>()
 const { t } = useI18n()
@@ -32,7 +33,8 @@ const frame = ref<HTMLIFrameElement | null>(null)
 const previewReady = ref(false)
 const panelActive = inject(intelligencePanelActiveKey, ref(true))
 const hovered = ref(false), focused = ref(false), pageVisible = ref(!document.hidden)
-const playing = computed(() => panelActive.value && pageVisible.value && (props.large || hovered.value || focused.value))
+const refreshRevision = inject(intelligencePreviewRefreshKey, ref(0))
+const playing = computed(() => panelActive.value && pageVisible.value && visible.value && (props.large || hovered.value || focused.value))
 const canvasWidth = 960
 const canvasHeight = 600
 const viewport = ref({ width: 0, height: 0 })
@@ -99,6 +101,14 @@ watch(panelActive, async active => {
   syncPreview()
 })
 let controller: AbortController | undefined, observer: IntersectionObserver | undefined, resizeObserver: ResizeObserver | undefined
+let loadedIdentity = ''
+let loadingIdentity = ''
+const runIdentity = computed(() => {
+  const run = props.run
+  // Polls may fill duration/HTTP metadata after the HTML is already loaded.
+  // Those fields do not identify a different artwork.
+  return run ? `${run.id}:${run.status}:${run.finished_at || ''}` : ''
+})
 function measureViewport() {
   if (!container.value) return
   const { width, height } = container.value.getBoundingClientRect()
@@ -110,16 +120,71 @@ function updateViewport(width: number, height: number) {
   if (width <= 0 || height <= 0 || !Number.isFinite(width) || !Number.isFinite(height)) return
   if (width !== viewport.value.width || height !== viewport.value.height) viewport.value = { width, height }
 }
-async function load() {
-  controller?.abort(); html.value = ''; error.value = ''; loading.value = false
-  if (!visible.value || !props.run || props.run.status !== 'succeeded') return
-  if (props.run.html !== undefined) { html.value = props.run.html; return }
-  const current = new AbortController(); controller = current; loading.value = true
-  try { const result = await intelligenceMonitorAPI.detail(props.run.id, current.signal); if (!current.signal.aborted) html.value = result.html || '' }
-  catch { if (!current.signal.aborted) error.value = t('intelligenceMonitor.loadFailed') }
-  finally { if (!current.signal.aborted) loading.value = false }
+function cancelLoad() {
+  controller?.abort()
+  controller = undefined
+  loadingIdentity = ''
+  loading.value = false
 }
-watch([() => props.run?.id, () => props.run?.status, () => props.run?.html, visible], () => void load())
+async function load() {
+  if (!panelActive.value || !pageVisible.value || !visible.value || !props.run || props.run.status !== 'succeeded') return
+  const identity = runIdentity.value
+  if ((loadedIdentity === identity && html.value) || loadingIdentity === identity) return
+  cancelLoad()
+  error.value = ''
+  loading.value = true
+  loadingIdentity = identity
+  const current = new AbortController(); controller = current
+  try {
+    if (props.run.html?.trim()) {
+      if (!current.signal.aborted) {
+        html.value = props.run.html
+        loadedIdentity = identity
+      }
+      return
+    }
+    let artwork: string
+    try {
+      artwork = await loadIntelligenceArtwork(props.run, current.signal)
+    } catch (cause) {
+      // The shared loader also cancels when authorization changes, including a
+      // token refresh. Retry once with the new authorization if still visible.
+      if (current.signal.aborted || (cause as Error)?.name !== 'AbortError') throw cause
+      artwork = await loadIntelligenceArtwork(props.run, current.signal)
+    }
+    if (!current.signal.aborted && runIdentity.value === identity) {
+      html.value = artwork
+      loadedIdentity = identity
+    }
+  } catch {
+    if (!current.signal.aborted) error.value = t('intelligenceMonitor.loadFailed')
+  } finally {
+    if (controller === current) {
+      loading.value = false
+      loadingIdentity = ''
+      controller = undefined
+    }
+  }
+}
+watch(runIdentity, identity => {
+  if (identity === loadedIdentity) return
+  cancelLoad()
+  html.value = ''
+  error.value = ''
+  loading.value = false
+  previewReady.value = false
+  void load()
+})
+watch([visible, panelActive, pageVisible], ([inView, activePanel, activePage]) => {
+  if (!inView || !activePanel || !activePage) cancelLoad()
+  else void load()
+})
+watch(refreshRevision, () => {
+  if (props.run?.status === 'succeeded' && (!html.value || error.value)) {
+    cancelLoad()
+    void load()
+  }
+})
 onMounted(() => {
   window.addEventListener('message', onPreviewMessage)
   document.addEventListener('visibilitychange', updatePageVisibility)
@@ -132,7 +197,10 @@ onMounted(() => {
     if (container.value) resizeObserver.observe(container.value)
   } else window.addEventListener('resize', measureViewport)
   if (props.large || typeof IntersectionObserver === 'undefined') { visible.value = true; return }
-  observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { visible.value = true; observer?.disconnect() } }, { rootMargin: '150px' })
+  observer = new IntersectionObserver(entries => {
+    const entry = entries.find(item => item.target === container.value)
+    if (entry) visible.value = entry.isIntersecting
+  }, { rootMargin: '120px' })
   if (container.value) observer.observe(container.value)
 })
 onBeforeUnmount(() => { controller?.abort(); observer?.disconnect(); resizeObserver?.disconnect(); window.removeEventListener('resize', measureViewport); window.removeEventListener('message', onPreviewMessage); document.removeEventListener('visibilitychange', updatePageVisibility) })

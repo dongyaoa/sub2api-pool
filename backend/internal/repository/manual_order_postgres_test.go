@@ -156,11 +156,18 @@ func TestManualOrderPostgresPersistenceIsolationAndMigration(t *testing.T) {
 	require.Equal(t, []int64{31, 30}, upstreamOrderIDs(t, other, ctx, "monitors", 0))
 	require.Equal(t, []int64{100, 101}, intelligenceOrderIDs(t, other, ctx, false))
 	require.Equal(t, []int64{200, 201}, intelligenceOrderIDs(t, other, ctx, true))
-	_, err := db.ExecContext(ctx, `INSERT INTO upstream_suppliers(id,name) VALUES(3,'New supplier');
+	_, err := db.ExecContext(ctx, `SELECT setval('upstream_suppliers_id_seq',2);
 INSERT INTO upstream_targets(id,supplier_id,name,provider,endpoint,api_key_encrypted,api_key_fingerprint) VALUES(12,1,'New group','openai','https://example.com','cipher','new-group'),(32,NULL,'New monitor','openai','https://example.com','cipher','new-monitor');
 INSERT INTO intelligence_monitor_plans(id,name,source_type,created_by) VALUES(102,'New IQ','external',1),(202,'New OAuth','openai_oauth',1);`)
 	require.NoError(t, err)
-	require.Equal(t, []int64{2, 1, 3}, upstreamOrderIDs(t, db, ctx, "suppliers", 0))
+	newSupplier := &service.UpstreamSupplier{Name: "New supplier"}
+	require.NoError(t, u.SaveSupplier(ctx, newSupplier))
+	require.Equal(t, []int64{newSupplier.ID, 2, 1}, upstreamOrderIDs(t, other, ctx, "suppliers", 0), "new suppliers precede the saved manual order")
+	nextSupplier := &service.UpstreamSupplier{Name: "Newest supplier"}
+	require.NoError(t, u.SaveSupplier(ctx, nextSupplier))
+	newSupplier.Name = "Renamed supplier"
+	require.NoError(t, u.SaveSupplier(ctx, newSupplier))
+	require.Equal(t, []int64{nextSupplier.ID, newSupplier.ID, 2, 1}, upstreamOrderIDs(t, other, ctx, "suppliers", 0), "repeated additions prepend; editing does not reorder")
 	require.Equal(t, []int64{11, 10, 12}, upstreamOrderIDs(t, db, ctx, "groups", 1))
 	require.Equal(t, []int64{31, 30, 32}, upstreamOrderIDs(t, db, ctx, "monitors", 0))
 	require.Equal(t, []int64{100, 101, 102}, intelligenceOrderIDs(t, db, ctx, false))
