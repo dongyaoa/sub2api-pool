@@ -177,6 +177,13 @@ type IntelligenceMonitorCandyScheduleRepository interface {
 	DueCandyPlanIDs(context.Context, int) ([]int64, error)
 }
 
+// Separate durable queues keep long artwork requests from consuming all candy
+// capacity. Implementations must enforce the limit across app instances and
+// continue to serialize the two test kinds belonging to the same plan.
+type IntelligenceMonitorQueueRepository interface {
+	ClaimNextForKind(context.Context, string, string, int) (*IntelligenceMonitorRun, error)
+}
+
 type IntelligenceMonitorRepository interface {
 	SaveOrder(context.Context, IntelligenceOrderInput) error
 	ListPlans(context.Context) ([]*IntelligenceMonitorPlan, error)

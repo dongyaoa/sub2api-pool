@@ -16,6 +16,32 @@ type IntelligenceMonitorHandler struct {
 func NewIntelligenceMonitorHandler(svc *service.IntelligenceMonitorService) *IntelligenceMonitorHandler {
 	return &IntelligenceMonitorHandler{svc: svc}
 }
+func (h *IntelligenceMonitorHandler) GetConcurrency(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	settings, err := h.svc.GetConcurrency(c.Request.Context())
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, settings)
+}
+func (h *IntelligenceMonitorHandler) UpdateConcurrency(c *gin.Context) {
+	var input struct {
+		MaxConcurrency      *int `json:"max_concurrency" binding:"required,min=1,max=256"`
+		CandyMaxConcurrency *int `json:"candy_max_concurrency" binding:"required,min=1,max=128"`
+	}
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "invalid intelligence monitor concurrency: pelican must be 1-256 and candy must be 1-128")
+		return
+	}
+	settings, err := h.svc.UpdateConcurrency(c.Request.Context(), service.IntelligenceMonitorConcurrency{
+		MaxConcurrency: *input.MaxConcurrency, CandyMaxConcurrency: *input.CandyMaxConcurrency,
+	})
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, settings)
+}
 func (h *IntelligenceMonitorHandler) ListPlans(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	var items []*service.IntelligenceMonitorPlan

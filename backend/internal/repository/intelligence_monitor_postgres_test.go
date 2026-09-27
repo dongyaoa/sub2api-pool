@@ -51,6 +51,8 @@ func intelligenceMonitorTestDB(t *testing.T, legacySchema ...bool) (*sql.DB, con
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `CREATE TABLE upstream_targets(id BIGINT PRIMARY KEY); CREATE TABLE accounts(id BIGINT PRIMARY KEY); CREATE TABLE api_keys(id BIGINT PRIMARY KEY,status TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),deleted_at TIMESTAMPTZ)`)
 	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `CREATE TABLE settings(key VARCHAR(100) PRIMARY KEY,value TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`)
+	require.NoError(t, err)
 	migration, err := migrations.FS.ReadFile("245_intelligence_monitor.sql")
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, string(migration))

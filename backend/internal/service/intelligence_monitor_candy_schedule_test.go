@@ -88,7 +88,8 @@ func TestIntelligenceCandySchedulerUsesIndependentDueQueries(t *testing.T) {
 				artworkDue:                 tc.artworkDue, candyDue: tc.candyDue,
 			}
 			svc := NewIntelligenceMonitorService(repo, upstreamTestEncryptor{}, nil, nil, nil, nil, nil)
-			svc.tick()
+			svc.schedule()
+			svc.dispatch()
 			require.Len(t, repo.queuedRuns, len(tc.kinds))
 			for i, kind := range tc.kinds {
 				require.Equal(t, kind, repo.queuedRuns[i].TestKind)

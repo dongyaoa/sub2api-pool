@@ -12,6 +12,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/upstream/IntelligenceHistoryDialog.spec.ts \
 	src/components/admin/upstream/IntelligencePlanCard.spec.ts \
 	src/components/admin/upstream/IntelligenceMonitorPanel.spec.ts \
+	src/components/admin/upstream/IntelligenceConcurrencyDialog.spec.ts \
 	src/components/admin/upstream/IntelligenceCandyBar.spec.ts \
 	src/components/admin/upstream/IntelligenceCandyDetailDialog.spec.ts \
 	src/components/admin/upstream/IntelligenceExecutionSource.spec.ts \

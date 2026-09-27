@@ -204,7 +204,7 @@ onBeforeUnmount(() => { disposed = true })
 <style scoped>
 /* Reserve the same viewport before the first response, on refresh and after iframe loads. */
 .group-intelligence-content {
-  height: min(496px, calc(90vh - 112px));
-  height: min(496px, calc(90dvh - 112px));
+  height: min(468px, calc(90vh - 112px));
+  height: min(468px, calc(90dvh - 112px));
 }
 </style>

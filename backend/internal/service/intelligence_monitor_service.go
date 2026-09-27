@@ -39,7 +39,9 @@ type IntelligenceMonitorService struct {
 	stopped        bool
 	wg             sync.WaitGroup
 	slots          chan struct{}
+	candySlots     chan struct{}
 	wake           chan struct{}
+	scheduleWake   chan struct{}
 }
 
 func NewIntelligenceMonitorService(repo IntelligenceMonitorRepository, encryptor SecretEncryptor, upstreamRepo UpstreamCenterRepository, groupRepo GroupRepository, apiKeys *APIKeyService, finance *UpstreamFinanceService, cfg *config.Config) *IntelligenceMonitorService {
@@ -50,8 +52,12 @@ func NewIntelligenceMonitorService(repo IntelligenceMonitorRepository, encryptor
 	}
 	localEndpoint := "http://127.0.0.1:" + strconv.Itoa(port)
 	requestTimeout := time.Duration(IntelligenceMonitorMaxTimeoutSeconds) * time.Second
-	localTransport := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, ResponseHeaderTimeout: requestTimeout, MaxIdleConns: 4, IdleConnTimeout: 90 * time.Second}
-	return &IntelligenceMonitorService{repo: repo, encryptor: encryptor, upstreams: upstreamRepo, groups: groupRepo, keys: apiKeys, finance: finance, cfg: cfg, externalClient: newSSRFSafeHTTPClientWithHeaderTimeout(requestTimeout, requestTimeout), localClient: &http.Client{Timeout: requestTimeout, Transport: localTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, localEndpoint: localEndpoint, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 2), wake: make(chan struct{}, 1)}
+	// Allocate only bounded semaphore storage, not workers. The database checks
+	// the live limit when claiming, allowing settings changes without replacing
+	// channels that still belong to running requests.
+	artworkConcurrency, candyConcurrency := IntelligenceMonitorMaxConcurrency, IntelligenceMonitorCandyMaxConcurrency
+	localTransport := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, ResponseHeaderTimeout: requestTimeout, MaxIdleConns: artworkConcurrency + candyConcurrency, MaxIdleConnsPerHost: artworkConcurrency + candyConcurrency, IdleConnTimeout: 90 * time.Second}
+	return &IntelligenceMonitorService{repo: repo, encryptor: encryptor, upstreams: upstreamRepo, groups: groupRepo, keys: apiKeys, finance: finance, cfg: cfg, externalClient: newSSRFSafeHTTPClientWithHeaderTimeout(requestTimeout, requestTimeout), localClient: &http.Client{Timeout: requestTimeout, Transport: localTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, localEndpoint: localEndpoint, ctx: ctx, cancel: cancel, slots: make(chan struct{}, artworkConcurrency), candySlots: make(chan struct{}, candyConcurrency), wake: make(chan struct{}, 1), scheduleWake: make(chan struct{}, 1)}
 }
 
 func (s *IntelligenceMonitorService) ListPlans(ctx context.Context) ([]*IntelligenceMonitorPlan, error) {
@@ -203,7 +209,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 			return nil, err
 		}
 		s.decoratePlan(p)
-		s.notify()
+		s.notifySchedule()
 		return p, nil
 	}
 	applyUpstreamString(&p.Name, in.Name)
@@ -368,7 +374,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		s.cleanupKey(*old.LocalAPIKeyID, *old.LocalKeyOwnerID)
 	}
 	s.decoratePlan(p)
-	s.notify()
+	s.notifySchedule()
 	return p, nil
 }
 
@@ -523,6 +529,26 @@ func (s *IntelligenceMonitorService) notify() {
 	default:
 	}
 }
+func (s *IntelligenceMonitorService) notifySchedule() {
+	select {
+	case s.scheduleWake <- struct{}{}:
+	default:
+	}
+}
+
+func intelligenceMonitorConcurrency(cfg *config.Config) (int, int) {
+	artwork, candy := config.DefaultIntelligenceMonitorMaxConcurrency, config.DefaultIntelligenceMonitorCandyMaxConcurrency
+	if cfg != nil {
+		if n := cfg.IntelligenceMonitor.MaxConcurrency; n >= 1 && n <= IntelligenceMonitorMaxConcurrency {
+			artwork = n
+		}
+		if n := cfg.IntelligenceMonitor.CandyMaxConcurrency; n >= 1 && n <= IntelligenceMonitorCandyMaxConcurrency {
+			candy = n
+		}
+	}
+	return artwork, candy
+}
+
 func (s *IntelligenceMonitorService) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -530,8 +556,11 @@ func (s *IntelligenceMonitorService) Start() {
 		return
 	}
 	s.started = true
-	s.wg.Add(1)
+	artwork, candy := intelligenceMonitorConcurrency(s.cfg)
+	slog.Info("intelligence monitoring scheduler started", "deployment_artwork_concurrency", artwork, "deployment_candy_concurrency", candy, "database_overrides_enabled", true)
+	s.wg.Add(2)
 	go s.loop()
+	go s.dispatchLoop()
 }
 func (s *IntelligenceMonitorService) Stop() {
 	s.mu.Lock()
@@ -553,26 +582,25 @@ func (s *IntelligenceMonitorService) loop() {
 		if s.ctx.Err() != nil {
 			return
 		}
-		s.tick()
+		s.schedule()
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-		case <-s.wake:
+		case <-s.scheduleWake:
 		}
 	}
 }
-func (s *IntelligenceMonitorService) tick() {
+func (s *IntelligenceMonitorService) schedule() {
 	ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
 	defer cancel()
+	defer s.notify()
 	if err := s.repo.ExpireRuns(ctx); err != nil {
 		slog.Warn("intelligence monitoring expiry failed", "error", err)
-		return
 	}
-	ids, err := s.repo.DuePlanIDs(ctx, 10)
+	ids, err := s.repo.DuePlanIDs(ctx, IntelligenceMonitorMaxConcurrency)
 	if err != nil {
 		slog.Warn("intelligence monitoring schedule failed", "error", err)
-		return
 	}
 	for _, id := range ids {
 		if _, err = s.enqueue(ctx, id, true); err != nil && !errors.Is(err, ErrIntelligenceBusy) && !errors.Is(err, ErrIntelligenceNotFound) {
@@ -580,7 +608,7 @@ func (s *IntelligenceMonitorService) tick() {
 		}
 	}
 	if candyRepo, ok := s.repo.(IntelligenceMonitorCandyScheduleRepository); ok {
-		candyIDs, candyErr := candyRepo.DueCandyPlanIDs(ctx, 10)
+		candyIDs, candyErr := candyRepo.DueCandyPlanIDs(ctx, IntelligenceMonitorCandyMaxConcurrency)
 		if candyErr != nil {
 			slog.Warn("intelligence candy schedule failed", "error", candyErr)
 		} else {
@@ -591,8 +619,58 @@ func (s *IntelligenceMonitorService) tick() {
 			}
 		}
 	}
-	for len(s.slots) < cap(s.slots) {
-		run, err := s.repo.ClaimNext(ctx, uuid.NewString())
+}
+
+// Dispatch never waits for due-plan scanning, billing/source preparation or
+// retention cleanup. Enqueue and completion wake it immediately; the ticker
+// discovers work and released slots belonging to other app instances.
+func (s *IntelligenceMonitorService) dispatchLoop() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if s.ctx.Err() != nil {
+			return
+		}
+		s.dispatch()
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-s.wake:
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *IntelligenceMonitorService) dispatch() {
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	defer cancel()
+	if repo, ok := s.repo.(IntelligenceMonitorQueueRepository); ok {
+		artwork, candy := intelligenceMonitorConcurrency(s.cfg)
+		// Separate pools prevent a queue of long drawings starving candy tests.
+		s.dispatchPool(ctx, s.candySlots, func(ctx context.Context, token string) (*IntelligenceMonitorRun, error) {
+			return repo.ClaimNextForKind(ctx, token, IntelligenceMonitorTestCandy, candy)
+		})
+		s.dispatchPool(ctx, s.slots, func(ctx context.Context, token string) (*IntelligenceMonitorRun, error) {
+			return repo.ClaimNextForKind(ctx, token, IntelligenceMonitorTestPelican, artwork)
+		})
+		return
+	}
+	// Compatibility for repository decorators implementing the original queue.
+	s.dispatchPool(ctx, s.slots, s.repo.ClaimNext)
+}
+
+func (s *IntelligenceMonitorService) dispatchPool(ctx context.Context, slots chan struct{}, claim func(context.Context, string) (*IntelligenceMonitorRun, error)) {
+	for ctx.Err() == nil {
+		select {
+		case slots <- struct{}{}:
+		default:
+			return
+		}
+		run, err := claim(ctx, uuid.NewString())
+		if err != nil || run == nil {
+			<-slots
+		}
 		if err != nil {
 			slog.Warn("intelligence monitoring claim failed", "error", err)
 			return
@@ -600,11 +678,10 @@ func (s *IntelligenceMonitorService) tick() {
 		if run == nil {
 			return
 		}
-		s.slots <- struct{}{}
 		s.wg.Add(1)
 		go func(run *IntelligenceMonitorRun) {
 			defer s.wg.Done()
-			defer func() { <-s.slots; s.notify() }()
+			defer func() { <-slots; s.notify() }()
 			s.execute(run)
 		}(run)
 	}

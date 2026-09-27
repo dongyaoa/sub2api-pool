@@ -8,6 +8,17 @@ export type IntelligenceRunStatus = 'pending' | 'running' | 'succeeded' | 'faile
 export type IntelligenceTestKind = 'pelican' | 'candy'
 export type IntelligenceRate = Record<string, unknown> | null
 export interface IntelligenceOrderInput { scope: 'intelligence' | 'oauth'; ids: number[] }
+export interface IntelligenceConcurrencyInput {
+  max_concurrency: number
+  candy_max_concurrency: number
+}
+export interface IntelligenceConcurrency extends IntelligenceConcurrencyInput {
+  source: 'deployment' | 'database'
+  pelican_running: number
+  pelican_pending: number
+  candy_running: number
+  candy_pending: number
+}
 
 export interface IntelligencePlanInput {
   name: string
@@ -88,6 +99,12 @@ export interface IntelligenceRunPage {
 }
 const base = '/admin/intelligence-monitors'
 export const intelligenceMonitorAPI = {
+  async concurrency(signal?: AbortSignal): Promise<IntelligenceConcurrency> {
+    return (await apiClient.get(`${base}/concurrency`, { signal })).data
+  },
+  async updateConcurrency(input: IntelligenceConcurrencyInput): Promise<IntelligenceConcurrency> {
+    return (await apiClient.put(`${base}/concurrency`, input)).data
+  },
   async reorder(input: IntelligenceOrderInput): Promise<void> {
     await apiClient.put(`${base}/plans/order`, input)
   },

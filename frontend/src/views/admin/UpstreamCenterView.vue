@@ -3,7 +3,7 @@
     <div class="mx-auto w-full min-w-0 max-w-[1600px] space-y-4 pb-6">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 dark:border-dark-700">
         <div class="flex min-w-0 gap-3 overflow-x-auto sm:gap-5" role="tablist" :aria-label="t('upstreamCenter.title')"><button v-for="item in tabs" :id="`upstream-tab-${item}`" :key="item" type="button" role="tab" :aria-selected="tab === item" aria-controls="upstream-panel" class="relative flex shrink-0 items-center gap-1.5 border-b-2 pb-3 pt-1 text-sm transition-colors" :class="tab === item ? 'border-primary-600 font-semibold text-primary-700 dark:border-primary-400 dark:text-primary-300' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200'" @click="tab = item"><Icon :name="item === 'suppliers' ? 'server' : item === 'monitors' ? 'chart' : item === 'oauth' ? 'shield' : item === 'local' ? 'grid' : 'lightbulb'" size="sm" />{{ item === 'oauth' ? t('intelligenceMonitor.oauth.title') : t(`upstreamCenter.tabs.${item}`) }}<span v-if="item === 'suppliers' || item === 'monitors'" class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-normal text-gray-500 dark:bg-dark-800 dark:text-dark-400">{{ item === 'suppliers' ? overview?.suppliers.length || 0 : overview?.monitors.length || 0 }}</span></button></div>
-        <div class="mb-2 flex items-center gap-2"><button type="button" class="btn btn-secondary btn-sm" data-testid="upstream-storage" @click="storageDialog = true"><Icon name="database" size="sm" class="mr-1.5" />{{ t('upstreamCenter.storage.title') }}</button><button v-if="tab === 'suppliers' || tab === 'monitors'" type="button" class="btn btn-primary btn-sm" @click="tab === 'suppliers' ? openSupplier() : openTarget()"><Icon name="plus" size="sm" class="mr-1.5" />{{ t(tab === 'suppliers' ? 'upstreamCenter.addSupplier' : 'upstreamCenter.addMonitor') }}</button></div>
+        <div class="mb-2 flex items-center gap-2"><button type="button" class="btn btn-secondary btn-sm" data-testid="intelligence-concurrency" @click="concurrencyDialog = true"><Icon name="cog" size="sm" class="mr-1.5" />{{ t('intelligenceMonitor.concurrency.title') }}</button><button type="button" class="btn btn-secondary btn-sm" data-testid="upstream-storage" @click="storageDialog = true"><Icon name="database" size="sm" class="mr-1.5" />{{ t('upstreamCenter.storage.title') }}</button><button v-if="tab === 'suppliers' || tab === 'monitors'" type="button" class="btn btn-primary btn-sm" @click="tab === 'suppliers' ? openSupplier() : openTarget()"><Icon name="plus" size="sm" class="mr-1.5" />{{ t(tab === 'suppliers' ? 'upstreamCenter.addSupplier' : 'upstreamCenter.addMonitor') }}</button></div>
       </div>
       <div v-if="error" role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-900 dark:bg-rose-500/10 dark:text-rose-400"><span>{{ error }}</span><button type="button" class="font-medium underline" @click="reload()">{{ t('upstreamCenter.retry') }}</button></div>
       <div id="upstream-panel" role="tabpanel" :aria-labelledby="`upstream-tab-${tab}`" :aria-busy="loading" class="space-y-4">
@@ -51,6 +51,7 @@
     <UpstreamSupplierDialog :show="supplierDialog" :supplier="editingSupplier" @close="supplierDialog = false" @saved="saved" @changed="reload()" />
     <UpstreamTargetDialog :show="targetDialog" :target="editingTarget" :supplier="targetSupplier" @close="targetDialog = false" @saved="saved" />
     <UpstreamDetailDialog :show="detailDialog" :target="detailTarget" :supplier="detailSupplier" :model="detailModel" :record="detailRecord" :window="window" :busy="!!detailTarget && busyIds.has(detailTarget.id)" @close="detailDialog = false" @run="runTarget" @sync="syncBalance" @window-change="window = $event" />
+    <IntelligenceConcurrencyDialog v-if="concurrencyDialog" :show="true" @close="concurrencyDialog = false" />
     <UpstreamStorageDialog :show="storageDialog" @close="storageDialog = false" @changed="storageChanged" />
     <UpstreamDeleteDialog :show="!!deleteItem" :item="deleteItem" :busy="deleting" :error="deleteError" @close="deleteItem = null" @confirm="deleteConfirmed" />
   </AppLayout>
@@ -76,6 +77,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { useAppStore } from '@/stores/app'
 import { useMonitorRefresh } from '@/composables/useMonitorRefresh'
 import { reconcileMonitorData } from '@/components/admin/upstream/monitorReconcile'
+const IntelligenceConcurrencyDialog = defineAsyncComponent(() => import('@/components/admin/upstream/IntelligenceConcurrencyDialog.vue'))
 const UpstreamIntelligenceDialog = defineAsyncComponent(() => import('@/components/admin/upstream/UpstreamIntelligenceDialog.vue'))
 const { t } = useI18n()
 const app = useAppStore()
@@ -107,7 +109,7 @@ function navigateSupplierTabs(event: KeyboardEvent) {
 watch(() => overview.value?.suppliers, suppliers => {
   if (suppliers && selectedSupplierId.value !== null && !suppliers.some(supplier => supplier.id === selectedSupplierId.value)) selectedSupplierId.value = null
 })
-const storageDialog = ref(false), storageRevision = ref(0)
+const storageDialog = ref(false), concurrencyDialog = ref(false), storageRevision = ref(0)
 function storageChanged() { storageRevision.value++; void reload() }
 const busyIds = ref(new Set<number>()), runningIds = ref(new Set<number>())
 const allGroups = computed(() => overview.value?.suppliers.flatMap(supplier => supplier.targets) || [])

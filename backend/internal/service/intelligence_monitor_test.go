@@ -109,7 +109,7 @@ func (r *intelligenceStartupRepository) DuePlanIDs(context.Context, int) ([]int6
 func (r *intelligenceStartupRepository) ClaimNext(context.Context, string) (*IntelligenceMonitorRun, error) {
 	return nil, nil
 }
-func TestIntelligenceStartupPrunesBeforeDispatch(t *testing.T) {
+func TestIntelligenceStartupPrunesBeforeScheduling(t *testing.T) {
 	repo := &intelligenceStartupRepository{ready: make(chan bool, 1)}
 	svc := NewIntelligenceMonitorService(repo, nil, nil, nil, nil, nil, nil)
 	svc.Start()

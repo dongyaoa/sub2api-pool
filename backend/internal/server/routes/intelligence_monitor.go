@@ -11,6 +11,8 @@ func registerIntelligenceMonitorRoutes(admin *gin.RouterGroup, h *handler.Handle
 	}
 	api := h.Admin.IntelligenceMonitor
 	group := admin.Group("/intelligence-monitors")
+	group.GET("/concurrency", api.GetConcurrency)
+	group.PUT("/concurrency", api.UpdateConcurrency)
 	group.GET("/plans", api.ListPlans)
 	group.POST("/plans", api.CreatePlan)
 	group.PUT("/plans/order", api.SaveOrder)

@@ -300,28 +300,61 @@ func (r *intelligenceMonitorRepository) duePlanIDs(ctx context.Context, limit in
 	return ids, rows.Err()
 }
 func (r *intelligenceMonitorRepository) ClaimNext(ctx context.Context, token string) (*service.IntelligenceMonitorRun, error) {
+	// Retain the shared two-worker contract for legacy repository decorators.
+	return r.claimNext(ctx, token, "", 2)
+}
+
+func (r *intelligenceMonitorRepository) ClaimNextForKind(ctx context.Context, token, kind string, limit int) (*service.IntelligenceMonitorRun, error) {
+	maxLimit := service.IntelligenceMonitorMaxConcurrency
+	if kind == service.IntelligenceMonitorTestCandy {
+		maxLimit = service.IntelligenceMonitorCandyMaxConcurrency
+	}
+	if (kind != service.IntelligenceMonitorTestPelican && kind != service.IntelligenceMonitorTestCandy) || limit < 1 || limit > maxLimit {
+		return nil, service.ErrIntelligenceInvalid
+	}
+	return r.claimNext(ctx, token, kind, limit)
+}
+
+func (r *intelligenceMonitorRepository) claimNext(ctx context.Context, token, kind string, limit int) (*service.IntelligenceMonitorRun, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// Serialize only the short claim transaction to enforce TWO workers globally,
-	// including when multiple app instances share this database.
+	// Serialize only the short claim transaction. The same lock spans both pools
+	// and legacy callers, so concurrent app instances cannot exceed a pool's
+	// global capacity or execute two kinds for the same plan simultaneously.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(245,1)`); err != nil {
 		return nil, err
 	}
+	if kind != "" {
+		limit, err = intelligenceConcurrencyForClaim(ctx, tx, kind, limit)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var active int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM intelligence_monitor_runs WHERE status='running' AND lease_until>NOW()`).Scan(&active); err != nil {
+	activeQuery := `SELECT COUNT(*) FROM intelligence_monitor_runs WHERE status='running' AND lease_until>NOW()`
+	var activeArgs []any
+	pendingFilter := ""
+	claimArgs := []any{token, service.IntelligenceMonitorLeaseGraceSeconds}
+	if kind != "" {
+		activeQuery += ` AND test_kind=$1`
+		activeArgs = append(activeArgs, kind)
+		pendingFilter = ` AND pending.test_kind=$3`
+		claimArgs = append(claimArgs, kind)
+	}
+	if err = tx.QueryRowContext(ctx, activeQuery, activeArgs...).Scan(&active); err != nil {
 		return nil, err
 	}
-	if active >= 2 {
+	if active >= limit {
 		return nil, nil
 	}
 	// The execution budget includes source preparation and persistence. Base the
 	// lease on this run's immutable timeout, not the plan's current configuration.
 	// Companion tests share credentials (including OAuth concurrency limits), so
-	// each plan executes serially while independent plans use the second worker.
-	run, err := scanIntelligenceRun(tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status='running',started_at=NOW(),lease_token=$1,lease_until=NOW()+make_interval(secs=>timeout_seconds+$2) WHERE id=(SELECT pending.id FROM intelligence_monitor_runs pending WHERE pending.status='pending' AND NOT EXISTS(SELECT 1 FROM intelligence_monitor_runs running WHERE running.plan_id=pending.plan_id AND running.status='running') ORDER BY pending.created_at,pending.id FOR UPDATE OF pending SKIP LOCKED LIMIT 1) RETURNING `+intelligenceRunColumns, token, service.IntelligenceMonitorLeaseGraceSeconds), false)
+	// each plan executes serially while independent plans use available workers.
+	run, err := scanIntelligenceRun(tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status='running',started_at=NOW(),lease_token=$1,lease_until=NOW()+make_interval(secs=>timeout_seconds+$2) WHERE id=(SELECT pending.id FROM intelligence_monitor_runs pending WHERE pending.status='pending'`+pendingFilter+` AND NOT EXISTS(SELECT 1 FROM intelligence_monitor_runs running WHERE running.plan_id=pending.plan_id AND running.status='running') ORDER BY pending.created_at,pending.id FOR UPDATE OF pending SKIP LOCKED LIMIT 1) RETURNING `+intelligenceRunColumns, claimArgs...), false)
 	if errors.Is(err, service.ErrIntelligenceNotFound) {
 		return nil, nil
 	}

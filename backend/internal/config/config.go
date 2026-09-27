@@ -65,6 +65,11 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 // 可通过 gateway.models_list_read_max_bytes 配置项覆盖。
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
 
+const (
+	DefaultIntelligenceMonitorMaxConcurrency      = 8
+	DefaultIntelligenceMonitorCandyMaxConcurrency = 4
+)
+
 type Config struct {
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
@@ -95,6 +100,7 @@ type Config struct {
 	DashboardAgg            DashboardAggregationConfig    `mapstructure:"dashboard_aggregation"`
 	UsageCleanup            UsageCleanupConfig            `mapstructure:"usage_cleanup"`
 	Concurrency             ConcurrencyConfig             `mapstructure:"concurrency"`
+	IntelligenceMonitor     IntelligenceMonitorConfig     `mapstructure:"intelligence_monitor"`
 	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
 	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
 	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
@@ -872,6 +878,15 @@ type CircuitBreakerConfig struct {
 type ConcurrencyConfig struct {
 	// PingInterval: 并发等待期间的 SSE ping 间隔（秒）
 	PingInterval int `mapstructure:"ping_interval"`
+}
+
+// IntelligenceMonitorConfig 为耗时不同的智商测试提供独立并发池。
+// 同数据库的所有实例共享上限，部署时须使用一致配置。
+type IntelligenceMonitorConfig struct {
+	// MaxConcurrency: 全局同时生成鹈鹕作品的最大数量，范围 1..256。
+	MaxConcurrency int `mapstructure:"max_concurrency"`
+	// CandyMaxConcurrency: 全局同时执行糖果测试的最大数量，范围 1..128。
+	CandyMaxConcurrency int `mapstructure:"candy_max_concurrency"`
 }
 
 type ImageConcurrencyConfig struct {
@@ -2468,6 +2483,8 @@ func setDefaults() {
 
 	viper.SetDefault("gateway.tls_fingerprint.enabled", true)
 	viper.SetDefault("concurrency.ping_interval", 10)
+	viper.SetDefault("intelligence_monitor.max_concurrency", DefaultIntelligenceMonitorMaxConcurrency)
+	viper.SetDefault("intelligence_monitor.candy_max_concurrency", DefaultIntelligenceMonitorCandyMaxConcurrency)
 
 	// TokenRefresh
 	viper.SetDefault("token_refresh.enabled", true)
@@ -3567,6 +3584,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Concurrency.PingInterval < 5 || c.Concurrency.PingInterval > 30 {
 		return fmt.Errorf("concurrency.ping_interval must be between 5-30 seconds")
+	}
+	if c.IntelligenceMonitor.MaxConcurrency < 1 || c.IntelligenceMonitor.MaxConcurrency > 256 {
+		return fmt.Errorf("intelligence_monitor.max_concurrency must be between 1 and 256")
+	}
+	if c.IntelligenceMonitor.CandyMaxConcurrency < 1 || c.IntelligenceMonitor.CandyMaxConcurrency > 128 {
+		return fmt.Errorf("intelligence_monitor.candy_max_concurrency must be between 1 and 128")
 	}
 	if c.Gateway.Grok.FreeQuotaSoftGateEnabled {
 		if c.Gateway.Grok.FreeQuotaTokenLimit <= 0 {
