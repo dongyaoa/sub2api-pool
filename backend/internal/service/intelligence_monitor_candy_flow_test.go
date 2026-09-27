@@ -79,11 +79,22 @@ func TestIntelligenceCandyRequestUsesOnlyQuestionAndNoTools(t *testing.T) {
 				var prompt string
 				response := `{"output_text":"最终答案：21个糖果。","status":"completed"}`
 				if mode == MonitorAPIModeResponses {
-					prompt = body["input"].(string)
-					require.Equal(t, "high", body["reasoning"].(map[string]any)["effort"])
+					input, ok := body["input"].(string)
+					require.True(t, ok, "responses input must be a string")
+					prompt = input
+					reasoning, ok := body["reasoning"].(map[string]any)
+					require.True(t, ok, "responses reasoning must be an object")
+					require.Equal(t, "high", reasoning["effort"])
 					require.Equal(t, float64(IntelligenceMonitorCandyMaxOutputTokens), body["max_output_tokens"])
 				} else {
-					prompt = body["messages"].([]any)[0].(map[string]any)["content"].(string)
+					messages, ok := body["messages"].([]any)
+					require.True(t, ok, "chat messages must be an array")
+					require.Len(t, messages, 1)
+					message, ok := messages[0].(map[string]any)
+					require.True(t, ok, "chat message must be an object")
+					content, ok := message["content"].(string)
+					require.True(t, ok, "chat content must be a string")
+					prompt = content
 					require.Equal(t, "high", body["reasoning_effort"])
 					require.Equal(t, float64(IntelligenceMonitorCandyMaxOutputTokens), body["max_completion_tokens"])
 					response = `{"choices":[{"message":{"content":"21"},"finish_reason":"stop"}]}`
