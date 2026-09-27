@@ -1,123 +1,83 @@
-# 号池镜像在线更新
+# 号池程序在线更新
 
-管理员页面检查固定仓库 `ghcr.io/dongyaoa/sub2api-pool` 的最新号池镜像。部署主机安装更新服务后，管理员可确认版本并更新应用容器。更新服务在 Linux 主机上以 systemd 服务运行，只监听 Unix socket；应用容器不挂载 Docker socket，也不获得执行任意 Docker 命令的接口。
+管理员在后台的版本卡片中点击检查更新，再确认「立即更新」，即可下载我们自己的号池程序、重启并检查启动结果。更新程序包含内嵌前端，不再要求安装宿主机 systemd 更新服务，也不需要 Docker socket。
 
-目前适用于 Linux amd64、systemd、Docker Engine 和 Compose v2。应用必须是已有 Compose 项目的 `sub2api` 服务，且配置了 Docker 健康检查。Windows 本地开发进程、无 systemd 的容器内环境和其他 CPU 架构只能检查版本，不能使用本安装方式。
+新版使用固定 GitHub 仓库 `dongyaoa/sub2api-pool` 的号池发行版，不会把官方仓库的 `v0.2.x` 当作号池更新。仅有镜像而没有完整程序更新附件的旧发行版不会被提供为可安装更新。
 
 ## 首次启用
 
-旧版本没有在线更新接口，必须先在终端更新一次到包含本功能的号池版本。**安装器的 bootstrap 仅给当前镜像添加 socket 接入，不升级应用版本。** 如果当前容器没有 `/app/pool-updater`，安装器会停止并提示先完成这次终端升级。
-
-以下例子对应原部署目录 `/www/wwwroot/sub2api`、容器名 `sub2api`。在原目录保留原来的 `.env`、Compose 文件、项目名、端口与数据卷；如原部署使用了 `-p`、多份 `-f` 或 `--env-file`，首次终端升级仍须带上原参数。不要从另一个目录新建同名服务。
+**旧镜像必须先更新一次 Docker 镜像，才能获得新的持久化程序入口。** 这一次操作沿用原部署目录、Compose 项目、环境变量和数据卷，不要创建新的数据库或替换原 `.env`：
 
 ```bash
-cd /www/wwwroot/sub2api
-# 确认原 sub2api 服务的 image 已指向 ghcr.io/dongyaoa/sub2api-pool:latest。
-# 仅在首次启用前沿用原部署命令；此处 docker-compose 应为 Compose v2。
-docker-compose pull sub2api
-docker-compose up -d --no-deps sub2api
-docker-compose ps
+cd /原来的部署目录
+# 原 sub2api 服务使用 ghcr.io/dongyaoa/sub2api-pool:latest
+docker compose pull sub2api
+docker compose up -d --no-deps sub2api
+docker compose ps
 ```
 
-等待容器健康后，从刚拉取的镜像复制安装资源。复制会创建一个不运行的临时容器，不访问模型服务：
+如原来使用 `docker-compose`，可以保留同一 Compose v2 命令；原部署有 `-p`、多份 `-f` 或 `--env-file` 时继续带上这些参数。`/app/data` 必须是可写的持久挂载，容器应使用 `restart: unless-stopped` 或 `restart: always`，使更新后的程序退出可以触发容器重启。只执行 `up -d` 不保证拉取新的镜像。
+
+目前在线安装支持官方号池镜像的 Linux amd64 运行环境。直接运行旧程序、自定义 entrypoint、只读数据目录、其他平台或没有重启策略的容器不属于此更新部署方式。
+
+如果之前安装过宿主机更新器，应先停用旧服务，避免两个更新方式同时操作应用：
 
 ```bash
-sudo docker pull ghcr.io/dongyaoa/sub2api-pool:latest
-installer_container=$(sudo docker create --network none ghcr.io/dongyaoa/sub2api-pool:latest)
-sudo docker cp "$installer_container:/app/pool-updater-install" ./pool-updater-install
-sudo docker rm "$installer_container"
-sudo bash ./pool-updater-install/install-pool-updater.sh --container sub2api
+sudo systemctl disable --now sub2api-pool-updater
 ```
 
-安装依赖 `python3`，Docker 位于 `/usr/bin/docker`。安装器固定拉取号池仓库，验证 Linux amd64、版本、commit 与来源标签，并要求版本标签和 `latest` 指向同一 digest/image ID，然后从该不可变镜像复制主机程序。发布中的标签暂时不一致时安装停止，可等发布完成再重试。它不接受自定义镜像仓库、镜像 URL 或安装命令。
+旧安装器的管理命令 `sub2api-pool-compose` 会追加固定旧镜像的 overlay。迁移到新入口时，使用原 Compose 配置，将应用的 `image` 明确设为新的号池镜像，按上面的原部署命令重建，并确认环境、端口和数据卷保持一致；不要继续使用固定旧镜像的 overlay。旧宿主机工具的文件暂时保留用于兼容，不再是后台在线更新的前置条件。
 
-安装器从当前容器的 Compose labels 读取完整项目名、工作目录和按顺序排列的配置文件。环境文件优先读取 Compose 的 `environment_file` label；旧部署没有该 label 时，使用记录的工作目录中的 `.env`。安装前用清理过的进程环境渲染 Compose，并逐项核对当前容器的环境、端口和持久挂载。不输出秘密值，也不把当前 shell 的隐式变量当作可重复的部署配置。
+## 后台更新过程
 
-所有配置文件、环境文件、Docker/Compose 可执行文件及其父目录必须属于 root，且组与其他用户不可写，不接受符号链接。宝塔等环境中 `/www/wwwroot` 或部署目录可能归 `www` 用户所有，此时安装会拒绝继续。请先由主机管理员核对并调整相关路径的所有权和权限；不要对整个网站目录盲目递归改权限。更新服务具有管理 Docker 的主机权限，因此不能信任可被 Web 用户替换的 Compose 文件或父目录。
+1. 点击刷新，检查自己的号池仓库是否有更新版本。只有已公开发布、平台匹配、具有完整清单及程序附件的发行版才可安装。
+2. 确认所显示的目标版本。服务重新核验版本、commit、附件大小和 SHA-256，下载到数据目录内的临时文件。
+3. 校验成功后，保存前一个程序并原子替换运行文件，持久记录更新任务，然后退出触发容器重启。页面短暂断开是正常现象，恢复后可继续查看状态。
+4. 新入口确认当前文件的 SHA-256 确实属于本次更新，再检查新程序是否存活及本机 `/health` 或 `/setup/status` 是否可访问。正常启动后清除待确认标记。
+5. 新程序退出或在默认 120 秒内未健康启动时，入口恢复上一个程序并记录失败原因。管理员可在页面查看失败结果，修复原因后重试。
 
-通过核对后，安装器写入固定主机配置，运行 `--bootstrap`：使用当前容器同一个 image ID，仅重建 `sub2api` 加入 socket 挂载及 `POOL_UPDATER_SOCKET` 环境变量，等待健康和版本核验。数据库及 Redis 不重建，镜像未升级。成功后启动 systemd 服务；bootstrap 健康检查失败会尝试恢复原声明与原镜像，安装命令仍返回失败。
+更新过程只替换程序和内嵌页面，**Docker 镜像标签、镜像 digest、系统库和外部资源不变**。因此容器详情仍显示原镜像版本，而后台应用版本会显示更新后的程序版本。系统依赖、安全补丁或外部资源发生变更时，仍需更新 Docker 镜像。
 
-## 特殊部署使用显式配置
+自动恢复只恢复程序文件，**不会回滚数据库迁移**。存在数据库不兼容变更的版本，应按发行说明备份并安排维护。新程序启动失败也可能来自数据库、环境变量或端口配置，需要结合容器日志排查。
 
-如原部署依赖终端临时环境变量、没有完整 Compose labels、使用不同的环境文件或自定义 Compose 路径，安装器不会猜测。先把原插值变量保存到 root 拥有、权限 `0600` 的环境文件，并用与当前容器 labels 完全一致的路径、项目名和文件顺序准备 JSON：
+## 重启与镜像升级
 
-```json
-{
-  "compose_files": ["/www/wwwroot/sub2api/docker-compose.yml"],
-  "project_name": "sub2api",
-  "working_dir": "/www/wwwroot/sub2api",
-  "env_files": ["/www/wwwroot/sub2api/.env"],
-  "socket_path": "/run/sub2api-pool-updater/updater.sock",
-  "state_dir": "/var/lib/sub2api-pool-updater",
-  "health_timeout_seconds": 180,
-  "socket_gid": 1000,
-  "docker_path": "/usr/bin/docker",
-  "compose_command": ["/usr/bin/docker", "compose"]
-}
-```
+运行程序保存在 `/app/data/runtime/sub2api`。相同镜像重启或重建容器时，该文件会保留，因此不会退回在线更新前的版本。
 
-项目名只是示例，须使用当前容器的 `com.docker.compose.project`。`env_files` 可以为空，但不能丢失原部署所需变量；多个文件保持原顺序。自定义 Compose v2 独立二进制可用 `"compose_command": ["/usr/local/bin/docker-compose"]`，或在自动发现时传 `--compose-bin /usr/local/bin/docker-compose`。不支持只提供 shell 命令字符串。
+入口还保存不可变镜像内 `/app/sub2api` 的 SHA-256。将来拉取并重建为不同程序的 Docker 镜像时，入口以新镜像程序建立基线，并清理旧的程序备份及启动标记；旧持久程序不会覆盖新镜像。原更新任务记录保留，后台会将不再匹配的中断任务标记为失败。
 
-```bash
-sudo chmod 600 /root/pool-updater-config.json
-sudo bash ./pool-updater-install/install-pool-updater.sh \
-  --container sub2api --config /root/pool-updater-config.json
-```
+`--version`、`--help`、`--setup` 等命令行模式会直接执行相应程序，不运行健康监督，也不会把待确认更新误标记为成功。自定义 Docker 命令（如 `sh`、`pg_dump`）保持原有行为。
 
-显式配置仍须匹配现有容器的 Compose labels，且通过环境、端口和挂载核验。对于完全缺少 labels 的容器，请先用原配置及正确项目名建立受 Compose 管理的部署；显式配置不绕过身份验证。
+## 文件和配置
 
-默认 socket 组 ID 为镜像中应用进程使用的 `1000`。自行修改容器用户时，需要在可信 JSON 中设置可访问 socket 的实际组 ID。不要把 socket 目录或 Docker socket 改为所有用户可写。
-
-## 安装后的终端管理
-
-**安装后用以下命令替代原来的裸 `docker-compose up -d`：**
-
-```bash
-sudo sub2api-pool-compose ps
-sudo sub2api-pool-compose up -d
-sudo sub2api-pool-compose logs --tail 100 sub2api
-```
-
-该管理命令保留已验证的项目名、工作目录、原配置文件列表和环境文件，并追加 `/var/lib/sub2api-pool-updater/compose.override.json`。overlay 保存当前被核验的不可变镜像及 socket 接入，权限为 root-only。原 Compose 文件和用户已有 override 均不改写。
-
-不要再省略该 overlay 直接执行原 `docker-compose up -d`，否则 Compose 可能恢复原镜像标签并丢失 socket 接入。不要编辑或把动态 overlay 复制进原 Compose：后续在线更新会原子替换此文件。需要修改部署配置时，先确认无更新任务，再停止主机服务，用上述管理命令完成变更并核对；路径或原文件列表变化需重新安装配置。
-
-## 更新过程与失败恢复
-
-页面确认的是当时显示的版本和 digest。主机服务在执行前重新核验固定仓库的最新版本，保存旧 image ID，拉取不可变 digest，验证镜像平台和标签，然后只重建 `sub2api`。成功需同时满足容器健康检查与应用报告的版本/commit。更新期间可能短暂断开页面，刷新后可继续查看持久保存的任务状态。
-
-新镜像启动或健康检查失败时，主机服务尝试恢复之前的 image ID，并核验健康和原版本。**自动恢复只涉及应用镜像，不回滚数据库迁移。** 有数据库不向后兼容变更的版本应先按发行说明备份并安排维护，不把镜像恢复当作数据库恢复。
-
-主机更新服务中断或恢复失败时会锁定后续更新，避免重复重建。先检查当前容器及主机日志，再处理实际部署问题：
-
-```bash
-sudo systemctl status sub2api-pool-updater
-sudo journalctl -u sub2api-pool-updater --since today
-sudo sub2api-pool-compose ps
-sudo sub2api-pool-compose logs --tail 100 sub2api
-```
-
-确认当前应用健康且版本正确后，管理员可在终端解除恢复状态：
-
-```bash
-sudo systemctl stop sub2api-pool-updater
-sudo /usr/local/libexec/sub2api-pool-updater \
-  --config /etc/sub2api-pool-updater/config.json --clear-recovery
-sudo systemctl start sub2api-pool-updater
-```
-
-`--clear-recovery` 会重新验证当前容器健康与号池版本；它不会自行升级、重建或回滚。没有通过检查时应继续修复原因，不删除 `job.json` 掩盖状态。
-
-## 主机文件与验证
-
-| 位置 | 用途 |
+| 位置或配置 | 用途 |
 | --- | --- |
-| `/usr/local/libexec/sub2api-pool-updater` | 主机更新程序 |
-| `/etc/sub2api-pool-updater/config.json` | root-only 固定部署配置 |
-| `/etc/systemd/system/sub2api-pool-updater.service` | systemd 服务 |
-| `/run/sub2api-pool-updater/updater.sock` | `0660` 的本机 Unix socket，没有 TCP 监听端口 |
-| `/var/lib/sub2api-pool-updater/job.json` | 更新状态与前一镜像，原子保存 |
-| `/var/lib/sub2api-pool-updater/compose.override.json` | 管理程序追加的镜像/socket overlay |
-| `/usr/local/sbin/sub2api-pool-compose` | 保留固定部署参数的终端管理入口 |
+| `/app/sub2api` | 镜像内不可变基线程序 |
+| `/app/data/runtime/sub2api` | 实际运行及在线更新的程序 |
+| `/app/data/runtime/sub2api.backup` | 上一次安装前的程序备份 |
+| `/app/data/runtime/image.sha256` | 当前 Docker 镜像程序的基线指纹 |
+| `/app/data/runtime/update-job.json` | 持久任务状态 |
+| `/app/data/runtime/update-pending` | 等待启动验证的新程序 SHA-256 |
+| `/app/data/runtime/update-rolled-back` | 启动失败或安装中断原因 |
+| `/app/data/runtime/update-recovery-required` | 无法可靠恢复时锁定后续更新，需管理员排查 |
+| `POOL_APP_UPDATE_DIR` | 默认 `/app/data/runtime`；自定义时必须仍在可写持久卷内 |
+| `POOL_APP_UPDATE_HEALTH_TIMEOUT_SECONDS` | 新程序启动健康验证的秒数，默认 `120` |
+| `SERVER_PORT` | 本机健康验证端口，默认 `8080`；自定义服务器端口时需同步设置 |
 
-CI 对安装配置执行离线测试，并用独立真实 Docker Compose 项目验证 bootstrap 成功、故意健康失败后的原配置恢复，以及镜像 ID、环境变量和数据卷文件的保留。测试容器不连接模型网络；测试结束删除的仅是随机测试项目和其测试卷。
+排查时先查看应用容器日志及后台任务结果，不要删除更新状态或备份掩盖失败原因：
+
+```bash
+docker compose ps
+docker compose logs --tail 200 sub2api
+```
+
+## 发行流程
+
+`Pool Images` 工作流接收版本和完整 commit SHA，对精确提交构建 Linux amd64 镜像，运行镜像检查并等待该提交的 CI 成功。之后发布镜像，从**同一个已测试镜像**提取 `/app/sub2api`，生成以下附件：
+
+- `sub2api-linux-amd64`：包含内嵌前端的程序。
+- `pool-update.json`：`schema_version: 1`，以及 `version`、`revision`、`platform`、`asset`、`sha256` 和 `size`。
+
+工作流先创建 `pool-vX.Y.Z.N` 草稿发行版，上传两个附件并核对大小及 GitHub 提供的摘要，全部成功后再公开为号池预发行版。上传失败的草稿不可被在线更新发现；同版本重试只能继续相同提交的草稿，已经公开的发行版禁止覆盖，应增加号池版本号。
+
+CI 同时验证入口的首次启动、同镜像持久化、新镜像覆盖、连续更新、命令行参数、健康成功、未配置状态、启动失败恢复、安装中断和停止信号。发布镜像前，真实 Docker 检查会在随机隔离容器及测试卷内，验证新入口的版本输出、独立命令兼容、实际程序带待确认标记重启后的 HTTP 就绪，以及故意损坏新程序后恢复真实备份和数据保留；测试结束仅删除该测试容器和测试卷。

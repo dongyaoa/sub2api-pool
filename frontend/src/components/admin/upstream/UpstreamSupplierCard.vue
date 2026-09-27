@@ -29,7 +29,7 @@
           <button type="button" class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-500/10" @click="emit('add-target', supplier)"><Icon name="plus" size="xs" />{{ t('upstreamCenter.addGroup') }}</button>
         </div>
       </div>
-      <div class="divide-y divide-gray-100 dark:divide-dark-700"><UpstreamGroupRow v-for="target in supplier.targets" :key="target.id" :target="target" :busy="busyIds.has(target.id)" :running="runningIds.has(target.id)" @details="(item, model, record) => emit('target-details', item, model, record)" @run="item => emit('run', item)" @toggle="item => emit('toggle', item)" @edit="item => emit('edit-target', item)" @delete="item => emit('delete-target', item)" /></div>
+      <div class="divide-y divide-gray-100 dark:divide-dark-700"><UpstreamGroupRow v-for="target in supplier.targets" :key="target.id" :target="target" :busy="busyIds.has(target.id)" :running="runningIds.has(target.id)" @details="(item, model, record) => emit('target-details', item, model, record)" @intelligence="item => emit('intelligence', item)" @run="item => emit('run', item)" @toggle="item => emit('toggle', item)" @edit="item => emit('edit-target', item)" @delete="item => emit('delete-target', item)" /></div>
       <div v-if="!supplier.targets.length" class="flex min-h-[190px] flex-col items-center justify-center px-5 py-6 text-center"><Icon name="key" size="lg" class="mb-3 text-gray-300 dark:text-dark-500" /><p class="text-sm text-gray-500 dark:text-dark-400">{{ t('upstreamCenter.noGroups') }}</p><p class="mt-1 text-xs text-gray-400 dark:text-dark-400">{{ t('upstreamCenter.noGroupsHint') }}</p><button type="button" class="mt-3 text-xs font-medium text-primary-600 dark:text-primary-400" @click="emit('add-target', supplier)">{{ t('upstreamCenter.addGroup') }}</button></div>
     </div>
   </article>
@@ -46,7 +46,7 @@ import { safeWebsite } from './safeWebsite'
 const props = defineProps<{ supplier: UpstreamSupplier; busyIds: Set<number>; runningIds: Set<number> }>()
 const website = computed(() => safeWebsite(props.supplier.website))
 const hasLocalAccounts = computed(() => props.supplier.targets.some(target => target.account_ids?.length > 0))
-const emit = defineEmits<{ edit: [supplier: UpstreamSupplier]; delete: [supplier: UpstreamSupplier]; finance: [supplier: UpstreamSupplier]; 'add-target': [supplier: UpstreamSupplier]; 'order-groups': [supplier: UpstreamSupplier]; 'target-details': [target: UpstreamTarget, model: string, record?: UpstreamHistoryRecord]; run: [target: UpstreamTarget]; toggle: [target: UpstreamTarget]; 'edit-target': [target: UpstreamTarget]; 'delete-target': [target: UpstreamTarget]; sync: [targetId: number] }>()
+const emit = defineEmits<{ edit: [supplier: UpstreamSupplier]; delete: [supplier: UpstreamSupplier]; finance: [supplier: UpstreamSupplier]; 'add-target': [supplier: UpstreamSupplier]; 'order-groups': [supplier: UpstreamSupplier]; 'target-details': [target: UpstreamTarget, model: string, record?: UpstreamHistoryRecord]; intelligence: [target: UpstreamTarget]; run: [target: UpstreamTarget]; toggle: [target: UpstreamTarget]; 'edit-target': [target: UpstreamTarget]; 'delete-target': [target: UpstreamTarget]; sync: [targetId: number] }>()
 const { t } = useI18n()
 </script>
 <style scoped>

@@ -109,10 +109,12 @@ COPY --from=backend-builder --chown=sub2api:sub2api /app/backend/resources /app/
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R sub2api:sub2api /app
+ENV POOL_APP_UPDATE_DIR=/app/data/runtime
 
 # Copy entrypoint script (fixes volume permissions then drops to sub2api)
 COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+COPY deploy/pool-app-runtime.sh /app/pool-app-runtime.sh
+RUN chmod +x /app/docker-entrypoint.sh /app/pool-app-runtime.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
 EXPOSE 8080

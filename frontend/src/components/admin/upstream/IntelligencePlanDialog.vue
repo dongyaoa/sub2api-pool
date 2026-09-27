@@ -3,7 +3,7 @@
     <form id="intelligence-plan-form" class="space-y-5" @submit.prevent="save">
       <div class="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/50"><Icon name="lightbulb" size="md" class="text-primary-500"/><div class="min-w-0 flex-1"><p class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ PELICAN_MODEL }} <span class="ml-2 rounded border border-primary-200 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:border-primary-800">{{ PELICAN_REASONING }}</span></p><p class="mt-1 text-xs text-gray-500">{{ t('intelligenceMonitor.form.fixedPrompt') }}</p></div></div>
       <div v-if="!oauthOnly"><label for="intelligence-name" class="input-label">{{ t('intelligenceMonitor.form.name') }}</label><input id="intelligence-name" v-model="form.name" class="input" required maxlength="100" :placeholder="t('intelligenceMonitor.form.namePlaceholder')"/></div>
-      <div v-if="!oauthOnly"><label class="input-label">{{ t('intelligenceMonitor.form.source') }}</label><div class="grid grid-cols-3 gap-2"><button v-for="source in sources" :key="source.value" type="button" class="flex items-center justify-center gap-2 rounded-xl border px-2 py-3 text-xs font-medium transition-colors" :class="form.source_type === source.value ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-600 dark:bg-primary-500/10 dark:text-primary-300' : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-dark-600 dark:text-dark-300'" :aria-pressed="form.source_type === source.value" @click="form.source_type = source.value"><Icon :name="source.icon" size="sm"/>{{ t(`intelligenceMonitor.source.${source.value}`) }}</button></div></div>
+      <div v-if="!oauthOnly && !lockedUpstream"><label class="input-label">{{ t('intelligenceMonitor.form.source') }}</label><div class="grid grid-cols-3 gap-2"><button v-for="source in sources" :key="source.value" type="button" class="flex items-center justify-center gap-2 rounded-xl border px-2 py-3 text-xs font-medium transition-colors" :class="form.source_type === source.value ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-600 dark:bg-primary-500/10 dark:text-primary-300' : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-dark-600 dark:text-dark-300'" :aria-pressed="form.source_type === source.value" @click="form.source_type = source.value"><Icon :name="source.icon" size="sm"/>{{ t(`intelligenceMonitor.source.${source.value}`) }}</button></div></div>
       <div v-if="oauthOnly" class="space-y-3">
         <div class="flex items-center gap-2"><span class="rounded-md bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-600 dark:bg-violet-500/10 dark:text-violet-300">OpenAI OAuth</span><span class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.nameHint') }}</span></div>
         <label class="input-label" for="intelligence-oauth-account">{{ t('intelligenceMonitor.oauth.select') }}</label>
@@ -17,6 +17,14 @@
         <p v-if="accountsLoading" role="status" class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.loading') }}</p>
         <p v-else-if="accountsReady && !oauthAccounts.length" class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.noAccounts') }}</p>
         <p id="intelligence-oauth-hint" class="text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.oauth.hint') }}</p><p v-if="accountError || accountSelectionError" role="alert" class="text-xs text-rose-500">{{ accountError || accountSelectionError }}</p>
+      </div>
+      <div v-else-if="lockedUpstream" data-testid="intelligence-locked-upstream" class="rounded-xl border border-primary-100 bg-primary-50/50 p-4 dark:border-primary-900/50 dark:bg-primary-500/5">
+        <div class="mb-3 flex items-center gap-2 text-xs font-medium text-primary-600 dark:text-primary-300"><Icon name="server" size="sm"/>{{ t('intelligenceMonitor.source.upstream') }}</div>
+        <div v-if="selectedTarget" class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0 flex-1"><p class="truncate text-xs text-gray-500 dark:text-dark-300">{{ selectedSupplier?.name }}</p><p class="mt-1 break-words text-sm font-semibold text-gray-900 dark:text-gray-100">{{ selectedTarget.name }}</p><p class="mt-1 truncate text-xs text-gray-500 dark:text-dark-400">{{ domain(selectedTarget.endpoint) }}</p></div>
+          <div class="shrink-0 text-right"><p class="text-[11px] text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.rate') }}</p><p class="mt-1 text-sm font-semibold tabular-nums" :class="selectedTarget.balance?.billing?.stale ? 'text-amber-600 dark:text-amber-400' : 'text-primary-600 dark:text-primary-300'">{{ upstreamRate(selectedTarget.id) }}</p><p class="mt-1 text-[10px] text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.autoRate') }}</p></div>
+        </div>
+        <p v-else role="status" class="text-sm text-amber-600 dark:text-amber-400">{{ t('intelligenceMonitor.sourceMissing') }}</p>
       </div>
       <div v-else-if="form.source_type === 'upstream'">
         <label for="intelligence-upstream" class="input-label">{{ t('intelligenceMonitor.form.selectUpstream') }}</label>
@@ -71,12 +79,14 @@ import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import { getAll } from '@/api/admin/groups'
 import type { AdminGroup, AccountListItem } from '@/types'
 import { list as listAccounts } from '@/api/admin/accounts'
-import { extractApiErrorMessage, extractApiErrorMetadata } from '@/utils/apiError'
+import { extractApiErrorCode, extractApiErrorMessage, extractApiErrorMetadata } from '@/utils/apiError'
 import { intelligenceRateLabel } from './intelligencePreview'
 import { domain } from './format'
-const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean }>()
-const emit = defineEmits<{ close: []; saved: [] }>()
+const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; upstreamTargetId?: number }>()
+const emit = defineEmits<{ close: []; saved: [plan?: IntelligencePlan] }>()
 const { t } = useI18n()
+const lockedUpstream = computed(() => props.upstreamTargetId !== undefined)
+const oauthOnly = computed(() => Boolean(props.oauthOnly && !lockedUpstream.value))
 const sources: {value:IntelligenceSource;icon:'server'|'link'|'grid'}[] = [{ value:'upstream',icon:'server' },{ value:'local_group',icon:'grid' },{ value:'external',icon:'link' }]
 const intervals = [300,900,1800,3600,7200,21600,43200,86400]
 const timeoutOptions = computed(() => {
@@ -87,11 +97,12 @@ const timeoutOptions = computed(() => {
     : presets
 })
 const protocolOptions = [{ value: 'responses', label: 'Responses' }, { value: 'chat_completions', label: 'Chat Completions' }]
-const defaults = (): IntelligencePlanInput => ({ name:'',source_type:props.oauthOnly?'openai_oauth':'upstream',account_id:null,endpoint:'',api_key:'',upstream_target_id:null,group_id:null,supplier_note:'',group_note:'',rate_note:'',notes:'',api_mode:'responses',enabled:false,interval_seconds:300,timeout_seconds:600 })
+const defaults = (): IntelligencePlanInput => ({ name:'',source_type:oauthOnly.value?'openai_oauth':'upstream',account_id:null,endpoint:'',api_key:'',upstream_target_id:null,group_id:null,supplier_note:'',group_note:'',rate_note:'',notes:'',api_mode:'responses',enabled:true,interval_seconds:300,timeout_seconds:600 })
 const form = reactive<IntelligencePlanInput>(defaults()), groups = ref<AdminGroup[]>([]), saving = ref(false), error = ref(''), groupError = ref(''), groupsLoading = ref(false)
 const intervalChoice = ref<number | 'custom'>(300), customInterval = ref('300'), intervalError = ref('')
 const eligibleSuppliers = computed(() => (props.overview?.suppliers || []).map(supplier => ({ ...supplier, targets: supplier.targets.filter(target => target.provider === 'openai') })).filter(supplier => supplier.targets.length))
 const selectedTarget = computed(() => eligibleSuppliers.value.flatMap(supplier => supplier.targets).find(target => target.id === form.upstream_target_id))
+const selectedSupplier = computed(() => eligibleSuppliers.value.find(supplier => supplier.targets.some(target => target.id === form.upstream_target_id)))
 function upstreamRate(id:number) { const billing = props.overview?.suppliers.flatMap(supplier => supplier.targets).find(target=>target.id===id)?.balance?.billing; return intelligenceRateLabel(billing as unknown as Record<string,unknown>) || t('intelligenceMonitor.rateUnknown') }
 const upstreamOptions = computed<SelectOption[]>(() => eligibleSuppliers.value.flatMap(supplier => [
   { value: `supplier-${supplier.id}`, label: supplier.name, kind: 'group', disabled: true, website: supplier.website ? domain(supplier.website) : '' },
@@ -163,14 +174,24 @@ async function loadAccounts() {
 let generation = 0
 function cancelLoading() { generation++; accountController?.abort(); accountsLoading.value = false; groupsLoading.value = false }
 function close() { if (!saving.value) { cancelLoading(); emit('close') } }
-watch(() => props.show, async show => {
-  const current = ++generation; if (!show) { cancelLoading(); return }
+watch([() => props.show, () => props.upstreamTargetId, () => props.plan?.id], async ([show]) => {
+  cancelLoading()
+  if (!show) return
+  const current = generation
   Object.assign(form, defaults(), props.plan ? { ...props.plan, api_key:'' } : {})
+  if (lockedUpstream.value) {
+    form.source_type = 'upstream'
+    form.upstream_target_id = props.upstreamTargetId
+    form.account_id = null
+    form.group_id = null
+    if (!props.plan) form.name = selectedTarget.value?.name || ''
+  }
   intervalChoice.value = intervals.includes(form.interval_seconds) ? form.interval_seconds : 'custom'
   customInterval.value = String(form.interval_seconds)
   error.value = ''; groupError.value = ''; accountError.value = ''; accountSelectionError.value = ''; intervalError.value = ''
   oauthAccounts.value = []; accountsReady.value = false; groups.value = []
-  if (props.oauthOnly) { await loadAccounts(); return }
+  if (lockedUpstream.value) return
+  if (oauthOnly.value) { await loadAccounts(); return }
   groupsLoading.value = true
   try { const result = await getAll(); if (current === generation) groups.value = result.filter(group => ['openai','composite'].includes(group.platform)) }
   catch { if (current === generation) groupError.value = t('intelligenceMonitor.form.loadGroupsFailed') }
@@ -180,10 +201,15 @@ async function save() {
   if (saving.value) return
   error.value = ''
   intervalError.value = ''
-  if (props.oauthOnly && (accountsLoading.value || !accountsReady.value)) return
-  if (!props.oauthOnly && !form.name.trim()) { error.value=t('intelligenceMonitor.form.requiredName'); return }
-  if ((props.oauthOnly && !form.account_id) || (form.source_type==='upstream' && !form.upstream_target_id) || (form.source_type==='local_group' && !form.group_id)) { error.value=t('intelligenceMonitor.form.requiredSource'); return }
-  if (props.oauthOnly && (!selectedAccount.value || !eligibleAccount(selectedAccount.value))) { form.account_id = null; form.name = ''; accountSelectionError.value = t('intelligenceMonitor.oauth.unavailable'); return }
+  if (lockedUpstream.value) {
+    form.source_type = 'upstream'
+    form.upstream_target_id = props.upstreamTargetId
+    if (!selectedTarget.value) { error.value = t('intelligenceMonitor.sourceMissing'); return }
+  }
+  if (oauthOnly.value && (accountsLoading.value || !accountsReady.value)) return
+  if (!oauthOnly.value && !form.name.trim()) { error.value=t('intelligenceMonitor.form.requiredName'); return }
+  if ((oauthOnly.value && !form.account_id) || (form.source_type==='upstream' && !form.upstream_target_id) || (form.source_type==='local_group' && !form.group_id)) { error.value=t('intelligenceMonitor.form.requiredSource'); return }
+  if (oauthOnly.value && (!selectedAccount.value || !eligibleAccount(selectedAccount.value))) { form.account_id = null; form.name = ''; accountSelectionError.value = t('intelligenceMonitor.oauth.unavailable'); return }
   if (intervalChoice.value === 'custom') {
     const text = customInterval.value.trim()
     const seconds = Number(text)
@@ -197,17 +223,19 @@ async function save() {
     if (!form.api_key?.trim() && (!props.plan || props.plan.source_type !== 'external')) { error.value=t('intelligenceMonitor.form.requiredKey'); return }
   }
   saving.value=true
-  const input: IntelligencePlanInput = { name:props.oauthOnly?'':form.name.trim(),source_type:props.oauthOnly?'openai_oauth':form.source_type,account_id:props.oauthOnly?form.account_id:null,endpoint:form.source_type==='external' ? form.endpoint?.trim() : undefined,api_key:form.source_type==='external' ? form.api_key?.trim() || undefined : undefined,upstream_target_id:form.source_type==='upstream' ? form.upstream_target_id : null,group_id:form.source_type==='local_group' ? form.group_id : null,supplier_note:form.supplier_note.trim(),group_note:form.group_note.trim(),rate_note:form.rate_note.trim(),notes:form.notes.trim(),api_mode:props.oauthOnly?'responses':form.api_mode,enabled:form.enabled,interval_seconds:form.interval_seconds,timeout_seconds:form.timeout_seconds }
-  try { if (props.plan) await intelligenceMonitorAPI.update(props.plan.id,input); else await intelligenceMonitorAPI.create(input); emit('saved'); emit('close') }
+  const input: IntelligencePlanInput = { name:oauthOnly.value?'':form.name.trim(),source_type:oauthOnly.value?'openai_oauth':form.source_type,account_id:oauthOnly.value?form.account_id:null,endpoint:form.source_type==='external' ? form.endpoint?.trim() : undefined,api_key:form.source_type==='external' ? form.api_key?.trim() || undefined : undefined,upstream_target_id:form.source_type==='upstream' ? form.upstream_target_id : null,group_id:form.source_type==='local_group' ? form.group_id : null,supplier_note:form.supplier_note.trim(),group_note:form.group_note.trim(),rate_note:form.rate_note.trim(),notes:form.notes.trim(),api_mode:oauthOnly.value?'responses':form.api_mode,enabled:form.enabled,interval_seconds:form.interval_seconds,timeout_seconds:form.timeout_seconds }
+  try { const saved = props.plan ? await intelligenceMonitorAPI.update(props.plan.id,input) : await intelligenceMonitorAPI.create(input); emit('saved', saved); emit('close') }
   catch (err) {
     const detail = extractApiErrorMetadata(err)?.detail
     const detailText = typeof detail === 'string' ? detail.trim() : ''
-    error.value = detailText === 'the selected account must support the fixed gpt-6-astra model without remapping'
+    error.value = extractApiErrorCode(err) === 'INTELLIGENCE_UPSTREAM_PLAN_EXISTS'
+      ? t('intelligenceMonitor.groupMonitor.alreadyExists')
+      : detailText === 'the selected account must support the fixed gpt-6-astra model without remapping'
       ? t('intelligenceMonitor.oauth.fixedModelRequired')
       : detailText === 'the selected OAuth account is disabled, paused, expired, rate limited or cooling down'
         ? t('intelligenceMonitor.oauth.unavailable')
       : detailText || extractApiErrorMessage(err,t('intelligenceMonitor.saveFailed'))
-    if (props.oauthOnly && extractApiErrorMetadata(err)?.field === 'account_id') void loadAccounts()
+    if (oauthOnly.value && extractApiErrorMetadata(err)?.field === 'account_id') void loadAccounts()
   }
   finally { saving.value=false }
 }

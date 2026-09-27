@@ -13,6 +13,8 @@ describe('supplier key-group ordering entry', () => {
     expect(view.emitted('order-groups')).toEqual([[supplier]])
     expect(view.findAllComponents({name:'UpstreamGroupRow'}).map(item=>item.props('target').id)).toEqual([12,7])
     expect(view.emitted('run')).toBeUndefined()
+    view.findAllComponents({name:'UpstreamGroupRow'})[1].vm.$emit('intelligence',supplier.targets[1])
+    expect(view.emitted('intelligence')).toEqual([[supplier.targets[1]]])
     await view.setProps({supplier:{...supplier,targets:supplier.targets.slice(0,1)}})
     expect(view.findAll('button').some(item=>item.text()==='upstreamCenter.order.groups')).toBe(false)
     view.unmount()

@@ -75,8 +75,8 @@ export const intelligenceMonitorAPI = {
   async reorder(input: IntelligenceOrderInput): Promise<void> {
     await apiClient.put(`${base}/plans/order`, input)
   },
-  async plans(signal?: AbortSignal): Promise<{ items: IntelligencePlan[] }> {
-    return (await apiClient.get(`${base}/plans`, { signal })).data
+  async plans(signal?: AbortSignal, upstreamTargetID?: number): Promise<{ items: IntelligencePlan[] }> {
+    return (await apiClient.get(`${base}/plans`, { signal, ...(upstreamTargetID === undefined ? {} : { params: { upstream_target_id: upstreamTargetID } }) })).data
   },
   async create(input: IntelligencePlanInput): Promise<IntelligencePlan> {
     return (await apiClient.post(`${base}/plans`, input)).data

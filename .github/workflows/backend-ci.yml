@@ -17,6 +17,7 @@ jobs:
           /bin/bash -n deploy/apple-container.sh
           /bin/bash -n deploy/install-pool-updater.sh
           /bin/bash -n deploy/tests/pool-updater-smoke.sh
+          /bin/bash -n deploy/tests/pool-app-docker-test.sh
           PYTHONDONTWRITEBYTECODE=1 python3 deploy/tests/pool-updater-config-test.py
           /bin/bash deploy/tests/apple-container-test.sh
           /bin/sh deploy/tests/docker-compose-security-test.sh
@@ -29,6 +30,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+      - name: Test persistent application runtime
+        run: |
+          /bin/sh deploy/tests/pool-app-runtime-test.sh
+          node --test deploy/tests/pool-app-release-test.mjs
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod

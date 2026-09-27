@@ -19,15 +19,17 @@ export interface VersionInfo {
   cached?: boolean
   warning?: string
   build_type: string // "source" for manual builds, "release" for CI builds
-  update_method?: 'container'
+  update_method?: 'binary' | 'container'
   update_available?: boolean
   update_unavailable_reason?: string
   current_revision?: string
   latest_revision?: string
   image_digest?: string
+  update_digest?: string
 }
 
-export type UpdateJobState = 'queued' | 'pulling' | 'recreating' | 'checking' | 'succeeded' | 'failed' | 'rolled_back'
+export type UpdateJobState = 'queued' | 'downloading' | 'verifying' | 'installing' | 'restarting'
+  | 'pulling' | 'recreating' | 'checking' | 'succeeded' | 'failed' | 'rolled_back'
 
 export interface UpdateJob {
   id: string
@@ -109,7 +111,7 @@ export async function getRollbackVersions(): Promise<{ versions: RollbackVersion
 const UPDATE_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
 
 /**
- * Submit a pinned Pool container update. The backend returns immediately;
+ * Submit a pinned Pool program or legacy container update. The backend returns immediately;
  * monitor getUpdateStatus instead of resubmitting when the connection drops.
  * The optional parameter preserves the legacy export signature.
  */

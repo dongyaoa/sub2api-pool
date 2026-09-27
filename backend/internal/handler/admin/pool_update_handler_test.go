@@ -108,6 +108,7 @@ func TestPoolImageUpdateStatusAndVersion(t *testing.T) {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 		if path == "/status" {
 			require.Contains(t, rec.Body.String(), `"state":"pulling"`)
 		} else {

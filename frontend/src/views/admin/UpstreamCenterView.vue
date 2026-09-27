@@ -35,7 +35,7 @@
           </div>
           <div v-if="!overview && loading" class="space-y-3"><div v-for="n in 2" :key="n" class="card grid animate-pulse gap-6 p-5 lg:grid-cols-[220px_1fr]"><div class="h-28 rounded-lg bg-gray-100 dark:bg-dark-700"></div><div class="space-y-3"><div class="h-12 rounded-lg bg-gray-100 dark:bg-dark-700"></div><div class="h-12 rounded-lg bg-gray-100 dark:bg-dark-700"></div></div></div></div>
           <div v-else-if="overview" :id="tab === 'suppliers' ? 'supplier-results' : undefined" :role="tab === 'suppliers' ? 'tabpanel' : undefined" :aria-labelledby="tab === 'suppliers' ? `supplier-filter-${selectedSupplierId ?? 'all'}` : undefined">
-            <div v-if="tab === 'suppliers' && filteredSuppliers.length" class="space-y-4"><UpstreamSupplierCard v-for="supplier in filteredSuppliers" :key="supplier.id" :supplier="supplier" :busy-ids="busyIds" :running-ids="runningIds" @edit="openSupplier" @delete="confirmSupplierDelete" @add-target="supplier => openTarget(null, supplier)" @order-groups="openGroupOrder" @edit-target="item => openTarget(item)" @delete-target="confirmTargetDelete" @target-details="showTargetDetails" @finance="showSupplierDetails" @run="runTarget" @toggle="toggleTarget" @sync="syncBalance" /></div>
+            <div v-if="tab === 'suppliers' && filteredSuppliers.length" class="space-y-4"><UpstreamSupplierCard v-for="supplier in filteredSuppliers" :key="supplier.id" :supplier="supplier" :busy-ids="busyIds" :running-ids="runningIds" @edit="openSupplier" @delete="confirmSupplierDelete" @add-target="supplier => openTarget(null, supplier)" @order-groups="openGroupOrder" @edit-target="item => openTarget(item)" @delete-target="confirmTargetDelete" @intelligence="openGroupIntelligence" @target-details="showTargetDetails" @finance="showSupplierDetails" @run="runTarget" @toggle="toggleTarget" @sync="syncBalance" /></div>
             <div v-else-if="tab === 'monitors' && filteredMonitors.length" class="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3"><UpstreamTargetCard v-for="target in filteredMonitors" :key="target.id" :target="target" :busy="busyIds.has(target.id)" :running="runningIds.has(target.id)" @edit="item => openTarget(item)" @delete="confirmTargetDelete" @details="showTargetDetails" @run="runTarget" @toggle="toggleTarget" /></div>
             <EmptyState v-else-if="search" class="card py-12" :title="t('upstreamCenter.noMatches')" />
             <EmptyState v-else class="card py-12" :title="t(tab === 'suppliers' ? 'upstreamCenter.emptySuppliers' : 'upstreamCenter.emptyMonitors')" :description="t(tab === 'suppliers' ? 'upstreamCenter.emptySuppliersHint' : 'upstreamCenter.emptyMonitorsHint')" :action-text="t(tab === 'suppliers' ? 'upstreamCenter.addSupplier' : 'upstreamCenter.addMonitor')" @action="tab === 'suppliers' ? openSupplier() : openTarget()"><template #icon><Icon :name="tab === 'suppliers' ? 'server' : 'chart'" size="xl" class="text-primary-500" /></template></EmptyState>
@@ -45,6 +45,7 @@
         </template>
       </div>
     </div>
+    <UpstreamIntelligenceDialog v-if="intelligenceTarget" :key="intelligenceTarget.id" :target="intelligenceTarget" :overview="overview" @close="intelligenceTargetId = null" @changed="storageRevision++" @refresh-overview="reload()" />
     <UpstreamOrderDialog :show="!!ordering" :scope="ordering?.scope || 'suppliers'" :supplier-id="ordering?.supplierId" :supplier-name="ordering?.supplierName" @close="ordering = null" @saved="orderSaved" />
     <UpstreamSupplierDialog :show="supplierDialog" :supplier="editingSupplier" @close="supplierDialog = false" @saved="saved" @changed="reload()" />
     <UpstreamTargetDialog :show="targetDialog" :target="editingTarget" :supplier="targetSupplier" @close="targetDialog = false" @saved="saved" />
@@ -54,7 +55,7 @@
   </AppLayout>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -74,6 +75,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { useAppStore } from '@/stores/app'
 import { useMonitorRefresh } from '@/composables/useMonitorRefresh'
 import { reconcileMonitorData } from '@/components/admin/upstream/monitorReconcile'
+const UpstreamIntelligenceDialog = defineAsyncComponent(() => import('@/components/admin/upstream/UpstreamIntelligenceDialog.vue'))
 const { t } = useI18n()
 const app = useAppStore()
 const tabs = ['suppliers', 'monitors', 'intelligence', 'oauth'] as const
@@ -108,6 +110,12 @@ const storageDialog = ref(false), storageRevision = ref(0)
 function storageChanged() { storageRevision.value++; void reload() }
 const busyIds = ref(new Set<number>()), runningIds = ref(new Set<number>())
 const allGroups = computed(() => overview.value?.suppliers.flatMap(supplier => supplier.targets) || [])
+const intelligenceTargetId = ref<number | null>(null)
+const intelligenceTarget = computed(() => tab.value === 'suppliers' ? allGroups.value.find(target => target.id === intelligenceTargetId.value && target.provider === 'openai') || null : null)
+function openGroupIntelligence(target: UpstreamTarget) { if (target.provider === 'openai') intelligenceTargetId.value = target.id }
+watch([tab, allGroups], () => {
+  if (tab.value !== 'suppliers' || !allGroups.value.some(target => target.id === intelligenceTargetId.value && target.provider === 'openai')) intelligenceTargetId.value = null
+})
 const allTargets = computed(() => [...allGroups.value, ...(overview.value?.monitors || [])])
 const match = (value: string) => value.toLowerCase().includes(search.value.toLowerCase().trim())
 const matchesTarget = (target: UpstreamTarget) => match(`${target.name} ${target.endpoint} ${target.models.join(' ')}`)

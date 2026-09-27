@@ -1,36 +1,50 @@
 <template>
-  <BaseDialog :show="show" :title="plan?.name || t('intelligenceMonitor.history')" width="full" @close="emit('close')">
-    <div class="grid min-h-[520px] gap-5 lg:grid-cols-[225px_minmax(0,1fr)]">
-      <aside class="min-w-0">
-        <div class="mb-3 flex items-center justify-between">
+  <BaseDialog :show="show" :title="plan?.name || t('intelligenceMonitor.history')" width="full" motion="fade" @close="emit('close')">
+    <div class="history-layout grid min-h-0 gap-5 lg:grid-cols-[225px_minmax(0,1fr)]" data-testid="history-layout">
+      <aside class="flex min-h-0 min-w-0 flex-col">
+        <div class="mb-3 flex shrink-0 items-center justify-between">
           <p class="text-xs font-medium text-gray-500">{{ t('intelligenceMonitor.times', { count: total }) }}</p>
           <button type="button" class="rounded-md p-1 text-gray-400 hover:text-primary-600" :title="t('intelligenceMonitor.refresh')" @click="loadRuns"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" /></button>
         </div>
-        <div class="flex max-h-[580px] gap-2 overflow-auto lg:flex-col">
+        <div class="history-run-list flex min-h-0 gap-2 overflow-auto overscroll-contain lg:flex-1 lg:flex-col">
           <button v-for="run in runs" :key="run.id" type="button" class="min-w-[190px] shrink-0 rounded-xl border p-3 text-left transition-colors lg:min-w-0" :class="selectedID === run.id ? 'border-primary-300 bg-primary-50/60 dark:border-primary-700 dark:bg-primary-500/10' : 'border-gray-100 hover:border-gray-300 dark:border-dark-700 dark:hover:border-dark-500'" @click="select(run.id)">
             <div class="flex items-center justify-between"><span class="font-mono text-[10px] text-gray-400">#{{ run.id }}</span><span class="text-[10px] font-medium" :class="run.status === 'failed' ? 'text-rose-600' : run.status === 'succeeded' ? 'text-emerald-600' : 'text-amber-600'">{{ t(`intelligenceMonitor.status.${run.status}`) }}</span></div>
             <p class="mt-1.5 text-xs font-medium text-gray-800 dark:text-gray-200">{{ dateTime(run.started_at || run.created_at) }}</p>
             <p class="mt-1 truncate text-[10px] text-gray-500">{{ run.model }} · {{ run.reasoning_effort }}</p>
           </button>
         </div>
+        <div class="history-pagination-slot shrink-0">
         <nav v-if="pageCount > 1" class="mt-3 grid grid-cols-[32px_minmax(0,1fr)_32px] items-center gap-2 border-t border-gray-100 pt-3 dark:border-dark-700" :aria-label="t('intelligenceMonitor.history')" data-testid="history-pagination">
           <button type="button" class="history-page-button" :disabled="loading || page <= 1" :aria-label="t('pagination.previous')" :title="t('pagination.previous')" data-testid="previous-page" @click="changePage(page - 1)"><Icon name="chevronLeft" size="sm" /></button>
           <p class="whitespace-nowrap text-center text-xs tabular-nums text-gray-400" :aria-label="t('pagination.pageOf', { page, total: pageCount })"><span class="font-semibold text-gray-700 dark:text-gray-200" aria-current="page" data-testid="page">{{ page }}</span><span class="mx-1.5">/</span>{{ pageCount }}</p>
           <button type="button" class="history-page-button" :disabled="loading || page >= pageCount" :aria-label="t('pagination.next')" :title="t('pagination.next')" data-testid="next-page" @click="changePage(page + 1)"><Icon name="chevronRight" size="sm" /></button>
         </nav>
+        </div>
       </aside>
-      <section class="min-w-0">
-        <p v-if="error" role="alert" class="mb-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-500/10">{{ error }}</p>
-        <div v-if="detailLoading" class="flex h-[420px] items-center justify-center"><Icon name="refresh" class="animate-spin text-primary-500" size="lg"/></div>
-        <template v-else-if="detail">
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-3"><div class="flex rounded-lg bg-gray-100 p-1 dark:bg-dark-900"><button v-for="mode in modes" :key="mode" class="rounded-md px-3 py-1.5 text-xs font-medium" :class="view===mode ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-gray-100' : 'text-gray-500'" @click="view=mode">{{ t(`intelligenceMonitor.${mode}`) }}</button></div><button v-if="detail.html" type="button" class="btn btn-secondary btn-sm" @click="download"><Icon name="download" size="sm" class="mr-1.5"/>{{ t('intelligenceMonitor.download') }}</button></div>
-          <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700"><IntelligenceArtifactPreview v-if="view==='preview'" :run="detail" large/><pre v-else class="max-h-[520px] min-h-[420px] overflow-auto bg-slate-950 p-5 font-mono text-xs leading-6 text-slate-200">{{ view==='sourceCode' ? detail.html || t('intelligenceMonitor.noHTML') : detail.raw_text || detail.error || '—' }}</pre></div>
-          <div class="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3"><div v-for="item in metadata" :key="item.label" class="min-w-0"><p class="text-[10px] text-gray-400 dark:text-dark-400">{{ t(`intelligenceMonitor.${item.label}`) }}</p><p class="mt-1 break-words text-xs font-medium text-gray-700 dark:text-gray-200">{{ item.value }}</p></div></div>
-          <p v-if="detail.error" class="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">{{ detail.error }}</p>
-          <p v-if="runNotes" class="mt-3 text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.notes') }}：{{ runNotes }}</p>
-          <details class="mt-4 border-t border-gray-100 pt-3 dark:border-dark-700"><summary class="cursor-pointer text-[11px] text-gray-500">{{ t('intelligenceMonitor.prompt') }}</summary><p class="mt-2 text-xs leading-6 text-gray-600 dark:text-dark-300">{{ detail.prompt }}</p></details>
-        </template>
-        <div v-else-if="!detailLoading" class="flex min-h-[420px] items-center justify-center rounded-xl border border-dashed border-gray-200 text-sm text-gray-400 dark:border-dark-700">{{ t('intelligenceMonitor.selectRun') }}</div>
+      <section class="flex min-h-0 min-w-0 flex-col">
+        <div class="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
+          <div class="flex rounded-lg bg-gray-100 p-1 dark:bg-dark-900">
+            <button v-for="mode in modes" :key="mode" type="button" class="rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50" :class="view===mode ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-gray-100' : 'text-gray-500'" :disabled="!detail || artworkLoading" @click="view=mode">{{ t(`intelligenceMonitor.${mode}`) }}</button>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm disabled:opacity-40" :disabled="!detail?.html || artworkLoading" @click="download"><Icon name="download" size="sm" class="mr-1.5"/>{{ t('intelligenceMonitor.download') }}</button>
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]" data-testid="history-detail-scroll">
+          <div class="history-artwork-frame overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700" :aria-busy="artworkLoading" data-testid="history-artwork-frame">
+            <div v-if="artworkLoading" class="flex h-full items-center justify-center bg-slate-50 dark:bg-dark-900" role="status" :aria-label="t('intelligenceMonitor.loadingPreview')" data-testid="history-artwork-loading"><Icon name="refresh" class="animate-spin text-primary-500 motion-reduce:animate-none" size="lg"/></div>
+            <template v-else-if="detail">
+              <IntelligenceArtifactPreview v-if="view==='preview'" :run="detail" large class="h-full !aspect-auto"/>
+              <pre v-else class="h-full overflow-auto bg-slate-950 p-5 font-mono text-xs leading-6 text-slate-200">{{ view==='sourceCode' ? detail.html || t('intelligenceMonitor.noHTML') : detail.raw_text || detail.error || '—' }}</pre>
+            </template>
+            <div v-else class="flex h-full items-center justify-center text-sm text-gray-400">{{ t('intelligenceMonitor.selectRun') }}</div>
+          </div>
+          <p v-if="error" role="alert" class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-500/10">{{ error }}</p>
+          <template v-if="detail">
+            <div class="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3"><div v-for="item in metadata" :key="item.label" class="min-w-0"><p class="text-[10px] text-gray-400 dark:text-dark-400">{{ t(`intelligenceMonitor.${item.label}`) }}</p><p class="mt-1 break-words text-xs font-medium text-gray-700 dark:text-gray-200">{{ item.value }}</p></div></div>
+            <p v-if="detail.error" class="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">{{ detail.error }}</p>
+            <p v-if="runNotes" class="mt-3 text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.notes') }}：{{ runNotes }}</p>
+            <details class="mt-4 border-t border-gray-100 pt-3 dark:border-dark-700"><summary class="cursor-pointer text-[11px] text-gray-500">{{ t('intelligenceMonitor.prompt') }}</summary><p class="mt-2 text-xs leading-6 text-gray-600 dark:text-dark-300">{{ detail.prompt }}</p></details>
+          </template>
+        </div>
       </section>
     </div>
   </BaseDialog>
@@ -52,6 +66,7 @@ const {t}=useI18n()
 const runs=ref<IntelligenceRun[]>([]),total=ref(0),page=ref(1),selectedID=ref<number|null>(null),detail=ref<IntelligenceRun|null>(null),loading=ref(false),detailLoading=ref(false),error=ref('')
 const modes=['preview','sourceCode','response'] as const
 const view=ref<typeof modes[number]>('preview')
+const artworkLoading=computed(()=>detailLoading.value||(loading.value&&!detail.value))
 const runNotes=computed(()=>intelligenceNotes(detail.value?.notes_snapshot))
 const pageCount=computed(()=>Math.max(1,Math.ceil(total.value/12)))
 const metadata=computed(()=>{
@@ -98,5 +113,24 @@ watch([()=>props.show,()=>props.plan?.id,()=>props.initialRunId],()=>{listContro
 onBeforeUnmount(()=>{listController?.abort();detailController?.abort();clearInterval(timer)})
 </script>
 <style scoped>
+.history-layout {
+  height: min(760px, calc(90vh - 112px));
+  height: min(760px, calc(90dvh - 112px));
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.history-run-list { min-height: 102px; max-height: 112px; }
+.history-pagination-slot { min-height: 57px; }
+/* Loading, preview and code share one canvas; metadata never changes its width. */
+.history-artwork-frame {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  max-height: min(520px, calc(90vh - 184px));
+  max-height: min(520px, calc(90dvh - 184px));
+}
+@media (min-width: 1024px) {
+  .history-layout { grid-template-rows: minmax(0, 1fr); }
+  .history-run-list { min-height: 0; max-height: none; scrollbar-gutter: stable; }
+  .history-pagination-slot { min-height: 0; }
+}
 .history-page-button { @apply flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-dark-600 dark:bg-dark-800 dark:text-dark-300 dark:hover:border-primary-600 dark:hover:bg-primary-500/10 dark:hover:text-primary-400; }
 </style>

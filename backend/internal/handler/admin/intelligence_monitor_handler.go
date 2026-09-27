@@ -18,7 +18,22 @@ func NewIntelligenceMonitorHandler(svc *service.IntelligenceMonitorService) *Int
 }
 func (h *IntelligenceMonitorHandler) ListPlans(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	items, err := h.svc.ListPlans(c.Request.Context())
+	var items []*service.IntelligenceMonitorPlan
+	var err error
+	if values, present := c.Request.URL.Query()["upstream_target_id"]; present {
+		if len(values) != 1 {
+			response.BadRequest(c, "invalid upstream target ID")
+			return
+		}
+		id, parseErr := strconv.ParseInt(values[0], 10, 64)
+		if parseErr != nil || id <= 0 {
+			response.BadRequest(c, "invalid upstream target ID")
+			return
+		}
+		items, err = h.svc.ListPlansForUpstream(c.Request.Context(), id)
+	} else {
+		items, err = h.svc.ListPlans(c.Request.Context())
+	}
 	if response.ErrorFrom(c, err) {
 		return
 	}

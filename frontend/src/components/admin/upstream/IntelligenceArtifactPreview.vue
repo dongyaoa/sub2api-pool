@@ -110,8 +110,16 @@ const runIdentity = computed(() => {
   return run ? `${run.id}:${run.status}:${run.finished_at || ''}` : ''
 })
 function measureViewport() {
-  if (!container.value) return
-  const { width, height } = container.value.getBoundingClientRect()
+  const element = container.value
+  if (!element || element.clientWidth <= 0 || element.clientHeight <= 0) return
+  // Bounding rectangles include ancestor transforms (such as dialog entrance
+  // scaling); ResizeObserver reports the untransformed layout instead. Mixing
+  // those measurements applies the entrance scale twice, then zooms the art
+  // again on the first observer callback. This padding-free viewport's resolved
+  // CSS size also retains the fractional pixels supplied by contentRect.
+  const style = window.getComputedStyle(element)
+  const width = style.width.endsWith('px') ? Number.parseFloat(style.width) : element.clientWidth
+  const height = style.height.endsWith('px') ? Number.parseFloat(style.height) : element.clientHeight
   updateViewport(width, height)
 }
 function updateViewport(width: number, height: number) {

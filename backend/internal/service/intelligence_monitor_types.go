@@ -21,9 +21,11 @@ const IntelligenceMonitorMaxTimeoutSeconds = 900
 const IntelligenceMonitorLeaseGraceSeconds = 180
 
 var (
-	ErrIntelligenceNotFound = infraerrors.NotFound("INTELLIGENCE_MONITOR_NOT_FOUND", "intelligence monitoring plan or run not found")
-	ErrIntelligenceInvalid  = infraerrors.BadRequest("INTELLIGENCE_MONITOR_INVALID", "invalid intelligence monitoring configuration")
-	ErrIntelligenceBusy     = infraerrors.Conflict("INTELLIGENCE_MONITOR_BUSY", "this plan has a pending or running generation; wait for completion")
+	ErrIntelligenceNotFound           = infraerrors.NotFound("INTELLIGENCE_MONITOR_NOT_FOUND", "intelligence monitoring plan or run not found")
+	ErrIntelligenceInvalid            = infraerrors.BadRequest("INTELLIGENCE_MONITOR_INVALID", "invalid intelligence monitoring configuration")
+	ErrIntelligenceBusy               = infraerrors.Conflict("INTELLIGENCE_MONITOR_BUSY", "this plan has a pending or running generation; wait for completion")
+	ErrIntelligenceUpstreamPlanExists = infraerrors.Conflict("INTELLIGENCE_UPSTREAM_PLAN_EXISTS", "this upstream group already has an intelligence monitoring plan")
+	ErrIntelligenceFilterUnavailable  = infraerrors.ServiceUnavailable("INTELLIGENCE_MONITOR_FILTER_UNAVAILABLE", "filtered intelligence monitoring is unavailable")
 )
 
 type IntelligenceMonitorPlan struct {
@@ -130,6 +132,10 @@ type IntelligenceMonitorPlanListData struct {
 
 type IntelligenceMonitorListRepository interface {
 	LoadPlanListData(context.Context, []int64) (*IntelligenceMonitorPlanListData, error)
+}
+
+type IntelligenceMonitorUpstreamListRepository interface {
+	ListPlansForUpstream(context.Context, int64) ([]*IntelligenceMonitorPlan, error)
 }
 
 type IntelligenceMonitorRepository interface {

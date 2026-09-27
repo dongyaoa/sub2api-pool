@@ -8,17 +8,17 @@ const mocks = vi.hoisted(() => ({ overview: vi.fn(), showSuccess: vi.fn(), delet
 vi.mock('@/api/admin/upstreamCenter', () => ({ upstreamCenterAPI: { overview: mocks.overview, deleteSupplier: mocks.deleteSupplier, deleteTarget: mocks.deleteTarget, purge: mocks.purge } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: mocks.showSuccess }) }))
 vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
-const supplierCard = defineComponent({ props: ['supplier'], emits: ['order-groups', 'delete'], template: '<article data-supplier><h2>{{ supplier.name }}</h2><button data-group-order @click="$emit(\'order-groups\',supplier)">groups</button></article>' })
+const supplierCard = defineComponent({ props: ['supplier'], emits: ['order-groups', 'delete', 'intelligence'], template: '<article data-supplier><h2>{{ supplier.name }}</h2><button data-group-order @click="$emit(\'order-groups\',supplier)">groups</button></article>' })
 const targetCard = defineComponent({ props: ['target'], template: '<article data-monitor>{{ target.name }}</article>' })
 const orderDialog = defineComponent({ name: 'UpstreamOrderDialog', props: ['show','scope','supplierId','supplierName'], emits: ['close','saved'], template: '<div v-if="show" data-order-dialog><button data-cancel-order @click="$emit(\'close\')">cancel</button><button data-save-order @click="$emit(\'saved\')">save</button></div>' })
-const target = (id: number, name: string) => ({ id, name, endpoint: 'https://example.com', models: ['model'], statistics: [] } as unknown as UpstreamTarget)
+const target = (id: number, name: string) => ({ id, name, endpoint: 'https://example.com', provider: 'openai', models: ['model'], statistics: [] } as unknown as UpstreamTarget)
 const supplier = (id: number, name: string) => ({ id, name, website: 'https://example.com', targets: [target(id*10,'Group A'),target(id*10+1,'Group B')] } as unknown as UpstreamSupplier)
 const overview = (): UpstreamOverview => ({ suppliers: [supplier(1,'Alpha'),supplier(2,'Beta')], monitors: [target(3,'Monitor A'),target(4,'Monitor B')], summary: {} } as UpstreamOverview)
 let wrapper: VueWrapper | undefined
 function render() {
   wrapper = mount(UpstreamCenterView, { global: { stubs: {
     AppLayout: { template: '<div><slot /></div>' }, Icon: true, BaseDialog: true, EmptyState: true,
-    IntelligenceMonitorPanel: true, UpstreamSupplierCard: supplierCard, UpstreamTargetCard: targetCard,
+    IntelligenceMonitorPanel: true, UpstreamIntelligenceDialog: defineComponent({ name: 'UpstreamIntelligenceDialog', props: ['target', 'overview'], emits: ['close', 'changed', 'refreshOverview'], template: '<div data-gallery>{{ target.name }}</div>' }), UpstreamSupplierCard: supplierCard, UpstreamTargetCard: targetCard,
     UpstreamOrderDialog: orderDialog, UpstreamSupplierDialog: true, UpstreamTargetDialog: true, UpstreamDetailDialog: true, UpstreamStorageDialog: true,
   } } })
   return wrapper
@@ -27,6 +27,43 @@ beforeEach(() => { vi.resetAllMocks(); vi.useFakeTimers({ toFake: ['setInterval'
 afterEach(() => { wrapper?.unmount(); wrapper=undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('upstream center manual ordering', () => {
+  it('opens only the selected group gallery lazily, keeps metadata fresh and unloads it on close or deletion', async () => {
+    const view = render(); await flushPromises()
+    expect(view.findComponent({ name: 'UpstreamIntelligenceDialog' }).exists()).toBe(false)
+    const cards = view.findAllComponents(supplierCard)
+    cards[0].vm.$emit('intelligence', supplier(1, 'Alpha').targets[1]); await flushPromises()
+    let dialog = view.getComponent({ name: 'UpstreamIntelligenceDialog' })
+    expect(dialog.props('target').id).toBe(11)
+    const original = dialog.element
+    const updated = overview(); updated.suppliers[0].targets[1].name = 'Updated group'
+    mocks.overview.mockResolvedValue(updated)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(view.getComponent({ name: 'UpstreamIntelligenceDialog' }).element).toBe(original)
+    expect(dialog.props('target').name).toBe('Updated group')
+    dialog.vm.$emit('close'); await flushPromises()
+    expect(view.findComponent({ name: 'UpstreamIntelligenceDialog' }).exists()).toBe(false)
+    cards[0].vm.$emit('intelligence', updated.suppliers[0].targets[1]); await flushPromises()
+    dialog = view.getComponent({ name: 'UpstreamIntelligenceDialog' })
+    dialog.vm.$emit('refreshOverview'); await flushPromises()
+    expect(mocks.overview).toHaveBeenCalledTimes(3)
+    updated.suppliers[0].targets = updated.suppliers[0].targets.slice(0, 1)
+    mocks.overview.mockResolvedValue(updated)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(view.findComponent({ name: 'UpstreamIntelligenceDialog' }).exists()).toBe(false)
+  })
+  it('closes a group gallery on tab changes and refuses unsupported providers', async () => {
+    const view = render(); await flushPromises()
+    const card = view.findAllComponents(supplierCard)[0]
+    card.vm.$emit('intelligence', { ...supplier(1, 'Alpha').targets[0], provider: 'anthropic' }); await flushPromises()
+    expect(view.findComponent({ name: 'UpstreamIntelligenceDialog' }).exists()).toBe(false)
+    card.vm.$emit('intelligence', supplier(1, 'Alpha').targets[0]); await flushPromises()
+    expect(view.findComponent({ name: 'UpstreamIntelligenceDialog' }).exists()).toBe(true)
+    await view.get('#upstream-tab-intelligence').trigger('click')
+    expect(view.findComponent({ name: 'UpstreamIntelligenceDialog' }).exists()).toBe(false)
+    await view.get('#upstream-tab-suppliers').trigger('click'); await flushPromises()
+    expect(view.findComponent({ name: 'UpstreamIntelligenceDialog' }).exists()).toBe(false)
+  })
+
   it('updates current monitor data after five seconds and lets manual refresh replace a slow request', async () => {
     const view = render(); await flushPromises()
     const updated = overview(); updated.suppliers[0].name = 'Updated supplier'

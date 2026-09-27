@@ -59,6 +59,28 @@ func (s *IntelligenceMonitorService) ListPlans(ctx context.Context) ([]*Intellig
 	if err != nil {
 		return nil, err
 	}
+	return s.populatePlanList(ctx, plans)
+}
+
+func (s *IntelligenceMonitorService) ListPlansForUpstream(ctx context.Context, targetID int64) ([]*IntelligenceMonitorPlan, error) {
+	if targetID <= 0 {
+		return nil, ErrIntelligenceInvalid
+	}
+	repo, ok := s.repo.(IntelligenceMonitorUpstreamListRepository)
+	if !ok {
+		return nil, ErrIntelligenceFilterUnavailable
+	}
+	plans, err := repo.ListPlansForUpstream(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	return s.populatePlanList(ctx, plans)
+}
+
+func (s *IntelligenceMonitorService) populatePlanList(ctx context.Context, plans []*IntelligenceMonitorPlan) ([]*IntelligenceMonitorPlan, error) {
+	if plans == nil {
+		plans = []*IntelligenceMonitorPlan{}
+	}
 	data, err := s.loadPlanListData(ctx, plans)
 	if err != nil {
 		return nil, err

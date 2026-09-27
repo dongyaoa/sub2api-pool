@@ -105,6 +105,73 @@ describe('intelligence preview isolation', () => {
     expect(disconnect).toHaveBeenCalledOnce()
   })
 
+  it('uses layout dimensions during a scaled dialog entrance so fitted artwork never gets a second zoom', async () => {
+    let resize: ResizeObserverCallback | undefined
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resize = callback }
+      observe() {}
+      disconnect() {}
+    })
+    const layoutWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800)
+    const layoutHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(500)
+    const visualBounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 760, bottom: 475, width: 760, height: 475, toJSON: () => ({})
+    })
+    const run = { id: 3, status: 'succeeded', html: '<svg viewBox="0 0 960 600" />' } as IntelligenceRun
+    const wrapper = mount(IntelligenceArtifactPreview, { attachTo: document.body, props: { run, large: true }, attrs: { style: 'width:800.25px;height:500.15625px' }, global: { stubs: { Icon: true } } })
+    try {
+      await flushPromises()
+      const frame = wrapper.get('iframe').element as HTMLIFrameElement
+      expect(Number(frame.style.transform.match(/scale\((.+)\)/)?.[1])).toBeCloseTo(800.25 / 960, 10)
+      expect(frame.style.left).toBe('0px')
+      expect(frame.style.top).toBe('0px')
+      expect(frame.style.opacity).toBe('0')
+      window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { type: 'intelligence-preview-fitted', width: 960, height: 600 } }))
+      await flushPromises()
+      expect(frame.style.opacity).toBe('1')
+      const revealedTransform = frame.style.transform
+      resize?.([{ target: wrapper.element, contentRect: { width: 800.25, height: 500.15625 } } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+      await flushPromises()
+      expect(frame.style.transform).toBe(revealedTransform)
+      expect(frame.style.opacity).toBe('1')
+      expect(wrapper.get('iframe').element).toBe(frame)
+    } finally {
+      wrapper.unmount()
+      layoutWidth.mockRestore()
+      layoutHeight.mockRestore()
+      visualBounds.mockRestore()
+    }
+  })
+
+  it('ignores ancestor transforms when resizing without ResizeObserver', async () => {
+    vi.stubGlobal('ResizeObserver', undefined)
+    let width = 800, height = 500
+    const layoutWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width)
+    const layoutHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => height)
+    const visualBounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      x: 0, y: 0, left: 0, top: 0, right: width * 0.95, bottom: height * 0.95,
+      width: width * 0.95, height: height * 0.95, toJSON: () => ({})
+    }))
+    const run = { id: 4, status: 'succeeded', html: '<svg viewBox="0 0 960 600" />' } as IntelligenceRun
+    const wrapper = mount(IntelligenceArtifactPreview, { props: { run, large: true }, global: { stubs: { Icon: true } } })
+    try {
+      await flushPromises()
+      const frame = wrapper.get('iframe').element as HTMLIFrameElement
+      expect(Number(frame.style.transform.match(/scale\((.+)\)/)?.[1])).toBeCloseTo(800 / 960)
+      width = 640; height = 400
+      window.dispatchEvent(new Event('resize'))
+      await flushPromises()
+      expect(Number(frame.style.transform.match(/scale\((.+)\)/)?.[1])).toBeCloseTo(640 / 960)
+      expect(frame.style.top).toBe('0px')
+      expect(wrapper.get('iframe').element).toBe(frame)
+    } finally {
+      wrapper.unmount()
+      layoutWidth.mockRestore()
+      layoutHeight.mockRestore()
+      visualBounds.mockRestore()
+    }
+  })
+
   it('covers thumbnails edge to edge at different sizes without restarting the iframe', async () => {
     let resize: ResizeObserverCallback | undefined
     vi.stubGlobal('IntersectionObserver', undefined)

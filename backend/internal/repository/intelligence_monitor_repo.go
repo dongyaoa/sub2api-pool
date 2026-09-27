@@ -35,7 +35,19 @@ func scanIntelligencePlan(row upstreamScanner) (*service.IntelligenceMonitorPlan
 	return p, intelligenceDBError(err)
 }
 func (r *intelligenceMonitorRepository) ListPlans(ctx context.Context) ([]*service.IntelligenceMonitorPlan, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT `+intelligencePlanColumns+` FROM intelligence_monitor_plans WHERE deleted_at IS NULL ORDER BY sort_order ASC NULLS LAST,created_at DESC,id DESC`)
+	return r.listPlans(ctx, "deleted_at IS NULL")
+}
+
+func (r *intelligenceMonitorRepository) ListPlansForUpstream(ctx context.Context, targetID int64) ([]*service.IntelligenceMonitorPlan, error) {
+	if targetID <= 0 {
+		return nil, service.ErrIntelligenceInvalid
+	}
+	return r.listPlans(ctx, "deleted_at IS NULL AND source_type='upstream' AND upstream_target_id=$1", targetID)
+}
+
+// where is an internal constant; source filtering precedes all summary reads.
+func (r *intelligenceMonitorRepository) listPlans(ctx context.Context, where string, args ...any) ([]*service.IntelligenceMonitorPlan, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+intelligencePlanColumns+` FROM intelligence_monitor_plans WHERE `+where+` ORDER BY sort_order ASC NULLS LAST,created_at DESC,id DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -63,10 +75,12 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 	if err = lockManualOrderMembership(ctx, tx); err != nil {
 		return err
 	}
+	var oldSource string
+	var oldTargetID *int64
 	if p.ID > 0 {
 		var busy bool
 		var oldKeyID *int64
-		err = tx.QueryRowContext(ctx, `SELECT local_api_key_id FROM intelligence_monitor_plans WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, p.ID).Scan(&oldKeyID)
+		err = tx.QueryRowContext(ctx, `SELECT local_api_key_id,source_type,upstream_target_id FROM intelligence_monitor_plans WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, p.ID).Scan(&oldKeyID, &oldSource, &oldTargetID)
 		if err != nil {
 			return intelligenceDBError(err)
 		}
@@ -80,6 +94,19 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 			if _, err = tx.ExecContext(ctx, `UPDATE api_keys SET status='disabled',updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, *oldKeyID); err != nil {
 				return err
 			}
+		}
+	}
+	if p.SourceType == "upstream" && p.UpstreamTargetID != nil && (p.ID == 0 || oldSource != "upstream" || oldTargetID == nil || *oldTargetID != *p.UpstreamTargetID) {
+		// The membership lock serializes create/move/archive across all writers.
+		// Legacy duplicates remain editable in place; only entering a new target
+		// is rejected when it already has a live (including paused) plan.
+		var exists bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intelligence_monitor_plans WHERE source_type='upstream' AND upstream_target_id=$1 AND deleted_at IS NULL AND id<>$2)`, *p.UpstreamTargetID, p.ID).Scan(&exists)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return service.ErrIntelligenceUpstreamPlanExists
 		}
 	}
 	args := []any{p.Name, p.SourceType, p.Endpoint, p.APIKeyEncrypted, p.UpstreamTargetID, p.GroupID, p.LocalAPIKeyID, p.LocalKeyOwnerID, p.SupplierNote, p.GroupNote, p.RateNote, p.Notes, p.APIMode, p.Enabled, p.IntervalSeconds, p.TimeoutSeconds, p.CreatedBy}

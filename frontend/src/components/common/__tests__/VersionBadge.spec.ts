@@ -25,10 +25,10 @@ const current = '0.2.7-pool.4'
 const target = '0.2.7-pool.5'
 function version(overrides: Partial<VersionInfo> = {}): VersionInfo {
   return { current_version: current, latest_version: target, has_update: true, build_type: 'release',
-    update_method: 'container', update_available: true, current_revision: 'c'.repeat(40), latest_revision: revision,
-    image_digest: digest, ...overrides }
+    update_method: 'binary', update_available: true, current_revision: 'c'.repeat(40), latest_revision: revision,
+    update_digest: digest, ...overrides }
 }
-function updateJob(state: UpdateJob['state'] = 'pulling', overrides: Partial<UpdateJob> = {}): UpdateJob {
+function updateJob(state: UpdateJob['state'] = 'downloading', overrides: Partial<UpdateJob> = {}): UpdateJob {
   return { id: 'job-1', state, message: '', version: target, revision, digest,
     started_at: new Date().toISOString(), ...overrides }
 }
@@ -36,8 +36,8 @@ let wrapper: VueWrapper | undefined
 async function render() {
   wrapper = mount(VersionBadge, { props: { version: current }, global: { stubs: {
     Icon: true,
-    ConfirmDialog: { props: ['show'], emits: ['confirm', 'cancel'],
-      template: '<div v-if="show" data-testid="confirmation"><button data-testid="confirm-update" @click="$emit(\'confirm\')">confirm</button><button data-testid="cancel-update" @click="$emit(\'cancel\')">cancel</button></div>' }
+    ConfirmDialog: { props: ['show', 'message'], emits: ['confirm', 'cancel'],
+      template: '<div v-if="show" data-testid="confirmation">{{ message }}<button data-testid="confirm-update" @click="$emit(\'confirm\')">confirm</button><button data-testid="cancel-update" @click="$emit(\'cancel\')">cancel</button></div>' }
   } } })
   await flushPromises()
   return wrapper
@@ -72,6 +72,121 @@ afterEach(() => {
 })
 
 describe('Pool version badge', () => {
+  it('shows the release card and program update without a host helper or image digest', async () => {
+    await render()
+    await open()
+    expect(wrapper!.get('[data-testid="update-available"]').text()).toContain(target)
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper!.text()).not.toContain('version.helperNotConfigured')
+    expect(wrapper!.get('a').attributes('href')).toBe('https://github.com/dongyaoa/sub2api-pool/releases/tag/pool-v0.2.7.5')
+    await wrapper!.get('[data-testid="update-now"]').trigger('click')
+    expect(wrapper!.get('[data-testid="confirmation"]').text()).toContain('version.confirmProgramUpdate')
+  })
+
+  it('does not render untrusted release URLs', async () => {
+    vi.mocked(checkUpdates).mockResolvedValue(version({ latest_version: 'https://other.example',
+      release_info: { name: 'Release', body: '', published_at: '', html_url: 'javascript:alert(1)' } }))
+    await render()
+    await open()
+    expect(wrapper!.get('a').attributes('href')).toBe('https://github.com/dongyaoa/sub2api-pool/releases')
+  })
+
+  it.each(['runtime_not_configured', 'runtime_unwritable', 'unsupported_platform'])('shows a clear deployment reason for %s', async (reason) => {
+    vi.mocked(checkUpdates).mockResolvedValue(version({ update_available: false, update_unavailable_reason: reason }))
+    await render()
+    await open()
+    expect(wrapper!.find('[data-testid="update-unavailable"]').exists()).toBe(true)
+    expect(wrapper!.find('[data-testid="update-now"]').exists()).toBe(false)
+    expect(wrapper!.text()).not.toContain(reason)
+  })
+
+  it('supports legacy container targets while preferring the program update digest', async () => {
+    vi.mocked(checkUpdates).mockResolvedValue(version({ update_method: 'container', update_digest: undefined, image_digest: digest }))
+    await render()
+    await open()
+    await confirmUpdate()
+    expect(performUpdate).toHaveBeenCalledWith({ version: target, digest })
+  })
+
+  it.each(['downloading', 'verifying', 'installing', 'restarting'] as const)('tracks the %s phase without submitting again', async (state) => {
+    vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob(state) })
+    await render()
+    await open()
+    expect(wrapper!.get('[data-testid="update-job"]').text()).toContain('version.jobStates.' + state)
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeDefined()
+    expect(performUpdate).not.toHaveBeenCalled()
+    const saved = JSON.parse(sessionStorage.getItem('pool-container-update-pending')!)
+    expect(saved).toMatchObject({ revision, jobId: 'job-1' })
+  })
+
+  it('prefers the program digest when the backend also returns a legacy image digest', async () => {
+    vi.mocked(checkUpdates).mockResolvedValue(version({ image_digest: 'sha256:' + 'd'.repeat(64) }))
+    await render()
+    await open()
+    await confirmUpdate()
+    expect(performUpdate).toHaveBeenCalledWith({ version: target, digest })
+  })
+
+  it.each(['succeeded', 'failed', 'rolled_back'] as const)('ignores historical %s jobs from an older installation', async (state) => {
+    vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob(state, { version: '0.2.7-pool.1' }) })
+    await render()
+    await open()
+    expect(wrapper!.find('[data-testid="update-job"]').exists()).toBe(false)
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeUndefined()
+    expect(sessionStorage.getItem('pool-container-update-pending')).toBeNull()
+    expect(getVersion).not.toHaveBeenCalled()
+  })
+
+  it('binds restored submissions to their revision and job ID', async () => {
+    sessionStorage.setItem('pool-container-update-pending', JSON.stringify({
+      version: target, digest, revision, jobId: 'accepted-job', startedAt: Date.now()
+    }))
+    vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob('succeeded', { id: 'different-job' }) })
+    await render()
+    expect(getVersion).not.toHaveBeenCalled()
+    vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob('succeeded', { id: 'accepted-job', revision: 'different' }) })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(getVersion).not.toHaveBeenCalled()
+    vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob('restarting', { id: 'accepted-job' }) })
+    await vi.advanceTimersByTimeAsync(5000)
+    await open()
+    expect(wrapper!.text()).toContain('version.jobStates.restarting')
+    expect(performUpdate).not.toHaveBeenCalled()
+  })
+
+  it('resumes monitoring after timeout and unlocks another attempt after confirmed failure', async () => {
+    vi.mocked(getUpdateStatus).mockResolvedValueOnce({ available: true, job: updateJob('restarting') }).mockRejectedValue({ status: 503 })
+    await render()
+    await vi.advanceTimersByTimeAsync(25 * 60 * 1000)
+    await open()
+    expect(wrapper!.find('[data-testid="retry-update-status"]').exists()).toBe(true)
+    vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob('restarting') })
+    await wrapper!.get('[data-testid="retry-update-status"]').trigger('click')
+    await flushPromises()
+    expect(wrapper!.find('[data-testid="retry-update-status"]').exists()).toBe(false)
+    vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob('failed') })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeUndefined()
+    expect(sessionStorage.getItem('pool-container-update-pending')).toBeNull()
+    expect(performUpdate).not.toHaveBeenCalled()
+  })
+
+  it('starts a fresh status request after admin access returns and ignores the old response', async () => {
+    let resolveOld!: (value: { available: boolean; job: UpdateJob }) => void
+    vi.mocked(getUpdateStatus).mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+    await render()
+    auth.isAdmin = false
+    await flushPromises()
+    auth.isAdmin = true
+    await flushPromises()
+    expect(getUpdateStatus).toHaveBeenCalledTimes(2)
+    resolveOld({ available: false, job: updateJob('restarting') })
+    await flushPromises()
+    await open()
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeUndefined()
+    expect(sessionStorage.getItem('pool-container-update-pending')).toBeNull()
+  })
+
   it('only shows the local version for non-admins and makes no admin request', async () => {
     auth.isAdmin = false
     useAppStore().currentVersion = target
@@ -140,7 +255,7 @@ describe('Pool version badge', () => {
     await confirmUpdate()
     await vi.advanceTimersByTimeAsync(5000)
     expect(performUpdate).toHaveBeenCalledTimes(1)
-    expect(wrapper!.find('[data-testid="update-now"]').exists()).toBe(false)
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeDefined()
     vi.mocked(getUpdateStatus).mockRejectedValueOnce({ status: 503 })
     await vi.advanceTimersByTimeAsync(5000)
     expect(wrapper!.text()).toContain('version.reconnecting')
@@ -150,7 +265,7 @@ describe('Pool version badge', () => {
     expect(performUpdate).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['POOL_UPDATE_CHANGED', 'POOL_UPDATE_UNAVAILABLE', 'ALREADY_UP_TO_DATE'])('clears pending state for a definite %s rejection and refreshes the release', async (reason) => {
+  it.each(['POOL_UPDATE_CHANGED', 'POOL_UPDATE_UNAVAILABLE', 'ALREADY_UP_TO_DATE', 'POOL_UPDATE_BUSY', 'SYSTEM_OPERATION_BUSY'])('clears pending state for a definite %s rejection and refreshes the release', async (reason) => {
     await render()
     await open()
     const checks = vi.mocked(checkUpdates).mock.calls.length
@@ -166,6 +281,18 @@ describe('Pool version badge', () => {
     expect(performUpdate).toHaveBeenCalledTimes(1)
   })
 
+  it('adopts another accepted task after an explicit busy rejection', async () => {
+    await render()
+    await open()
+    vi.mocked(performUpdate).mockRejectedValue({ status: 409, reason: 'POOL_UPDATE_BUSY', message: 'Already running' })
+    vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob('downloading', { id: 'other-admin-job' }) })
+    await confirmUpdate()
+    expect(JSON.parse(sessionStorage.getItem('pool-container-update-pending')!)).toMatchObject({ jobId: 'other-admin-job', revision })
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeDefined()
+    expect(wrapper!.find('[data-testid="update-error"]').exists()).toBe(false)
+    expect(performUpdate).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps GET recovery for POOL_UPDATE_REJECTED because the host may already have accepted it', async () => {
     await render()
     await open()
@@ -176,7 +303,7 @@ describe('Pool version badge', () => {
     await vi.advanceTimersByTimeAsync(5000)
     expect(getUpdateStatus).toHaveBeenCalledTimes(statusCalls + 1)
     expect(performUpdate).toHaveBeenCalledTimes(1)
-    expect(wrapper!.find('[data-testid="update-now"]').exists()).toBe(false)
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeDefined()
   })
 
   it('resumes an existing job on mount and waits for matching running version and revision', async () => {
@@ -199,7 +326,8 @@ describe('Pool version badge', () => {
     expect(performUpdate).not.toHaveBeenCalled()
   })
 
-  it('treats rolled_back as failure even when the old service is healthy', async () => {
+  it('treats an active job that rolls back as failure even when the old service is healthy', async () => {
+    sessionStorage.setItem('pool-container-update-pending', JSON.stringify({ version: target, digest, revision, jobId: 'job-1', startedAt: Date.now() }))
     vi.mocked(getUpdateStatus).mockResolvedValue({ available: true, job: updateJob('rolled_back') })
     await render()
     await open()
@@ -219,6 +347,18 @@ describe('Pool version badge', () => {
     expect(getUpdateStatus).toHaveBeenCalledTimes(calls)
     expect(checkUpdates).toHaveBeenCalledTimes(checks)
     expect(performUpdate).not.toHaveBeenCalled()
+  })
+
+  it('stops the submitting indicator when administrator authentication expires during submission', async () => {
+    await render()
+    await open()
+    vi.mocked(performUpdate).mockRejectedValue({ status: 401 })
+    await confirmUpdate()
+    expect(wrapper!.find('[data-testid="update-now"]').exists()).toBe(false)
+    expect(wrapper!.text()).toContain('version.authRequired')
+    const calls = vi.mocked(getUpdateStatus).mock.calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(getUpdateStatus).toHaveBeenCalledTimes(calls)
   })
 
   it('stops retrying after twenty-five minutes during a service outage', async () => {
@@ -249,8 +389,8 @@ describe('Pool version badge', () => {
     await render()
     await vi.advanceTimersByTimeAsync(5000)
     await open()
-    expect(wrapper!.text()).toContain('version.jobStates.pulling')
-    expect(wrapper!.find('[data-testid="update-now"]').exists()).toBe(false)
+    expect(wrapper!.text()).toContain('version.jobStates.downloading')
+    expect(wrapper!.get('[data-testid="update-now"]').attributes('disabled')).toBeDefined()
     expect(performUpdate).not.toHaveBeenCalled()
   })
 
@@ -260,7 +400,8 @@ describe('Pool version badge', () => {
     vi.mocked(getVersion).mockResolvedValue({ version: target, revision })
     await render()
     await open()
-    expect(wrapper!.text()).toContain('version.updateComplete')
+    expect(wrapper!.find('[data-testid="update-job"]').exists()).toBe(false)
+    expect(getVersion).not.toHaveBeenCalled()
     expect(useAppStore().toasts).toHaveLength(0)
     expect(performUpdate).not.toHaveBeenCalled()
   })

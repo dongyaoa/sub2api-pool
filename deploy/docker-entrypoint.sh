@@ -16,8 +16,16 @@ fi
 # Compatibility: if the first arg looks like a flag (e.g. --help),
 # prepend the default binary so it behaves the same as the old
 # ENTRYPOINT ["/app/sub2api"] style.
-if [ "${1#-}" != "$1" ]; then
+if [ "$#" -eq 0 ]; then
+    set -- /app/sub2api
+elif [ "${1#-}" != "$1" ]; then
     set -- /app/sub2api "$@"
+fi
+
+# Only the default application uses the persistent, supervised runtime.
+# Explicit commands (for example sh or pg_dump) retain normal Docker semantics.
+if [ "$1" = /app/sub2api ]; then
+    exec /app/pool-app-runtime.sh "$@"
 fi
 
 exec "$@"

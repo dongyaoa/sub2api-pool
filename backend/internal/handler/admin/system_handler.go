@@ -65,6 +65,7 @@ func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOper
 // GetVersion returns the current version
 // GET /api/v1/admin/system/version
 func (h *SystemHandler) GetVersion(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	if current, ok := h.updateSvc.(interface{ GetCurrentBuild() (string, string) }); ok {
 		version, revision := current.GetCurrentBuild()
 		response.Success(c, gin.H{"version": version, "revision": revision})
@@ -83,6 +84,7 @@ func (h *SystemHandler) GetVersion(c *gin.Context) {
 // CheckUpdates checks for available updates
 // GET /api/v1/admin/system/check-updates
 func (h *SystemHandler) CheckUpdates(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	force := c.Query("force") == "true"
 	info, err := h.updateSvc.CheckUpdate(c.Request.Context(), force)
 	if err != nil {
@@ -151,6 +153,7 @@ type poolImageUpdateService interface {
 }
 
 func (h *SystemHandler) UpdateStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	updater, ok := h.updateSvc.(poolImageUpdateService)
 	if !ok || !updater.PoolUpdatesEnabled() {
 		response.Success(c, poolupdate.Status{Available: false})
@@ -158,7 +161,7 @@ func (h *SystemHandler) UpdateStatus(c *gin.Context) {
 	}
 	status, err := updater.PoolUpdateStatus(c.Request.Context())
 	if err != nil || status == nil {
-		response.Error(c, http.StatusServiceUnavailable, "Image update service is unavailable")
+		response.Error(c, http.StatusServiceUnavailable, "Update status is unavailable")
 		return
 	}
 	response.Success(c, status)
@@ -166,14 +169,14 @@ func (h *SystemHandler) UpdateStatus(c *gin.Context) {
 
 func (h *SystemHandler) startPoolImageUpdate(c *gin.Context, updater poolImageUpdateService) {
 	if c.Request.Body == nil {
-		response.Error(c, http.StatusBadRequest, "Confirm the version and image digest before updating")
+		response.Error(c, http.StatusBadRequest, "Confirm the release version and checksum before updating")
 		return
 	}
 	var request poolupdate.UpdateRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 1024))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || request.Version == "" || request.Digest == "" {
-		response.Error(c, http.StatusBadRequest, "Confirm the version and image digest before updating")
+		response.Error(c, http.StatusBadRequest, "Confirm the release version and checksum before updating")
 		return
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
@@ -181,20 +184,20 @@ func (h *SystemHandler) startPoolImageUpdate(c *gin.Context, updater poolImageUp
 		return
 	}
 	if poolupdate.ValidateVersion(request.Version) != nil || poolupdate.ValidateDigest(request.Digest) != nil {
-		response.Error(c, http.StatusBadRequest, "Invalid Pool image version or digest")
+		response.Error(c, http.StatusBadRequest, "Invalid Pool release version or checksum")
 		return
 	}
-	operationID := buildSystemOperationID(c, "pool-image-update")
+	operationID := buildSystemOperationID(c, "pool-update")
 	payload := gin.H{"operation_id": operationID, "version": request.Version, "digest": request.Digest}
-	executeAdminIdempotentJSON(c, "admin.system.pool-image-update", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
+	executeAdminIdempotentJSON(c, "admin.system.pool-update", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		_, release, err := h.acquireSystemLock(ctx, operationID)
 		if err != nil {
 			return nil, err
 		}
 		succeeded := false
 		defer func() { release("", succeeded) }()
-		// The helper owns the durable task. The HTTP request only submits it;
-		// disconnects never cancel an accepted image pull/recreation.
+		// The updater owns the durable background task. This request only
+		// submits it; a browser disconnect never cancels an accepted update.
 		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 55*time.Second)
 		defer cancel()
 		job, err := updater.StartPoolUpdate(startCtx, request)
@@ -202,7 +205,7 @@ func (h *SystemHandler) startPoolImageUpdate(c *gin.Context, updater poolImageUp
 			return nil, err
 		}
 		succeeded = true
-		return gin.H{"message": "Image update accepted", "need_restart": false, "job": job}, nil
+		return gin.H{"message": "Update accepted", "need_restart": false, "job": job}, nil
 	})
 }
 

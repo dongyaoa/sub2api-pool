@@ -1,5 +1,11 @@
 export default {
   intelligenceMonitor: {
+    groupMonitor: {
+      open: 'Intelligence monitor', unsupported: 'Available for OpenAI-compatible groups only', title: '{name} · Intelligence monitor',
+      emptyTitle: 'Create a pelican test for this group', emptyHint: 'Uses this group’s key and effective rate. New plans default to scheduled testing every 5 minutes, starting after saving. Disable scheduling for manual tests.',
+      create: 'Create test plan', sharedHint: 'Plans and results also appear in the intelligence monitor.',
+      alreadyExists: 'This group already has a test plan. Close settings and refresh the list.',
+    },
     group: 'Group', recentWorks: 'Recent results', newestFirst: 'Newest on the left', latest: 'Latest', retention: 'Only the latest 20 results per plan are retained; older records are removed automatically.',
     oauth: { title: 'OAuth monitoring', add: 'Add OAuth monitor', account: 'OAuth account', select: 'Select an OpenAI OAuth account', search: 'Search account names…', nameHint: 'Plan names follow the name in account management', emptyTitle: 'Compare results from each OAuth account', emptyHint: 'Select a local OpenAI OAuth account to run the same pelican test and retain the latest 20 results.', noAccounts: 'No enabled, healthy and schedulable OpenAI OAuth accounts available', loading: 'Loading all available OAuth accounts…', loadFailed: 'Unable to load OAuth accounts. Refresh to retry.', unavailable: 'The selected account is disabled or temporarily unavailable. Refresh and select an account again.', hint: 'Only enabled, healthy and currently schedulable real OpenAI OAuth accounts are shown. Runs directly on the selected account using its token refresh and proxy settings.', more: 'Next', previous: 'Previous', fixedModelRequired: 'This account cannot use gpt-6-astra directly with its current model settings. Check its model allowlist or mappings in account management.' },
     title: 'Intelligence monitor', add: 'New test plan', edit: 'Edit test plan', search: 'Search plans, providers or groups', allSources: 'All sources', allSites: 'All sites', quickSwitch: 'Quick switch monitoring sites',
@@ -23,7 +29,7 @@ export default {
       supplierNote: 'Provider note', supplierPlaceholder: 'Provider or relay', groupNote: 'Group note', groupPlaceholder: 'Group or route', rateNote: 'Rate note', ratePlaceholder: 'For example: advertised 0.8× promotion',
       rateHint: 'A note for this external source. The automatically fetched effective rate is recorded separately.', enabled: 'Scheduled testing', interval: 'Interval', timeout: 'Maximum wait per run', timeoutHint: 'Choose 5–15 minutes; the default is 10 minutes to allow reasoning and animation generation.',
       customInterval: 'Custom', customSeconds: 'Custom interval (seconds)', intervalPlaceholder: 'For example: 45', intervalHint: 'Enter a whole number from 30 to 86400 seconds. The default is 5 minutes.', validInterval: 'Enter a whole number from 30 to 86400 seconds.',
-      scheduleHint: 'Enabling starts the first run and schedules subsequent runs. Manual tests remain available when disabled.', notesPlaceholder: 'Route characteristics, promotions or aspects to compare',
+      scheduleHint: 'New plans default to testing every 5 minutes. Saving starts the first run; later runs follow the selected interval. Manual tests remain available when disabled.', notesPlaceholder: 'Route characteristics, promotions or aspects to compare',
       requiredSource: 'Choose a source', requiredName: 'Enter a plan name', validEndpoint: 'Enter a valid public HTTPS endpoint', requiredKey: 'Enter an API key',
       saving: 'Saving…', save: 'Save plan', fixedPrompt: 'Every test uses this exact prompt and these parameters', loadGroupsFailed: 'Unable to load local groups', noGroups: 'No groups available',
     },

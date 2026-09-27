@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <Transition name="modal">
+    <Transition :name="motion === 'fade' ? 'modal-fade' : 'modal'">
       <div
         v-if="show"
         class="modal-overlay"
@@ -43,7 +43,13 @@
 </template>
 
 <script lang="ts">
+import { shallowReactive } from 'vue'
 let dialogIdCounter = 0
+const openDialogs = shallowReactive<string[]>([])
+
+function syncDialogScrollLock() {
+  document.body.classList.toggle('modal-open', openDialogs.length > 0)
+}
 </script>
 
 <script setup lang="ts">
@@ -68,6 +74,7 @@ interface Props {
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
   zIndex?: number
+  motion?: 'scale' | 'fade'
 }
 
 interface Emits {
@@ -79,15 +86,27 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
-  zIndex: 50
+  zIndex: 50,
+  motion: 'scale'
 })
 
 const emit = defineEmits<Emits>()
 
 // Custom z-index style (overrides the default z-50 from CSS)
 const zIndexStyle = computed(() => {
-  return props.zIndex !== 50 ? { zIndex: props.zIndex } : undefined
+  const zIndex = props.zIndex + Math.max(0, openDialogs.indexOf(dialogId)) * 10
+  return zIndex !== 50 ? { zIndex } : undefined
 })
+const isTopDialog = () => openDialogs.at(-1) === dialogId
+
+function releaseDialog() {
+  const wasTop = isTopDialog()
+  const index = openDialogs.indexOf(dialogId)
+  if (index >= 0) openDialogs.splice(index, 1)
+  syncDialogScrollLock()
+  if (wasTop && previousActiveElement?.isConnected) previousActiveElement.focus()
+  previousActiveElement = null
+}
 
 const widthClasses = computed(() => {
   // Width guidance: narrow=confirm/short prompts, normal=standard forms,
@@ -104,13 +123,13 @@ const widthClasses = computed(() => {
 })
 
 const handleClose = () => {
-  if (props.closeOnClickOutside) {
+  if (props.closeOnClickOutside && isTopDialog()) {
     emit('close')
   }
 }
 
 const handleEscape = (event: KeyboardEvent) => {
-  if (props.show && props.closeOnEscape && event.key === 'Escape') {
+  if (props.show && props.closeOnEscape && isTopDialog() && event.key === 'Escape') {
     emit('close')
   }
 }
@@ -122,11 +141,13 @@ watch(
     if (isOpen) {
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
+      if (!openDialogs.includes(dialogId)) openDialogs.push(dialogId)
       // 使用CSS类而不是直接操作style,更易于管理多个对话框
-      document.body.classList.add('modal-open')
+      syncDialogScrollLock()
 
       // 等待DOM更新后设置焦点到对话框
       await nextTick()
+      if (!props.show || !isTopDialog()) return
       if (modalBodyRef.value) {
         modalBodyRef.value.scrollTop = 0
       }
@@ -137,12 +158,7 @@ watch(
         firstFocusable?.focus()
       }
     } else {
-      document.body.classList.remove('modal-open')
-      // 恢复之前的焦点
-      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-        previousActiveElement.focus()
-      }
-      previousActiveElement = null
+      releaseDialog()
     }
   },
   { immediate: true }
@@ -155,6 +171,17 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
   // 确保组件卸载时移除滚动锁定
-  document.body.classList.remove('modal-open')
+  releaseDialog()
 })
 </script>
+
+<style scoped>
+.modal-fade-enter-active { transition: opacity 160ms ease-out; }
+.modal-fade-leave-active { transition: opacity 120ms ease-in; }
+.modal-fade-enter-from,
+.modal-fade-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .modal-fade-enter-active,
+  .modal-fade-leave-active { transition-duration: 1ms; }
+}
+</style>

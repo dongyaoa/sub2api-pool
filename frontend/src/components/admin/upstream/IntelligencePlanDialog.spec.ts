@@ -16,7 +16,7 @@ const oauthAccount = (id: number, name: string, fields: Record<string, unknown> 
 const page = (items: unknown[], number = 1, pages = 1) => ({ items, total: pages === 1 ? items.length : pages * 100, page: number, page_size: 100, pages })
 const savedPlan = (fields: Partial<IntelligencePlan> = {}) => ({ id: 3, name: 'OAuth Seven', source_type: 'openai_oauth', account_id: 7, api_mode: 'responses', enabled: true, interval_seconds: 3600, timeout_seconds: 900, supplier_note: '', group_note: '', rate_note: '', notes: '', ...fields }) as IntelligencePlan
 let wrapper: VueWrapper | undefined
-function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean }> = {}) {
+function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; upstreamTargetId: number }> = {}) {
   wrapper = mount(IntelligencePlanDialog, { attachTo: document.body, props: { show: true, plan: null, overview: null, oauthOnly: true, ...props }, global: { stubs: { BaseDialog: dialog, Icon: true, transition: true } } })
   return wrapper
 }
@@ -71,7 +71,7 @@ describe('OAuth intelligence plan dialog', () => {
     await trigger.trigger('click')
     await view.get('form').trigger('submit')
     await flushPromises()
-    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'openai_oauth', account_id: 7, name: '', enabled: false, interval_seconds: 300, timeout_seconds: 600, api_mode: 'responses', endpoint: undefined, api_key: undefined, upstream_target_id: null, group_id: null }))
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'openai_oauth', account_id: 7, name: '', enabled: true, interval_seconds: 300, timeout_seconds: 600, api_mode: 'responses', endpoint: undefined, api_key: undefined, upstream_target_id: null, group_id: null }))
     expect(view.emitted('saved')).toHaveLength(1)
     expect(view.emitted('close')).toHaveLength(1)
   })
@@ -240,6 +240,107 @@ describe('intelligence plan choices and interval validation', () => {
     { id: 2, name: 'South Relay', website: 'https://south.example', targets: [{ id: 21, name: 'Backup GPT', provider: 'openai', endpoint: 'https://south.example' }] }
   ] } as UpstreamOverview
 
+  it('locks a group shortcut to its upstream and emits the created plan without loading unrelated sources', async () => {
+    const created = savedPlan({ id: 91, name: 'Primary GPT', source_type: 'upstream', upstream_target_id: 11, account_id: null })
+    mocks.create.mockResolvedValueOnce(created)
+    const view = render({ oauthOnly: false, overview: upstreamOverview, upstreamTargetId: 11 })
+    await flushPromises()
+    expect(mocks.accounts).not.toHaveBeenCalled()
+    expect(mocks.groups).not.toHaveBeenCalled()
+    expect(view.find('#intelligence-upstream').exists()).toBe(false)
+    expect(view.findAll('button').some(button => button.text().startsWith('intelligenceMonitor.source.'))).toBe(false)
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('North Relay')
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('Primary GPT')
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('north.example')
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Primary GPT')
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'upstream', upstream_target_id: 11, account_id: null, group_id: null, name: 'Primary GPT', enabled: true, timeout_seconds: 600, interval_seconds: 300 }))
+    expect(view.emitted('saved')).toEqual([[created]])
+    expect(view.emitted('close')).toHaveLength(1)
+  })
+
+  it('refreshes the locked source summary while preserving a custom draft across overview and plan polling', async () => {
+    const plan = savedPlan({ name: 'Existing comparison', source_type: 'upstream', upstream_target_id: 11, account_id: null })
+    const view = render({ oauthOnly: false, overview: upstreamOverview, upstreamTargetId: 11, plan })
+    await flushPromises()
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Existing comparison')
+    await view.get('#intelligence-name').setValue('Unsaved custom name')
+    await view.get('#intelligence-notes').setValue('Keep these notes')
+    await view.get('[data-timeout="600"]').trigger('click')
+    const updatedOverview = { suppliers: [{ ...upstreamOverview.suppliers[0], name: 'Renamed Relay', targets: [{ ...upstreamOverview.suppliers[0].targets[0], name: 'Renamed Group', balance: { billing: { effective_rate_multiplier: 0.75, stale: false } } }] }] } as UpstreamOverview
+    await view.setProps({ overview: updatedOverview, plan: { ...plan, name: 'Server version' } })
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('Renamed Relay')
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('Renamed Group')
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('0.75×')
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Unsaved custom name')
+    const updated = { ...plan, name: 'Unsaved custom name' }
+    mocks.update.mockResolvedValueOnce(updated)
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ name: 'Unsaved custom name', notes: 'Keep these notes', timeout_seconds: 600, upstream_target_id: 11 }))
+    expect(view.emitted('saved')).toEqual([[updated]])
+  })
+
+  it.each(['removed', 'unsupported'])('blocks a locked source that becomes %s and preserves the draft for retry', async state => {
+    const view = render({ oauthOnly: false, overview: upstreamOverview, upstreamTargetId: 11 })
+    await flushPromises()
+    await view.get('#intelligence-name').setValue('My retained draft')
+    const overview = state === 'removed'
+      ? { suppliers: [] } as unknown as UpstreamOverview
+      : { suppliers: [{ ...upstreamOverview.suppliers[0], targets: [{ ...upstreamOverview.suppliers[0].targets[0], provider: 'anthropic' }] }] } as UpstreamOverview
+    await view.setProps({ overview })
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('intelligenceMonitor.sourceMissing')
+    await view.get('form').trigger('submit')
+    expect(mocks.create).not.toHaveBeenCalled()
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.sourceMissing')
+    expect(view.emitted('close')).toBeUndefined()
+    await view.setProps({ overview: upstreamOverview })
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'My retained draft', upstream_target_id: 11 }))
+  })
+
+  it('keeps locked group input after a duplicate or other save failure and allows retry', async () => {
+    const view = render({ oauthOnly: false, overview: upstreamOverview, upstreamTargetId: 11 })
+    await flushPromises()
+    await view.get('#intelligence-name').setValue('Custom comparison')
+    await view.get('#intelligence-notes').setValue('Draft details')
+    mocks.create.mockRejectedValueOnce({ status: 409, reason: 'INTELLIGENCE_UPSTREAM_PLAN_EXISTS', message: 'duplicate key', metadata: { detail: 'private database detail' } })
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.groupMonitor.alreadyExists')
+    expect(view.text()).not.toContain('private database detail')
+    expect(view.emitted('saved')).toBeUndefined()
+    expect(view.emitted('close')).toBeUndefined()
+    mocks.create.mockRejectedValueOnce({ message: 'Temporary service failure' })
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(view.get('[role="alert"]').text()).toBe('Temporary service failure')
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Custom comparison')
+    expect((view.get('#intelligence-notes').element as HTMLTextAreaElement).value).toBe('Draft details')
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Custom comparison', notes: 'Draft details', upstream_target_id: 11 }))
+    expect(view.emitted('saved')).toHaveLength(1)
+  })
+
+  it('initializes each group only when opened or its identity changes and closing does not create a plan', async () => {
+    const view = render({ oauthOnly: false, overview: upstreamOverview, upstreamTargetId: 11 })
+    await flushPromises()
+    await view.get('#intelligence-name').setValue('Unsaved draft')
+    await view.setProps({ overview: { ...upstreamOverview } })
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Unsaved draft')
+    await view.setProps({ upstreamTargetId: 21 })
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Backup GPT')
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('South Relay')
+    await view.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
+    expect(mocks.create).not.toHaveBeenCalled()
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(view.emitted('saved')).toBeUndefined()
+    expect(view.emitted('close')).toHaveLength(1)
+  })
+
   it('names a new plan after the chosen upstream group and allows a final custom name', async () => {
     const view = render({ oauthOnly: false, overview: upstreamOverview })
     await flushPromises()
@@ -255,7 +356,7 @@ describe('intelligence plan choices and interval validation', () => {
     await view.get('#intelligence-name').setValue('Evening comparison')
     await view.get('form').trigger('submit')
     await flushPromises()
-    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Evening comparison', source_type: 'upstream', upstream_target_id: 21, interval_seconds: 300, timeout_seconds: 600 }))
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Evening comparison', source_type: 'upstream', upstream_target_id: 21, enabled: true, interval_seconds: 300, timeout_seconds: 600 }))
   })
 
   it('preserves an existing upstream plan name and timing until its group is changed', async () => {
@@ -307,7 +408,7 @@ describe('intelligence plan choices and interval validation', () => {
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'local_group', group_id: 5, api_mode: 'chat_completions' }))
   })
 
-  it('defaults to a 10-minute wait and 5-minute interval while preserving all minute presets', async () => {
+  it('defaults to enabled scheduling with a 10-minute wait and 5-minute interval while preserving all minute presets', async () => {
     const view = render()
     await flushPromises()
     await selectOAuth(view)
@@ -320,13 +421,40 @@ describe('intelligence plan choices and interval validation', () => {
       expect(view.get(`[data-timeout="${seconds}"]`).attributes('aria-pressed')).toBe('true')
       expect(view.get(`[data-timeout="${seconds}"]`).text()).toBe(`intelligenceMonitor.minutes:${seconds / 60}`)
     }
-    await view.get('#intelligence-enabled').trigger('click')
+    expect(view.get('#intelligence-enabled').attributes('aria-checked')).toBe('true')
     expect(view.get('[data-interval="300"]').attributes('aria-pressed')).toBe('true')
     await view.get('[data-interval="300"]').trigger('click')
     expect(view.get('[data-interval="300"]').text()).toBe('intelligenceMonitor.minutes:5')
     await view.get('form').trigger('submit')
     await flushPromises()
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, interval_seconds: 300, timeout_seconds: 900 }))
+  })
+
+  it.each(['oauth', 'upstream', 'locked upstream'])('preserves a paused %s plan when reopened and saved', async source => {
+    const oauthOnly = source === 'oauth'
+    const plan = savedPlan({ enabled: false, interval_seconds: 1800, timeout_seconds: 900, source_type: oauthOnly ? 'openai_oauth' : 'upstream', account_id: oauthOnly ? 7 : null, upstream_target_id: oauthOnly ? null : 11 })
+    const view = render({ oauthOnly, overview: upstreamOverview, plan, ...(source === 'locked upstream' ? { upstreamTargetId: 11 } : {}) })
+    await flushPromises()
+    expect(view.get('#intelligence-enabled').attributes('aria-checked')).toBe('false')
+    expect(view.find('[data-interval="300"]').exists()).toBe(false)
+    await view.setProps({ show: false })
+    await view.setProps({ show: true })
+    await flushPromises()
+    expect(view.get('#intelligence-enabled').attributes('aria-checked')).toBe('false')
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ enabled: false, interval_seconds: 1800, timeout_seconds: 900 }))
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it('allows disabling the default schedule before creating a plan', async () => {
+    const view = render({ oauthOnly: false, overview: upstreamOverview, upstreamTargetId: 11 })
+    await flushPromises()
+    expect(view.get('#intelligence-enabled').attributes('aria-checked')).toBe('true')
+    await view.get('#intelligence-enabled').trigger('click')
+    await view.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, interval_seconds: 300, timeout_seconds: 600 }))
   })
 
   it.each([180, 240])('keeps a legacy %s-second timeout selected and unchanged until explicitly edited', async seconds => {

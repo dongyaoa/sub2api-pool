@@ -95,6 +95,40 @@ afterEach(() => {
 })
 
 describe('intelligence history polling state', () => {
+  it('keeps one artwork frame from the initial list read through detail loading, selection and code view', async () => {
+    let resolveRuns!: (value: { items: IntelligenceRun[]; total: number }) => void
+    let resolveDetail!: (value: IntelligenceRun) => void
+    mocks.runs.mockReturnValueOnce(new Promise(resolve => { resolveRuns = resolve }))
+    mocks.detail.mockReturnValueOnce(new Promise(resolve => { resolveDetail = resolve }))
+    const view = render()
+    const frame = view.get('[data-testid="history-artwork-frame"]').element
+    const canvas = () => view.get('[data-testid="history-artwork-frame"]')
+    expect(canvas().attributes('aria-busy')).toBe('true')
+    expect(view.find('[data-testid="history-artwork-loading"]').exists()).toBe(true)
+    expect(view.find('[data-testid="artifact-preview"]').exists()).toBe(false)
+
+    resolveRuns({ items: [run(111), run(112)], total: 2 })
+    await flushPromises()
+    expect(canvas().element).toBe(frame)
+    expect(canvas().attributes('aria-busy')).toBe('true')
+    resolveDetail(run(111))
+    await flushPromises()
+    expect(canvas().element).toBe(frame)
+    expect(canvas().attributes('aria-busy')).toBe('false')
+    expect(view.get('[data-testid="artifact-preview"]').text()).toBe('111')
+
+    mocks.detail.mockReturnValueOnce(new Promise(resolve => { resolveDetail = resolve }))
+    await runButton(view, 112).trigger('click')
+    expect(canvas().element).toBe(frame)
+    expect(canvas().attributes('aria-busy')).toBe('true')
+    resolveDetail(run(112))
+    await flushPromises()
+    const source = view.findAll('button').find(button => button.text() === 'intelligenceMonitor.sourceCode')!
+    await source.trigger('click')
+    expect(canvas().element).toBe(frame)
+    expect(view.get('pre').text()).toBe(run(112).html)
+  })
+
   it('uses compact sidebar pagination and disables requests outside the page bounds', async () => {
     const view = render()
     await flushPromises()

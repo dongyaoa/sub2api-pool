@@ -13,7 +13,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   actions: read
   packages: write
 
@@ -60,6 +60,45 @@ jobs:
         env:
           RELEASE_REF: ${{ steps.release.outputs.commit }}
         run: test "$(git rev-parse HEAD)" = "$RELEASE_REF"
+
+      - name: Protect published application releases
+        uses: actions/github-script@v8
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_REF: ${{ steps.release.outputs.commit }}
+        with:
+          script: |
+            const tag = `pool-v${process.env.RELEASE_VERSION.replace('-pool.', '.')}`;
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              if (!release.draft) {
+                throw new Error(`Published release ${tag} is immutable. Choose a new pool version.`);
+              }
+              if (release.target_commitish !== process.env.RELEASE_REF) {
+                throw new Error(`Draft ${tag} belongs to a different commit.`);
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            // A manually created tag must also resolve to this exact release commit.
+            try {
+              let { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` });
+              let object = ref.object;
+              for (let depth = 0; object.type === 'tag' && depth < 5; depth++) {
+                const { data } = await github.rest.git.getTag({ ...context.repo, tag_sha: object.sha });
+                object = data.object;
+              }
+              if (object.type !== 'commit' || object.sha !== process.env.RELEASE_REF) {
+                throw new Error(`Tag ${tag} does not point to the requested release commit.`);
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+      - name: Test persistent application runtime
+        run: |
+          /bin/sh deploy/tests/pool-app-runtime-test.sh
+          node --test deploy/tests/pool-app-release-test.mjs
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -126,21 +165,9 @@ jobs:
           version_output=$(docker run --rm --network none "$POOL_IMAGE:$RELEASE_VERSION" --version 2>&1)
           printf '%s\n' "$version_output"
           grep -F "Sub2API $RELEASE_VERSION (commit: $RELEASE_REF," <<< "$version_output"
-          docker run -d --name pool-runtime-smoke --network none \
-            -e SERVER_HOST=127.0.0.1 -e SERVER_PORT=8080 "$POOL_IMAGE:$RELEASE_VERSION"
-          trap 'docker rm -f pool-runtime-smoke >/dev/null 2>&1 || true' EXIT
-          for attempt in {1..30}; do
-            if docker exec pool-runtime-smoke wget -q -O - http://127.0.0.1:8080/setup/status \
-              | jq -e '.data.needs_setup == true' >/dev/null; then
-              docker exec pool-runtime-smoke wget -q -O - http://127.0.0.1:8080/ \
-                | grep -i '<!doctype html' >/dev/null
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs pool-runtime-smoke
-          echo '::error::Pool setup server did not become ready'
-          exit 1
+          docker run --rm --network none "$POOL_IMAGE:$RELEASE_VERSION" sh -c \
+            'test -z "${POOL_APP_UPDATE_SUPERVISED:-}" && test ! -d "$POOL_APP_UPDATE_DIR"'
+          /bin/bash deploy/tests/pool-app-docker-test.sh "$POOL_IMAGE:$RELEASE_VERSION"
 
       - name: Require successful CI for the release commit
         uses: actions/github-script@v8
@@ -215,3 +242,105 @@ jobs:
           local_digest=$(docker image inspect "$POOL_IMAGE:$RELEASE_VERSION" --format '{{index .RepoDigests 0}}')
           test "${local_digest##*@}" = "$version_digest"
           printf '| `%s:%s` | `%s` |\n' "$POOL_IMAGE" "$RELEASE_VERSION" "$version_digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Extract the tested application and update manifest
+        env:
+          POOL_IMAGE: ${{ steps.release.outputs.image }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_REF: ${{ steps.release.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pool-app-release"
+          extract=$(docker create --network none "$POOL_IMAGE:$RELEASE_VERSION")
+          trap 'docker rm "$extract" >/dev/null 2>&1 || true' EXIT
+          docker cp "$extract:/app/sub2api" "$RUNNER_TEMP/pool-app-release/sub2api-linux-amd64"
+          asset="$RUNNER_TEMP/pool-app-release/sub2api-linux-amd64"
+          sha=$(sha256sum "$asset" | cut -d ' ' -f 1)
+          size=$(stat -c %s "$asset")
+          test "$size" -gt 0
+          jq -n --arg version "$RELEASE_VERSION" --arg revision "$RELEASE_REF" \
+            --arg sha256 "$sha" --argjson size "$size" \
+            '{schema_version: 1, version: $version, revision: $revision, platform: "linux/amd64",
+              asset: "sub2api-linux-amd64", sha256: $sha256, size: $size}' \
+            > "$RUNNER_TEMP/pool-app-release/pool-update.json"
+
+      - name: Publish complete application update release
+        uses: actions/github-script@v8
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_REF: ${{ steps.release.outputs.commit }}
+          POOL_IMAGE: ${{ steps.release.outputs.image }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const crypto = require('node:crypto');
+            const version = process.env.RELEASE_VERSION;
+            const revision = process.env.RELEASE_REF;
+            const tag = `pool-v${version.replace('-pool.', '.')}`;
+            const directory = path.join(process.env.RUNNER_TEMP, 'pool-app-release');
+            const manifestBytes = fs.readFileSync(path.join(directory, 'pool-update.json'));
+            const manifest = JSON.parse(manifestBytes);
+            const binary = fs.readFileSync(path.join(directory, 'sub2api-linux-amd64'));
+            const digest = crypto.createHash('sha256').update(binary).digest('hex');
+            if (manifest.version !== version || manifest.revision !== revision ||
+                manifest.sha256 !== digest || manifest.size !== binary.length) {
+              throw new Error('Extracted application does not match the update manifest.');
+            }
+            const body = [
+              `Pool ${version} built from \`${revision}\`.`,
+              '',
+              `Image: \`${process.env.POOL_IMAGE}:${version}\` (also published as \`latest\`).`,
+              '',
+              'The online updater installs this release\'s verified Linux amd64 application, including its embedded frontend. The Docker image tag and system dependencies remain unchanged.',
+              'The first upgrade from an older image requires one Docker image update to install the persistent runtime entrypoint. Automatic recovery restores the previous application; it does not roll back database migrations.',
+              '',
+              `Application SHA-256: \`${digest}\``,
+              `Build and validation: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+            let release;
+            try {
+              ({ data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            if (release && (!release.draft || release.target_commitish !== revision)) {
+              throw new Error(`Refusing to overwrite published or mismatched release ${tag}.`);
+            }
+            if (!release) {
+              ({ data: release } = await github.rest.repos.createRelease({
+                ...context.repo, tag_name: tag, target_commitish: revision,
+                name: `Sub2API Pool ${version}`, body, draft: true, prerelease: true,
+                make_latest: 'false',
+              }));
+            }
+            // Failed attempts remain drafts and cannot be discovered by the updater.
+            // Only assets in this unpublished draft may be replaced on retry.
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              ...context.repo, release_id: release.id, per_page: 100,
+            });
+            for (const asset of assets) {
+              if (['sub2api-linux-amd64', 'pool-update.json'].includes(asset.name)) {
+                await github.rest.repos.deleteReleaseAsset({ ...context.repo, asset_id: asset.id });
+              }
+            }
+            for (const [name, data, type] of [
+              ['sub2api-linux-amd64', binary, 'application/octet-stream'],
+              ['pool-update.json', manifestBytes, 'application/json'],
+            ]) {
+              const { data: asset } = await github.rest.repos.uploadReleaseAsset({
+                ...context.repo, release_id: release.id, name, data,
+                headers: { 'content-type': type, 'content-length': data.length },
+              });
+              if (asset.state !== 'uploaded' || asset.size !== data.length ||
+                  (asset.digest && asset.digest !== `sha256:${crypto.createHash('sha256').update(data).digest('hex')}`)) {
+                throw new Error(`Uploaded asset ${name} failed verification; release remains a draft.`);
+              }
+            }
+            const { data: published } = await github.rest.repos.updateRelease({
+              ...context.repo, release_id: release.id, body, draft: false,
+              prerelease: true, make_latest: 'false',
+            });
+            core.summary.addLink(`Online update ${version}`, published.html_url);
+            await core.summary.write();

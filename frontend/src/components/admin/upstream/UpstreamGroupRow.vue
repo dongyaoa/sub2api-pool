@@ -8,6 +8,7 @@
         <span class="font-mono text-[10px] text-gray-400 dark:text-dark-400">{{ target.api_key_masked }}</span>
       </div>
       <div class="flex shrink-0 items-center gap-0.5">
+        <button type="button" class="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-violet-700 transition-colors hover:bg-violet-50 hover:text-violet-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/40 disabled:cursor-not-allowed disabled:opacity-40 dark:text-violet-300 dark:hover:bg-violet-500/10 dark:hover:text-violet-200" :disabled="target.provider !== 'openai'" :title="target.provider === 'openai' ? t('intelligenceMonitor.groupMonitor.open') : t('intelligenceMonitor.groupMonitor.unsupported')" data-testid="group-intelligence" @click="emit('intelligence', target)"><Icon name="lightbulb" size="xs" />{{ t('intelligenceMonitor.groupMonitor.open') }}</button>
         <button type="button" class="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-primary-600 hover:bg-primary-50 disabled:opacity-50 dark:text-primary-400 dark:hover:bg-primary-500/10" :disabled="busy || running" @click="emit('run', target)">
           <Icon :name="running ? 'refresh' : 'play'" size="xs" :class="running && 'animate-spin'" />{{ t(running ? 'upstreamCenter.running' : 'upstreamCenter.run') }}
         </button>
@@ -89,7 +90,7 @@ import { upstreamSyncError } from './newapi'
 import { amount, availability, availabilityColor, compactTokens, latency, latencyColor, money, targetStatus } from './format'
 
 const props = defineProps<{ target: UpstreamTarget; busy: boolean; running: boolean }>()
-const emit = defineEmits<{ details: [target: UpstreamTarget, model: string, record?: UpstreamHistoryRecord]; run: [target: UpstreamTarget]; toggle: [target: UpstreamTarget]; edit: [target: UpstreamTarget]; delete: [target: UpstreamTarget] }>()
+const emit = defineEmits<{ details: [target: UpstreamTarget, model: string, record?: UpstreamHistoryRecord]; intelligence: [target: UpstreamTarget]; run: [target: UpstreamTarget]; toggle: [target: UpstreamTarget]; edit: [target: UpstreamTarget]; delete: [target: UpstreamTarget] }>()
 const { t } = useI18n()
 const selectedModel = ref(props.target.models[0] || '')
 watch(() => props.target.models, models => { if (!models.includes(selectedModel.value)) selectedModel.value = models[0] || '' })

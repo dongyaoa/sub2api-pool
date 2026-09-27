@@ -4,10 +4,11 @@ vi.mock('../client', () => ({ apiClient: { get, post } }))
 import { checkUpdates, getUpdateStatus, getVersion, performUpdate, systemAPI } from '@/api/admin/system'
 
 beforeEach(() => { get.mockReset(); post.mockReset() })
-describe('Pool container update API', () => {
-  it('force-checks the backend release registry with a bounded timeout', async () => {
-    get.mockResolvedValue({ data: { current_version: '0.2.7-pool.4' } })
-    await checkUpdates(true)
+describe('Pool online update API', () => {
+  it('force-checks published program updates with a bounded timeout', async () => {
+    const release = { current_version: '0.2.7-pool.4', update_method: 'binary', update_digest: 'sha256:' + 'c'.repeat(64) }
+    get.mockResolvedValue({ data: release })
+    expect(await checkUpdates(true)).toEqual(release)
     expect(get).toHaveBeenCalledWith('/admin/system/check-updates', { params: { force: 'true' }, timeout: 30000 })
   })
   it('submits a pinned target quickly and retains compatibility exports', async () => {

@@ -78,7 +78,7 @@ func NewPoolUpdateService(cache UpdateCache, github GitHubReleaseClient, build B
 	return s
 }
 
-func (s *UpdateService) PoolUpdatesEnabled() bool { return s.poolRegistry != nil }
+func (s *UpdateService) PoolUpdatesEnabled() bool { return s.appUpdates || s.poolRegistry != nil }
 
 func (s *UpdateService) GetCurrentBuild() (string, string) {
 	return s.currentVersion, s.currentRevision
@@ -127,6 +127,13 @@ func (s *UpdateService) checkPoolUpdate(ctx context.Context, force bool) *Update
 }
 
 func (s *UpdateService) PoolUpdateStatus(ctx context.Context) (*poolupdate.Status, error) {
+	if s.appUpdates {
+		if s.appUpdater == nil {
+			return &poolupdate.Status{Available: false, RecoveryRequired: s.appUnavailableReason == "recovery_required"}, nil
+		}
+		status := s.appUpdater.Status()
+		return &status, nil
+	}
 	if s.poolUpdater == nil {
 		return &poolupdate.Status{Available: false}, nil
 	}
@@ -138,6 +145,9 @@ func (s *UpdateService) PoolUpdateStatus(ctx context.Context) (*poolupdate.Statu
 // StartPoolUpdate revalidates the exact image confirmed in the UI. Only the
 // host helper can run Docker; the web process never receives its socket.
 func (s *UpdateService) StartPoolUpdate(ctx context.Context, request poolupdate.UpdateRequest) (*poolupdate.Job, error) {
+	if s.appUpdates {
+		return s.startApplicationUpdate(ctx, request)
+	}
 	if s.buildType != "release" || s.poolRegistry == nil || s.poolUpdater == nil {
 		return nil, infraerrors.Conflict("POOL_UPDATE_UNAVAILABLE", "Online image updater is not configured for this deployment")
 	}

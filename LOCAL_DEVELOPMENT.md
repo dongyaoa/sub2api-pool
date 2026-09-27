@@ -58,9 +58,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\local-pool.ps1 -Acti
 
 ### 版本提示与官方更新
 
-号池分支独立维护，不再请求官方发行版，也不允许安装或远程回滚到官方发行版。版本检查仅访问固定的号池镜像仓库。Linux Docker 部署可安装主机更新服务，从管理员页面更新号池容器；首次启用、保留现有 Compose 参数及失败恢复见 [号池镜像在线更新](deploy/POOL_ONLINE_UPDATE.md)。
+号池分支独立维护，不请求或安装上游官方发行版。版本检查仅访问 `dongyaoa/sub2api-pool` 的 GitHub Release，后台可下载与发布镜像同次构建的程序，校验后自动重启。新版 Linux amd64 镜像将程序保存在数据卷中，无需额外安装主机更新服务；首次切换及失败恢复见 [号池在线更新](deploy/POOL_ONLINE_UPDATE.md)。
 
-本文件的 Windows 本地进程属于源码开发环境，不能执行镜像在线更新；继续使用下方的本地构建与重启流程。主机 Docker socket 不挂载到应用容器。
+本文件的 Windows 本地进程属于源码开发环境，不能执行程序在线更新；继续使用下方的本地构建与重启流程。在线更新不改变 Docker 镜像标签，也不挂载主机 Docker socket。
 
 前端修改会由启动脚本启动的 Vite 自动热更新。仓库 CI 和锁文件使用 pnpm 9；本机全局 pnpm 11 对 `package.json` 中 `pnpm.overrides` 的配置读取方式不同，会导致锁文件配置不匹配。因此，本仓库使用 `.dev/runtime/pnpm` 中的 pnpm 9.15.9，并通过专用脚本调用，不修改全局 pnpm。
 

@@ -25,6 +25,18 @@ describe('upstream card headline measurements', () => {
   beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-24T00:00:02Z')) })
   afterEach(() => { vi.restoreAllMocks() })
 
+  it('opens intelligence for this group without triggering a probe and explains incompatible providers', async () => {
+    const item = { ...target(), provider: 'openai' as const }
+    const wrapper = mount(UpstreamGroupRow, { props: { target: item, busy: true, running: true }, global: { stubs } })
+    await wrapper.get('[data-testid="group-intelligence"]').trigger('click')
+    expect(wrapper.emitted('intelligence')).toEqual([[item]])
+    expect(wrapper.emitted('run')).toBeUndefined()
+    await wrapper.setProps({ target: { ...item, provider: 'anthropic' } })
+    expect(wrapper.get('[data-testid="group-intelligence"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="group-intelligence"]').attributes('title')).toBe('intelligenceMonitor.groupMonitor.unsupported')
+    wrapper.unmount()
+  })
+
   it.each([['key group', UpstreamGroupRow], ['standalone monitor', UpstreamTargetCard]] as const)('uses fixed seven-day success and the latest latency in %s', async (_, component) => {
     const wrapper = mount(component, { props: { target: target(), busy: false, running: false }, global: { stubs } })
     expect(wrapper.get('[data-testid="upstream-availability"]').text()).toBe('98.25%')

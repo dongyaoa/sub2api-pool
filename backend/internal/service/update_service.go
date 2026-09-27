@@ -21,6 +21,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/poolappupdate"
 	"github.com/Wei-Shaw/sub2api/internal/poolupdate"
 )
 
@@ -76,6 +77,13 @@ type UpdateService struct {
 	poolRelease            *poolupdate.Release
 	poolCheckedAt          time.Time
 	poolChecking           *poolReleaseCheck
+	appUpdates             bool
+	appSource              poolappupdate.Source
+	appUpdater             applicationUpdater
+	appUnavailableReason   string
+	appRelease             *poolappupdate.Release
+	appCheckedAt           time.Time
+	appChecking            *applicationReleaseCheck
 }
 
 // NewUpdateService creates a new UpdateService
@@ -106,6 +114,7 @@ type UpdateInfo struct {
 	CurrentRevision         string       `json:"current_revision,omitempty"`
 	LatestRevision          string       `json:"latest_revision,omitempty"`
 	ImageDigest             string       `json:"image_digest,omitempty"`
+	UpdateDigest            string       `json:"update_digest,omitempty"`
 }
 
 // ReleaseInfo contains GitHub release details
@@ -151,6 +160,9 @@ type GitHubAsset struct {
 
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	if s.appUpdates {
+		return s.checkApplicationUpdate(ctx, force), nil
+	}
 	if s.poolRegistry != nil {
 		return s.checkPoolUpdate(ctx, force), nil
 	}
