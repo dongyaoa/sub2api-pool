@@ -42,7 +42,9 @@ func TestIntelligenceExecutionTraceRequiresBoundOneUsePermit(t *testing.T) {
 	require.Equal(t, AccountTypeAPIKey, snapshot["execution_account_type"])
 	require.Equal(t, PlatformOpenAI, snapshot["execution_account_platform"])
 	require.Equal(t, "https://relay.example:8443", snapshot["execution_account_base_origin"])
-	started, err := time.Parse(time.RFC3339Nano, snapshot["execution_started_at"].(string))
+	startedAt, ok := snapshot["execution_started_at"].(string)
+	require.True(t, ok, "execution start time must be a string")
+	started, err := time.Parse(time.RFC3339Nano, startedAt)
 	require.NoError(t, err)
 	require.WithinDuration(t, time.Now(), started, time.Second)
 	require.Equal(t, "completed", snapshot["execution_source_status"])
@@ -133,8 +135,12 @@ func TestIntelligenceExecutionTraceFollowsLastForwardAttemptForBothTestsAndAPIs(
 						if outcome != "before_forward" {
 							RecordIntelligenceExecutionAccount(bound, &Account{ID: 10, Name: "Failed first route", Type: AccountTypeAPIKey, Platform: PlatformOpenAI})
 							RecordIntelligenceExecutionAccount(bound, &Account{ID: 20, Name: "Final route", Type: AccountTypeOAuth, Platform: PlatformOpenAI})
-							trace := bound.Value(intelligenceExecutionTraceContextKey{}).(*intelligenceExecutionTrace)
-							finalAttemptStartedAt = trace.sourceSnapshot(nil, false)["execution_started_at"].(string)
+							trace, ok := bound.Value(intelligenceExecutionTraceContextKey{}).(*intelligenceExecutionTrace)
+							require.True(t, ok, "bound request must carry an execution trace")
+							require.NotNil(t, trace)
+							startedAt, ok := trace.sourceSnapshot(nil, false)["execution_started_at"].(string)
+							require.True(t, ok, "final attempt start time must be a string")
+							finalAttemptStartedAt = startedAt
 						}
 						if outcome == "transport_error" {
 							return nil, errors.New("simulated transport failure")
