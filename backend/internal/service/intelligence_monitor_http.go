@@ -22,6 +22,16 @@ func (s *IntelligenceMonitorService) clientAndEndpoint(run *IntelligenceMonitorR
 	return s.externalClient, run.SourceEndpoint
 }
 func (s *IntelligenceMonitorService) generate(ctx context.Context, run *IntelligenceMonitorRun, key string) (*int, string, string) {
+	completed := false
+	if run != nil && run.SourceType == "local_group" {
+		var trace *intelligenceExecutionTrace
+		ctx, trace = newIntelligenceExecutionTrace(ctx)
+		defer func() { run.SourceSnapshot = trace.sourceSnapshot(run.SourceSnapshot, completed) }()
+	}
+	prompt, maxOutputTokens, validTest := intelligenceTestRequest(run)
+	if !validTest {
+		return nil, "", "unsupported intelligence test"
+	}
 	client, endpoint := s.clientAndEndpoint(run)
 	if run.SourceType != "local_group" {
 		if err := validateEndpoint(endpoint); err != nil {
@@ -34,10 +44,10 @@ func (s *IntelligenceMonitorService) generate(ctx context.Context, run *Intellig
 	// Loopback requests retain their trusted buffered path and its IQ deadline;
 	// switching that path to streaming would re-enable ordinary gateway guards.
 	stream := run.SourceType != "local_group"
-	payload := map[string]any{"model": IntelligenceMonitorModel, "input": IntelligenceMonitorPrompt, "reasoning": map[string]string{"effort": IntelligenceMonitorReasoning}, "max_output_tokens": 24000, "stream": stream}
+	payload := map[string]any{"model": IntelligenceMonitorModel, "input": prompt, "reasoning": map[string]string{"effort": IntelligenceMonitorReasoning}, "max_output_tokens": maxOutputTokens, "stream": stream}
 	if run.APIMode == MonitorAPIModeChatCompletions {
 		path = "/v1/chat/completions"
-		payload = map[string]any{"model": IntelligenceMonitorModel, "messages": []map[string]string{{"role": "user", "content": IntelligenceMonitorPrompt}}, "reasoning_effort": IntelligenceMonitorReasoning, "max_completion_tokens": 24000, "stream": stream}
+		payload = map[string]any{"model": IntelligenceMonitorModel, "messages": []map[string]string{{"role": "user", "content": prompt}}, "reasoning_effort": IntelligenceMonitorReasoning, "max_completion_tokens": maxOutputTokens, "stream": stream}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -80,6 +90,7 @@ func (s *IntelligenceMonitorService) generate(ctx context.Context, run *Intellig
 	}
 	// Generated text is retained for comparison, but echoed credentials never are.
 	text = strings.ReplaceAll(text, key, "[REDACTED]")
+	completed = message == ""
 	return &status, text, message
 }
 

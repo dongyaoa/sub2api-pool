@@ -47,8 +47,8 @@ func TestUpstreamStoragePurgeRejectsIncorrectConfirmationAndUnknownItems(t *test
 		{"supplier missing", "supplier", sqlmock.NewRows([]string{"name"}), service.ErrUpstreamStorageNotFound},
 		{"target changed name", "target", sqlmock.NewRows([]string{"id", "name", "busy"}).AddRow(7, "new name", false), service.ErrUpstreamStorageConfirm},
 		{"target missing", "target", sqlmock.NewRows([]string{"id", "name", "busy"}), service.ErrUpstreamStorageNotFound},
-		{"plan changed name", "intelligence", sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id"}).AddRow("new name", nil, nil, "external", nil), service.ErrUpstreamStorageConfirm},
-		{"plan missing", "intelligence", sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id"}), service.ErrUpstreamStorageNotFound},
+		{"plan changed name", "intelligence", sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id", "borrowed"}).AddRow("new name", nil, nil, "external", nil, false), service.ErrUpstreamStorageConfirm},
+		{"plan missing", "intelligence", sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id", "borrowed"}), service.ErrUpstreamStorageNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
@@ -60,7 +60,7 @@ func TestUpstreamStoragePurgeRejectsIncorrectConfirmationAndUnknownItems(t *test
 				query = `SELECT id,name,COALESCE.*FROM upstream_targets WHERE id=\$1 ORDER BY id FOR UPDATE`
 			}
 			if tc.kind == "intelligence" {
-				query = `SELECT name,local_api_key_id,local_key_owner_id,source_type,account_id FROM intelligence_monitor_plans WHERE id=\$1 FOR UPDATE`
+				query = `SELECT name,local_api_key_id,local_key_owner_id,source_type,account_id,local_api_key_borrowed FROM intelligence_monitor_plans WHERE id=\$1 FOR UPDATE`
 			}
 			mock.ExpectQuery(query).WithArgs(int64(7)).WillReturnRows(tc.result)
 			mock.ExpectRollback()
@@ -102,7 +102,7 @@ func TestUpstreamStoragePurgeIntelligenceDisablesOnlyDedicatedOwnedKey(t *testin
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	expectStoragePurgeLocks(mock)
-	mock.ExpectQuery(`SELECT name,local_api_key_id,local_key_owner_id,source_type,account_id FROM intelligence_monitor_plans.*FOR UPDATE`).WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id"}).AddRow("Local plan", 23, 31, "local_group", nil))
+	mock.ExpectQuery(`SELECT name,local_api_key_id,local_key_owner_id,source_type,account_id,local_api_key_borrowed FROM intelligence_monitor_plans.*FOR UPDATE`).WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id", "borrowed"}).AddRow("Local plan", 23, 31, "local_group", nil, false))
 	mock.ExpectQuery(`SELECT EXISTS.*status IN \('pending','running'\)`).WithArgs(pq.Array([]int64{7})).WillReturnRows(sqlmock.NewRows([]string{"busy"}).AddRow(false))
 	mock.ExpectQuery(`UPDATE api_keys SET status='disabled'.*id=\$1 AND user_id=\$2 AND deleted_at IS NULL RETURNING key`).WithArgs(int64(23), int64(31)).WillReturnRows(sqlmock.NewRows([]string{"key"}).AddRow("dedicated-monitor-key"))
 	mock.ExpectExec(`DELETE FROM intelligence_monitor_runs WHERE plan_id=\$1`).WithArgs(int64(7)).WillReturnResult(sqlmock.NewResult(0, 20))
@@ -119,7 +119,7 @@ func TestUpstreamStoragePurgeOAuthDoesNotTouchActualAccount(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	expectStoragePurgeLocks(mock)
-	mock.ExpectQuery(`SELECT name,local_api_key_id,local_key_owner_id.*FOR UPDATE`).WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id"}).AddRow("Old OAuth account", nil, nil, "openai_oauth", 29))
+	mock.ExpectQuery(`SELECT name,local_api_key_id,local_key_owner_id.*FOR UPDATE`).WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id", "borrowed"}).AddRow("Old OAuth account", nil, nil, "openai_oauth", 29, false))
 	mock.ExpectQuery(`SELECT name FROM accounts WHERE id=\$1 AND deleted_at IS NULL FOR SHARE NOWAIT`).WithArgs(int64(29)).WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("OAuth account"))
 	mock.ExpectQuery(`SELECT EXISTS.*status IN \('pending','running'\)`).WithArgs(pq.Array([]int64{7})).WillReturnRows(sqlmock.NewRows([]string{"busy"}).AddRow(false))
 	mock.ExpectExec(`DELETE FROM intelligence_monitor_runs WHERE plan_id=\$1`).WithArgs(int64(7)).WillReturnResult(sqlmock.NewResult(0, 20))
@@ -136,7 +136,7 @@ func TestUpstreamStoragePurgePlanRejectsActiveWork(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	expectStoragePurgeLocks(mock)
-	mock.ExpectQuery(`SELECT name,local_api_key_id,local_key_owner_id.*FOR UPDATE`).WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id"}).AddRow("Plan", 23, 31, "local_group", nil))
+	mock.ExpectQuery(`SELECT name,local_api_key_id,local_key_owner_id.*FOR UPDATE`).WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"name", "key_id", "owner_id", "source_type", "account_id", "borrowed"}).AddRow("Plan", 23, 31, "local_group", nil, false))
 	mock.ExpectQuery(`SELECT EXISTS.*status IN \('pending','running'\)`).WithArgs(pq.Array([]int64{7})).WillReturnRows(sqlmock.NewRows([]string{"busy"}).AddRow(true))
 	mock.ExpectRollback()
 	_, err = (&upstreamCenterRepository{db: db}).PurgeStorage(context.Background(), service.UpstreamStoragePurgeInput{Kind: "intelligence", ID: 7, ConfirmName: "Plan"})

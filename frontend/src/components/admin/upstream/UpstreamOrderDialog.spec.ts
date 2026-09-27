@@ -49,6 +49,15 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined })
 
 describe('upstream manual order dialog', () => {
+  it.each(['local', 'external'] as const)('reorders only %s intelligence slots while preserving other sources in the full sequence', async intelligenceFilter => {
+    mocks.plans.mockResolvedValue({ items: [...planItems, { id: 7, name: 'Another local', source_type: 'local_group', enabled: true }] })
+    const view = render({ scope: 'intelligence', intelligenceFilter }); await flushPromises()
+    const expected = intelligenceFilter === 'local' ? [2, 7] : [42, 21]
+    expect(ids(view)).toEqual(expected)
+    await view.get(`[data-order-item="${expected[0]}"] [data-move-order="down"]`).trigger('click')
+    await view.get('[data-save-order]').trigger('click'); await flushPromises()
+    expect(mocks.reorderIntelligence).toHaveBeenCalledWith({ scope: 'intelligence', ids: intelligenceFilter === 'local' ? [42, 21, 7, 2] : [21, 42, 2, 7] })
+  })
   it('loads the full server-ordered upstream list with explanatory text and accessible boundary buttons', async () => {
     const view = render()
     await flushPromises()

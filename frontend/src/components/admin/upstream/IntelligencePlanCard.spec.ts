@@ -16,6 +16,39 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it('adds the candy strip only after opt-in and preserves the original card and artwork DOM when absent', async () => {
+    const artwork = run(90)
+    const view = render(plan({ latest_run: artwork, recent_runs: [artwork] }))
+    const article = view.get('article').element
+    const sectionClass = view.get('section').attributes('class')
+    const previewElement = view.get('.test-preview').element
+    expect(view.find('[data-testid="candy-monitor"]').exists()).toBe(false)
+    const candy = { ...run(100), plan_id: 1, test_kind: 'candy' as const, correct: true, answer: '21' }
+    await view.setProps({ plan: plan({ latest_run: artwork, recent_runs: [artwork], candy_enabled: true, candy_latest_run: candy }) })
+    expect(view.find('[data-testid="candy-monitor"]').exists()).toBe(true)
+    expect(view.get('.test-preview').element).toBe(previewElement)
+    await view.get('[data-testid="candy-run"]').trigger('click')
+    await view.get('[data-candy-status="correct"]').trigger('click')
+    expect(view.emitted('candyRun')).toEqual([[]])
+    expect(view.emitted('candySelect')).toEqual([[candy]])
+    expect(view.emitted('run')).toBeUndefined()
+    await view.setProps({ plan: plan({ latest_run: artwork, candy_enabled: false, candy_latest_run: candy }) })
+    expect(view.find('[data-testid="candy-monitor"]').exists()).toBe(false)
+    expect(view.get('article').element).toBe(article)
+    expect(view.get('section').attributes('class')).toBe(sectionClass)
+    view.unmount()
+  })
+
+  it('allows pelican while candy is active but protects edit/archive and keeps artwork separate', () => {
+    const artwork = run(90)
+    const view = render(plan({ candy_enabled: true, latest_run: artwork, recent_runs: [artwork], candy_latest_run: { ...run(100, 'running'), test_kind: 'candy' } }))
+    expect(view.findAllComponents(preview).map(child => child.props('run').id)).toEqual([90])
+    expect(view.get('aside').findAll('button').find(button => button.text() === 'intelligenceMonitor.run')!.attributes('disabled')).toBeUndefined()
+    expect(view.get('[aria-label="intelligenceMonitor.edit"]').attributes('disabled')).toBeDefined()
+    expect(view.get('[aria-label="intelligenceMonitor.archive"]').attributes('disabled')).toBeDefined()
+    expect(view.get('[data-testid="candy-run"]').attributes('disabled')).toBeDefined()
+    view.unmount()
+  })
   it('replaces a stale recent record with the completed latest run of the same ID', () => {
     const latest = { ...run(91), html: '<svg>completed</svg>' }
     const view = render(plan({ latest_run: latest, recent_runs: [run(91, 'pending'), run(90)] }))
@@ -204,6 +237,16 @@ describe('intelligence plan schedule countdown', () => {
     view?.unmount()
     view = undefined
     vi.useRealTimers()
+  })
+
+  it('keeps the pelican countdown independent of a candy-only active request', async () => {
+    const value = plan({ enabled: true, candy_enabled: true, candy_latest_run: { ...run(100, 'running'), test_kind: 'candy' }, next_run_at: '2026-09-24T00:05:00Z' })
+    view = render(value)
+    expect(view.get('[data-testid="intelligence-countdown"]').text()).toBe('00:05:00')
+    expect(vi.getTimerCount()).toBe(1)
+    await view.setProps({ plan: { ...value, candy_latest_run: { ...run(100), test_kind: 'candy', correct: true } } })
+    expect(view.get('[data-testid="intelligence-countdown"]').text()).toBe('00:05:00')
+    expect(vi.getTimerCount()).toBe(1)
   })
 
   it('stops hidden card countdowns and restores the current deadline when shown again', async () => {

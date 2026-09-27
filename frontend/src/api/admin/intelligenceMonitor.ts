@@ -5,6 +5,7 @@ export const PELICAN_REASONING = 'high'
 export const PELICAN_PROMPT = '创建一个 HTML，内容是用 SVG 绘制一个鹈鹕骑自行车的 2D 动画。你不需要任何测试。'
 export type IntelligenceSource = 'external' | 'upstream' | 'local_group' | 'openai_oauth'
 export type IntelligenceRunStatus = 'pending' | 'running' | 'succeeded' | 'failed'
+export type IntelligenceTestKind = 'pelican' | 'candy'
 export type IntelligenceRate = Record<string, unknown> | null
 export interface IntelligenceOrderInput { scope: 'intelligence' | 'oauth'; ids: number[] }
 
@@ -22,6 +23,9 @@ export interface IntelligencePlanInput {
   notes: string
   api_mode: 'responses' | 'chat_completions'
   enabled: boolean
+  candy_enabled?: boolean
+  candy_interval_seconds?: number
+  local_api_key_id?: number | null
   interval_seconds: number
   timeout_seconds: number
 }
@@ -29,6 +33,9 @@ export interface IntelligenceRun {
   id: number
   plan_id: number
   status: IntelligenceRunStatus
+  test_kind?: IntelligenceTestKind
+  correct?: boolean | null
+  answer?: string
   trigger: 'manual' | 'scheduled'
   created_at: string
   started_at: string | null
@@ -63,6 +70,15 @@ export interface IntelligencePlan extends Omit<IntelligencePlanInput, 'api_key'>
   next_run_at: string | null
   latest_run: IntelligenceRun | null
   recent_runs?: IntelligenceRun[]
+  candy_latest_run?: IntelligenceRun | null
+  candy_recent_runs?: IntelligenceRun[]
+  candy_next_run_at?: string | null
+  candy_last_run_at?: string | null
+  local_api_key_managed?: boolean
+  local_api_key_name?: string
+  local_group_name?: string
+  local_group_rate_multiplier?: number | null
+  local_group_status?: string
 }
 export interface IntelligenceRunPage {
   items: IntelligenceRun[]
@@ -88,8 +104,11 @@ export const intelligenceMonitorAPI = {
   async run(id: number): Promise<IntelligenceRun> {
     return (await apiClient.post(`${base}/plans/${id}/run`)).data
   },
-  async runs(planID: number, page = 1, signal?: AbortSignal): Promise<IntelligenceRunPage> {
-    return (await apiClient.get(`${base}/runs`, { params: { plan_id: planID, page, page_size: 12 }, signal })).data
+  async runCandy(id: number): Promise<IntelligenceRun> {
+    return (await apiClient.post(`${base}/plans/${id}/candy/run`)).data
+  },
+  async runs(planID: number, page = 1, signal?: AbortSignal, testKind?: IntelligenceTestKind): Promise<IntelligenceRunPage> {
+    return (await apiClient.get(`${base}/runs`, { params: { plan_id: planID, page, page_size: 12, ...(testKind ? { test_kind: testKind } : {}) }, signal })).data
   },
   async detail(id: number, signal?: AbortSignal): Promise<IntelligenceRun> {
     return (await apiClient.get(`${base}/runs/${id}`, { signal })).data

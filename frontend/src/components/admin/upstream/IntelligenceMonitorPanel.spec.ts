@@ -5,7 +5,7 @@ import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import IntelligenceMonitorPanel from './IntelligenceMonitorPanel.vue'
 
 const mocks = vi.hoisted(() => ({
-  plans: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), run: vi.fn(),
+  plans: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), run: vi.fn(), runCandy: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
   purge: vi.fn(),
 }))
@@ -19,8 +19,10 @@ vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
   name: 'IntelligencePlanCard', props: ['plan', 'overview', 'busy', 'visible'],
   template: '<div data-testid="plan-card" :data-id="plan.id">{{ plan.name }}</div>',
 } }))
+vi.mock('./IntelligenceLocalCard.vue', () => ({ default: { name: 'IntelligenceLocalCard', props: ['plan', 'busy', 'visible'], template: '<div data-testid="plan-card" :data-id="plan.id">{{ plan.name }}</div>' } }))
 vi.mock('./IntelligencePlanDialog.vue', () => ({ default: { name: 'IntelligencePlanDialog', template: '<div />' } }))
 vi.mock('./IntelligenceHistoryDialog.vue', () => ({ default: { name: 'IntelligenceHistoryDialog', template: '<div />' } }))
+vi.mock('./IntelligenceCandyDetailDialog.vue', () => ({ default: { name: 'IntelligenceCandyDetailDialog', props: ['run'], emits: ['close'], template: '<div data-testid="candy-detail" />' } }))
 vi.mock('./UpstreamOrderDialog.vue', () => ({ default: {
   name: 'UpstreamOrderDialog', props: ['show', 'scope'], emits: ['close', 'saved'],
   template: '<div v-if="show" data-testid="order-dialog" :data-scope="scope"><button data-testid="save-order" @click="$emit(\'saved\')">Save order</button><button data-testid="cancel-order" @click="$emit(\'close\')">Cancel order</button></div>',
@@ -37,9 +39,9 @@ function plan(id: number, name: string, source_type: IntelligenceSource = 'exter
 }
 const original = () => [plan(1, 'Alpha external'), plan(2, 'Beta upstream', 'upstream'), plan(3, 'Gamma local', 'local_group'), plan(4, 'OAuth A', 'openai_oauth'), plan(5, 'OAuth B', 'openai_oauth')]
 let wrapper: VueWrapper | undefined
-function render(oauthOnly = false) {
+function render(oauthOnly = false, localOnly = false) {
   wrapper = mount(IntelligenceMonitorPanel, {
-    props: { overview: null, oauthOnly },
+    props: { overview: null, oauthOnly, localOnly },
     global: { stubs: { Icon: true, BaseDialog: true, Select: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input data-testid="source-filter" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' } } },
   })
   return wrapper
@@ -55,6 +57,33 @@ beforeEach(() => {
 })
 
 describe('intelligence monitoring site tabs', () => {
+  it('pauses retained card previews while the large history dialog is open and resumes on close', async () => {
+    const view = render(); await flushPromises()
+    const card = view.getComponent({ name: 'IntelligencePlanCard' })
+    const element = card.element
+    expect(card.props('visible')).toBe(true)
+    card.vm.$emit('history', 91); await flushPromises()
+    expect(card.props('visible')).toBe(false)
+    view.getComponent({ name: 'IntelligenceHistoryDialog' }).vm.$emit('close'); await flushPromises()
+    expect(card.props('visible')).toBe(true)
+    expect(card.element).toBe(element)
+  })
+  it('renders local groups only in their independent workbench while retaining the shared refresh and action pipeline', async () => {
+    const item = { ...plan(8, 'Primary local', 'local_group'), candy_enabled: true, candy_latest_run: { id: 101, plan_id: 8, status: 'running', test_kind: 'candy' } as IntelligenceRun }
+    mocks.plans.mockResolvedValue({ items: [...original(), item] })
+    const view = render(false, true); await flushPromises()
+    expect(cardIDs(view)).toEqual([3, 8])
+    expect(view.find('[data-testid="local-group-workbench"]').exists()).toBe(true)
+    expect(view.find('[data-testid="intelligence-site-tabs"]').exists()).toBe(false)
+    expect(view.findAllComponents({ name: 'IntelligencePlanCard' })).toHaveLength(0)
+    expect(view.findAllComponents({ name: 'IntelligenceLocalCard' })).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+    view.findAllComponents({ name: 'IntelligenceLocalCard' })[1]!.vm.$emit('run'); await flushPromises()
+    expect(mocks.run).toHaveBeenCalledWith(8)
+    await view.findAll('button').find(button => button.text() === 'intelligenceMonitor.local.add')!.trigger('click')
+    expect(view.getComponent({ name: 'IntelligencePlanDialog' }).attributes('local-only')).toBe('true')
+  })
   const items = () => [
     { ...plan(1, 'Alpha premium', 'upstream'), upstream_target_id: 11 },
     { ...plan(2, 'Alpha standard', 'upstream'), upstream_target_id: 12 },
@@ -81,15 +110,14 @@ describe('intelligence monitoring site tabs', () => {
   it('groups plans by supplier, external provider note or origin, and local site with plan counts', async () => {
     const view = await renderSites()
     const tabs = view.findAll('[data-testid="intelligence-site-tabs"] [role="tab"]')
-    expect(tabs.map(tab => tab.text())).toEqual(['intelligenceMonitor.allSites9', 'Alpha relay2', 'Beta relay1', 'relay.example2', 'intelligenceMonitor.source.local_group2', 'Named relay2'])
+    expect(tabs.map(tab => tab.text())).toEqual(['intelligenceMonitor.allSites7', 'Alpha relay2', 'Beta relay1', 'relay.example2', 'Named relay2'])
     await site(view, 'upstream:1').trigger('click')
     expect(cardIDs(view)).toEqual([1, 2])
     await site(view, 'external:https://relay.example').trigger('click')
     expect(cardIDs(view)).toEqual([4, 5])
     await site(view, 'external:note:Named relay').trigger('click')
     expect(cardIDs(view)).toEqual([8, 9])
-    await site(view, 'local').trigger('click')
-    expect(cardIDs(view)).toEqual([6, 7])
+    expect(view.find('[data-site="local"]').exists()).toBe(false)
   })
 
   it('keeps the same cards while filtering, refreshing or leaving the panel, and retains the selected site', async () => {
@@ -122,7 +150,7 @@ describe('intelligence monitoring site tabs', () => {
     await flushPromises()
     expect(site(view, 'all').attributes('aria-selected')).toBe('true')
     expect(view.find('[data-site="upstream:1"]').exists()).toBe(false)
-    expect(cardIDs(view)).toEqual([9, 8, 7, 6, 5, 4, 3])
+    expect(cardIDs(view)).toEqual([9, 8, 5, 4, 3])
     expect(view.findAll('[role="tab"]')[1].text()).toBe('Named relay2')
   })
 
@@ -135,7 +163,7 @@ describe('intelligence monitoring site tabs', () => {
     await site(view, 'upstream:1').trigger('keydown', { key: 'End' })
     expect(cardIDs(view)).toEqual([8, 9])
     await site(view, 'external:note:Named relay').trigger('keydown', { key: 'Home' })
-    expect(cardIDs(view)).toHaveLength(9)
+    expect(cardIDs(view)).toHaveLength(7)
   })
 
   it('does not add site tabs to the OAuth account panel', async () => {
@@ -148,6 +176,79 @@ describe('intelligence monitoring site tabs', () => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('intelligence monitoring manual order', () => {
+  it.each([false, true])('runs candy only on explicit action in the matching panel and blocks duplicate generation (OAuth: %s)', async oauthOnly => {
+    const item = { ...plan(1, 'Candy plan', oauthOnly ? 'openai_oauth' : 'upstream'), candy_enabled: true }
+    mocks.plans.mockResolvedValue({ items: [item] })
+    const view = render(oauthOnly); await flushPromises()
+    const card = view.getComponent({ name: 'IntelligencePlanCard' })
+    expect(mocks.runCandy).not.toHaveBeenCalled()
+    let resolve!: (run: IntelligenceRun) => void
+    mocks.runCandy.mockReturnValueOnce(new Promise(yes => { resolve = yes }))
+    card.vm.$emit('candyRun'); card.vm.$emit('candyRun'); card.vm.$emit('run')
+    await flushPromises()
+    expect(mocks.runCandy).toHaveBeenCalledTimes(1)
+    expect(mocks.runCandy).toHaveBeenCalledWith(1)
+    expect(mocks.run).not.toHaveBeenCalled()
+    expect(card.props('busy')).toBe(true)
+    const queued = { id: 101, plan_id: 1, status: 'pending', test_kind: 'candy' } as IntelligenceRun
+    mocks.plans.mockRejectedValue(new Error('offline')); resolve(queued); await flushPromises()
+    expect(card.props('plan')).toMatchObject({ candy_latest_run: queued, latest_run: null })
+    expect(card.props('busy')).toBe(false)
+    card.vm.$emit('candyRun'); card.vm.$emit('run'); await flushPromises()
+    expect(mocks.runCandy).toHaveBeenCalledTimes(1)
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores candy action while disabled and polls candy-only active work every two seconds', async () => {
+    const item = plan(1, 'Candy plan')
+    mocks.plans.mockResolvedValue({ items: [item] })
+    const view = render(); await flushPromises()
+    view.getComponent({ name: 'IntelligencePlanCard' }).vm.$emit('candyRun'); await flushPromises()
+    expect(mocks.runCandy).not.toHaveBeenCalled()
+    const candy = { id: 101, plan_id: 1, status: 'running', test_kind: 'candy' } as IntelligenceRun
+    mocks.plans.mockResolvedValue({ items: [{ ...item, candy_enabled: true, candy_latest_run: candy }] })
+    await refreshButton(view).trigger('click'); await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(mocks.plans).toHaveBeenCalledTimes(3)
+    mocks.plans.mockResolvedValue({ items: [{ ...item, candy_enabled: true, candy_latest_run: { ...candy, status: 'succeeded', correct: true } }] })
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(4999)
+    expect(mocks.plans).toHaveBeenCalledTimes(4)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(mocks.plans).toHaveBeenCalledTimes(5)
+  })
+
+  it('updates the selected candy record from polling, pauses previews, and removes its detail when the panel hides', async () => {
+    const candy = { id: 101, plan_id: 1, status: 'running', test_kind: 'candy' } as IntelligenceRun
+    const item = { ...plan(1, 'Candy plan'), candy_enabled: true, candy_latest_run: candy }
+    mocks.plans.mockResolvedValue({ items: [item] })
+    const view = render(); await flushPromises()
+    const card = view.getComponent({ name: 'IntelligencePlanCard' })
+    card.vm.$emit('candySelect', candy); await flushPromises()
+    expect(card.props('visible')).toBe(false)
+    expect(view.getComponent({ name: 'IntelligenceCandyDetailDialog' }).props('run')).toEqual(candy)
+    const completed = { ...candy, status: 'succeeded', correct: false, answer: '20' } as IntelligenceRun
+    mocks.plans.mockResolvedValue({ items: [{ ...item, candy_latest_run: completed }] })
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(view.getComponent({ name: 'IntelligenceCandyDetailDialog' }).props('run')).toEqual(completed)
+    await view.setProps({ active: false })
+    expect(view.find('[data-testid="candy-detail"]').exists()).toBe(false)
+  })
+
+  it.each(['resolve', 'reject'] as const)('ignores late candy %s after hiding the panel', async result => {
+    mocks.plans.mockResolvedValue({ items: [{ ...plan(1, 'Candy'), candy_enabled: true }] })
+    const view = render(); await flushPromises()
+    let resolve!: (run: IntelligenceRun) => void, reject!: (error: Error) => void
+    mocks.runCandy.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no }))
+    view.getComponent({ name: 'IntelligencePlanCard' }).vm.$emit('candyRun'); await flushPromises()
+    await view.setProps({ active: false })
+    if (result === 'resolve') resolve({ id: 101, status: 'pending', test_kind: 'candy' } as IntelligenceRun)
+    else reject(new Error('offline'))
+    await flushPromises()
+    expect(mocks.showSuccess).not.toHaveBeenCalled()
+    expect(mocks.showError).not.toHaveBeenCalled()
+    expect(mocks.plans).toHaveBeenCalledTimes(1)
+  })
   it('refreshes live generations every two seconds and immediately retries an outstanding manual refresh', async () => {
     const running = { ...plan(1, 'Live'), latest_run: { id: 10, plan_id: 1, status: 'running' } as IntelligenceRun }
     mocks.plans.mockResolvedValue({ items: [running] })
@@ -189,7 +290,7 @@ describe('intelligence monitoring manual order', () => {
     else { expect(mocks.archive).toHaveBeenCalledWith(4); expect(mocks.purge).not.toHaveBeenCalled() }
     expect(removal.props('show')).toBe(false)
   })
-  it.each([{ oauthOnly: false, scope: 'intelligence', ids: [1, 2, 3] }, { oauthOnly: true, scope: 'oauth', ids: [4, 5] }])('opens the full $scope list with an independent scope', async ({ oauthOnly, scope, ids }) => {
+  it.each([{ oauthOnly: false, scope: 'intelligence', ids: [1, 2] }, { oauthOnly: true, scope: 'oauth', ids: [4, 5] }])('opens the full $scope list with an independent scope', async ({ oauthOnly, scope, ids }) => {
     const view = render(oauthOnly)
     await flushPromises()
     expect(cardIDs(view)).toEqual(ids)
@@ -235,19 +336,19 @@ describe('intelligence monitoring manual order', () => {
     await flushPromises()
     expect(olderSignal.aborted).toBe(true)
     expect(view.find('[data-testid="order-dialog"]').exists()).toBe(false)
-    expect(cardIDs(view)).toEqual([3, 1, 2])
+    expect(cardIDs(view)).toEqual([1, 2])
     expect(mocks.showSuccess).not.toHaveBeenCalled()
     resolveOlder({ items: original() })
     await flushPromises()
-    expect(cardIDs(view)).toEqual([3, 1, 2])
+    expect(cardIDs(view)).toEqual([1, 2])
     await view.get('[aria-label="intelligenceMonitor.search"]').setValue('a')
-    expect(cardIDs(view)).toEqual([3, 1, 2])
+    expect(cardIDs(view)).toEqual([1, 2])
     await view.get('[data-testid="source-filter"]').setValue('external')
     expect(cardIDs(view)).toEqual([1])
     await view.get('[data-testid="source-filter"]').setValue('')
     await vi.advanceTimersByTimeAsync(5000)
     expect(mocks.plans).toHaveBeenCalledTimes(4)
-    expect(cardIDs(view)).toEqual([3, 1, 2])
+    expect(cardIDs(view)).toEqual([1, 2])
   })
 
   it('pauses polling while sorting and cancels without writing or reloading the list', async () => {
@@ -281,7 +382,7 @@ describe('intelligence monitoring manual order', () => {
     await flushPromises()
     expect(mocks.plans).toHaveBeenCalledTimes(2)
     expect(view.get('[data-testid="plan-card"]').element).toBe(firstCard)
-    expect(cardIDs(view)).toEqual([1, 2, 3])
+    expect(cardIDs(view)).toEqual([1, 2])
   })
 
   it('aborts a pending read on hide and ignores its late response', async () => {
@@ -295,7 +396,7 @@ describe('intelligence monitoring manual order', () => {
     expect(signal.aborted).toBe(true)
     resolveOld({ items: [] })
     await flushPromises()
-    expect(cardIDs(view)).toEqual([1, 2, 3])
+    expect(cardIDs(view)).toEqual([1, 2])
     expect(refreshButton(view).attributes('disabled')).toBeUndefined()
   })
 })

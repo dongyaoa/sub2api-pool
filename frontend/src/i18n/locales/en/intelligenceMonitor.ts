@@ -1,12 +1,32 @@
 export default {
   intelligenceMonitor: {
+    candy: {
+      title: 'Candy test', recent: 'Latest 60 runs', run: 'Run test', running: 'Testing', pending: 'Queued',
+      failed: 'Request failed', correct: 'Correct answer', incorrect: 'Incorrect answer', unknown: 'Not scored', answer: 'Model answer',
+      detail: 'Candy test result', response: 'Full response', noResponse: 'No response yet', enabled: 'Add candy test', queued: 'Candy test queued',
+      enableHint: 'Uses this plan’s model and high reasoning effort, making separate candy requests on its own interval. Manual runs are also available.',
+      interval: 'Candy test interval', intervalHint: 'Defaults to 3 minutes. The main scheduling switch controls both tests; each can still be run manually when scheduling is off.',
+      scoringHint: 'The expected answer, 21, is used only for scoring and is not included in the prompt sent to the model.',
+    },
+    local: {
+      groupRate: 'Group multiplier', search: 'Search groups, plans or keys',
+      title: 'Local monitoring', add: 'Add monitor', order: 'Reorder local monitors', emptyTitle: 'Add a local group to start monitoring',
+      emptyHint: 'Use an existing key owned by the current administrator or create a dedicated monitor key. Pelican results and candy records follow separate schedules.',
+      key: 'Monitoring key', keyHint: 'Only available keys owned by the current administrator are listed. An existing key selects its bound group automatically; its binding cannot be changed here.',
+      managedKey: 'Create a dedicated monitoring key automatically', bindingFixed: 'Bound group', existingHint: 'Uses the selected administrator key through the local gateway, following its group, permissions and billing settings.',
+      managedBadge: 'Dedicated key', ownBadge: 'Administrator key', keysFailed: 'Unable to load available keys. Refresh to retry.', keyUnavailable: 'This key or its group is no longer available. Select another key.', pelican: 'Pelican test',
+    },
+    execution: {
+      title: 'Actual execution source', completed: 'Completed', attempted: 'Attempted', account: 'Execution account', attemptedAccount: 'Attempted account', type: 'Account type', origin: 'Configured account site', attempts: 'Request attempts',
+      supplier: 'Linked upstream', target: 'Upstream group', notRecorded: 'This historical record did not save the execution account.', unbound: 'No upstream group linked to this account', ambiguous: 'Multiple upstream links; no unique match', unavailable: 'Upstream links temporarily unavailable', unknown: 'Upstream link not recorded',
+    },
     groupMonitor: {
       open: 'Intelligence monitor', unsupported: 'Available for OpenAI-compatible groups only', title: '{name} · Intelligence monitor',
       emptyTitle: 'Create a pelican test for this group', emptyHint: 'Uses this group’s key and effective rate. New plans default to scheduled testing every 5 minutes, starting after saving. Disable scheduling for manual tests.',
       create: 'Create test plan', sharedHint: 'Plans and results also appear in the intelligence monitor.',
       alreadyExists: 'This group already has a test plan. Close settings and refresh the list.',
     },
-    group: 'Group', recentWorks: 'Recent results', newestFirst: 'Newest on the left', latest: 'Latest', retention: 'Only the latest 20 results per plan are retained; older records are removed automatically.',
+    group: 'Group', recentWorks: 'Recent results', newestFirst: 'Newest on the left', latest: 'Latest', retention: 'Only the latest 20 artworks per plan are retained; older artworks are removed automatically.',
     oauth: { title: 'OAuth monitoring', add: 'Add OAuth monitor', account: 'OAuth account', select: 'Select an OpenAI OAuth account', search: 'Search account names…', nameHint: 'Plan names follow the name in account management', emptyTitle: 'Compare results from each OAuth account', emptyHint: 'Select a local OpenAI OAuth account to run the same pelican test and retain the latest 20 results.', noAccounts: 'No enabled, healthy and schedulable OpenAI OAuth accounts available', loading: 'Loading all available OAuth accounts…', loadFailed: 'Unable to load OAuth accounts. Refresh to retry.', unavailable: 'The selected account is disabled or temporarily unavailable. Refresh and select an account again.', hint: 'Only enabled, healthy and currently schedulable real OpenAI OAuth accounts are shown. Runs directly on the selected account using its token refresh and proxy settings.', more: 'Next', previous: 'Previous', fixedModelRequired: 'This account cannot use gpt-6-astra directly with its current model settings. Check its model allowlist or mappings in account management.' },
     title: 'Intelligence monitor', add: 'New test plan', edit: 'Edit test plan', search: 'Search plans, providers or groups', allSources: 'All sources', allSites: 'All sites', quickSwitch: 'Quick switch monitoring sites',
     source: { external: 'External endpoint', upstream: 'Upstream key', local_group: 'Local group', openai_oauth: 'OpenAI OAuth' },

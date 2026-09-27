@@ -7,7 +7,7 @@ import UpstreamIntelligenceDialog from './UpstreamIntelligenceDialog.vue'
 import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
 
 const mocks = vi.hoisted(() => ({
-  plans: vi.fn(), update: vi.fn(), run: vi.fn(), archive: vi.fn(), purge: vi.fn(),
+  plans: vi.fn(), update: vi.fn(), run: vi.fn(), runCandy: vi.fn(), archive: vi.fn(), purge: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -15,7 +15,7 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: mocks, PELICAN_MODEL: 'gpt-6-astra', PELICAN_REASONING: 'high' }))
 vi.mock('@/api/admin/upstreamCenter', () => ({ upstreamCenterAPI: { purge: mocks.purge } }))
 vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
-  name: 'IntelligencePlanCard', props: ['plan', 'overview', 'busy', 'visible'], emits: ['run', 'toggle', 'edit', 'history', 'archive'],
+  name: 'IntelligencePlanCard', props: ['plan', 'overview', 'busy', 'visible'], emits: ['run', 'candyRun', 'candySelect', 'toggle', 'edit', 'history', 'archive'],
   setup(props: { visible: boolean }) {
     const panelActive = inject(intelligencePanelActiveKey, ref(true))
     const active = computed(() => panelActive.value && props.visible)
@@ -37,6 +37,7 @@ vi.mock('./UpstreamDeleteDialog.vue', () => ({ default: {
   name: 'UpstreamDeleteDialog', props: ['show', 'item', 'busy', 'error'], emits: ['close', 'confirm'],
   template: '<div data-testid="plan-delete">{{ error }}</div>',
 } }))
+vi.mock('./IntelligenceCandyDetailDialog.vue', () => ({ default: { name: 'IntelligenceCandyDetailDialog', props: ['run'], emits: ['close'], template: '<div data-testid="candy-detail" />' } }))
 
 const baseDialog = {
   name: 'BaseDialog', props: { show: Boolean, title: String, width: String, closeOnEscape: Boolean, showCloseButton: Boolean }, emits: ['close'],
@@ -73,6 +74,53 @@ afterEach(() => {
 })
 
 describe('upstream group intelligence dialog', () => {
+  it('uses the separate candy action, prevents duplicate runs and retains its result through refresh errors', async () => {
+    mocks.plans.mockResolvedValue({ items: [plan(1, { candy_enabled: true })] })
+    const view = render(); await flushPromises()
+    const response = deferred<IntelligenceRun>(); mocks.runCandy.mockReturnValueOnce(response.promise)
+    cards(view)[0]!.vm.$emit('candyRun'); cards(view)[0]!.vm.$emit('candyRun'); cards(view)[0]!.vm.$emit('run')
+    await flushPromises()
+    expect(mocks.runCandy).toHaveBeenCalledTimes(1)
+    expect(mocks.run).not.toHaveBeenCalled()
+    const queued = { id: 102, plan_id: 1, test_kind: 'candy', status: 'pending' } as IntelligenceRun
+    mocks.plans.mockRejectedValue(new Error('offline')); response.resolve(queued); await flushPromises()
+    expect(cards(view)[0]!.props('plan')).toMatchObject({ candy_latest_run: queued, latest_run: null })
+    expect(view.emitted('changed')).toHaveLength(1)
+    cards(view)[0]!.vm.$emit('candyRun'); cards(view)[0]!.vm.$emit('run'); await flushPromises()
+    expect(mocks.runCandy).toHaveBeenCalledTimes(1)
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+  })
+
+  it('polls candy-only activity, updates its open detail and protects the parent modal until detail closes', async () => {
+    const candy = { id: 102, plan_id: 1, test_kind: 'candy', status: 'running' } as IntelligenceRun
+    mocks.plans.mockResolvedValue({ items: [plan(1, { candy_enabled: true, candy_latest_run: candy })] })
+    const view = render(); await flushPromises()
+    cards(view)[0]!.vm.$emit('candySelect', candy); await flushPromises()
+    const child = view.getComponent({ name: 'IntelligenceCandyDetailDialog' })
+    const parent = view.getComponent({ name: 'BaseDialog' })
+    expect(parent.props('closeOnEscape')).toBe(false)
+    expect(cards(view)[0]!.props('visible')).toBe(false)
+    parent.vm.$emit('close'); expect(view.emitted('close')).toBeUndefined()
+    const completed = { ...candy, status: 'succeeded', correct: true, answer: '21' } as IntelligenceRun
+    mocks.plans.mockResolvedValue({ items: [plan(1, { candy_enabled: true, candy_latest_run: completed })] })
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+    expect(child.props('run')).toEqual(completed)
+    child.vm.$emit('close'); await flushPromises()
+    expect(parent.props('closeOnEscape')).toBe(true)
+    expect(cards(view)[0]!.props('visible')).toBe(true)
+    expect(view.find('[data-testid="candy-detail"]').exists()).toBe(false)
+  })
+
+  it('preserves candy metadata when saved plan responses omit run summaries', async () => {
+    const candy = { id: 102, plan_id: 1, test_kind: 'candy', status: 'succeeded', correct: true } as IntelligenceRun
+    mocks.plans.mockResolvedValue({ items: [plan(1, { candy_enabled: true, candy_latest_run: candy, candy_recent_runs: [candy] })] })
+    const view = render(); await flushPromises()
+    cards(view)[0]!.vm.$emit('edit'); await flushPromises()
+    mocks.plans.mockRejectedValue(new Error('offline'))
+    view.getComponent({ name: 'IntelligencePlanDialog' }).vm.$emit('saved', plan(1, { candy_enabled: false })); await flushPromises()
+    expect(cards(view)[0]!.props('plan')).toMatchObject({ candy_enabled: false, candy_latest_run: candy, candy_recent_runs: [candy] })
+  })
   it('loads only this group and displays every legacy linked plan without a new-plan button', async () => {
     mocks.plans.mockResolvedValue({ items: [plan(1), plan(2), plan(3, { upstream_target_id: 12 }), plan(4, { source_type: 'external' })] })
     const view = render()

@@ -100,6 +100,9 @@ func BindIntelligenceLocalRequest(request *http.Request, key *APIKey) (context.C
 	ctx, cancel := context.WithDeadline(ctx, permit.deadline)
 	stop := context.AfterFunc(permit.ctx, cancel)
 	ctx = context.WithValue(ctx, intelligenceGenerationContextKey{}, true)
+	if trace, ok := permit.ctx.Value(intelligenceExecutionTraceContextKey{}).(*intelligenceExecutionTrace); ok && trace != nil {
+		ctx = context.WithValue(ctx, intelligenceExecutionTraceContextKey{}, trace)
+	}
 	ctx = context.WithValue(ctx, boundUpstreamLifecycleContextKey{}, true)
 	ctx = WithHTTPUpstreamResponseHeaderTimeout(ctx, time.Duration(IntelligenceMonitorMaxTimeoutSeconds)*time.Second)
 	return ctx, func() { stop(); cancel() }

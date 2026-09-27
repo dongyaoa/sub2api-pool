@@ -80,14 +80,15 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 
 type OrderScope = 'suppliers' | 'monitors' | 'groups' | 'intelligence' | 'oauth'
 interface OrderItem { id: number; name: string; description: string; paused?: boolean }
-const props = defineProps<{ show: boolean; scope: OrderScope; supplierId?: number; supplierName?: string }>()
+const props = defineProps<{ show: boolean; scope: OrderScope; supplierId?: number; supplierName?: string; intelligenceFilter?: 'local' | 'external' }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 const { t } = useI18n()
 const app = useAppStore()
-const title = computed(() => props.scope === 'groups' && props.supplierName
+const title = computed(() => props.scope === 'intelligence' && props.intelligenceFilter === 'local' ? t('intelligenceMonitor.local.order') : props.scope === 'groups' && props.supplierName
   ? t('upstreamCenter.order.groupTitle', { name: props.supplierName })
   : t(`upstreamCenter.order.titles.${props.scope}`))
 const items = ref<OrderItem[]>([])
+const fullIntelligenceOrder = ref<number[]>([])
 const loading = ref(false)
 const loaded = ref(false)
 const saving = ref(false)
@@ -103,6 +104,7 @@ function reset() {
   controller?.abort()
   controller = undefined
   items.value = []
+  fullIntelligenceOrder.value = []
   loaded.value = false
   loading.value = false
   saving.value = false
@@ -122,10 +124,13 @@ async function loadOrder() {
   const supplierId = props.supplierId
   try {
     let result: OrderItem[]
+    let fullOrder: number[] = []
     if (scope === 'intelligence' || scope === 'oauth') {
       const plans = await intelligenceMonitorAPI.plans(current.signal)
       if (!Array.isArray(plans.items)) throw new Error(t('upstreamCenter.order.loadError'))
-      result = plans.items.filter(plan => (plan.source_type === 'openai_oauth') === (scope === 'oauth')).map(plan => ({
+      const scoped = plans.items.filter(plan => (plan.source_type === 'openai_oauth') === (scope === 'oauth'))
+      fullOrder = scoped.map(plan => plan.id)
+      result = scoped.filter(plan => scope !== 'intelligence' || !props.intelligenceFilter || (plan.source_type === 'local_group') === (props.intelligenceFilter === 'local')).map(plan => ({
         id: plan.id, name: plan.name, paused: !plan.enabled,
         description: [t(`intelligenceMonitor.source.${plan.source_type}`), plan.endpoint || plan.source_name].filter(Boolean).join(' · '),
       }))
@@ -143,6 +148,7 @@ async function loadOrder() {
     if (current.signal.aborted || disposed || currentSession !== session || !props.show) return
     if (result.some(item => !Number.isSafeInteger(item.id) || item.id <= 0) || new Set(result.map(item => item.id)).size !== result.length) throw new Error(t('upstreamCenter.order.loadError'))
     items.value = result
+    fullIntelligenceOrder.value = fullOrder
     loaded.value = true
   } catch (error) {
     if (!current.signal.aborted && !disposed && currentSession === session) loadError.value = extractApiErrorMessage(error, t('upstreamCenter.order.loadError'))
@@ -172,7 +178,12 @@ async function save() {
   const scope = props.scope
   const supplierId = props.supplierId
   const currentSession = session
-  const ids = items.value.map(item => item.id)
+  let ids = items.value.map(item => item.id)
+  if (scope === 'intelligence' && props.intelligenceFilter) {
+    const selected = new Set(ids)
+    let cursor = 0
+    ids = fullIntelligenceOrder.value.map(id => selected.has(id) ? ids[cursor++]! : id)
+  }
   saving.value = true
   saveError.value = ''
   try {
@@ -200,7 +211,7 @@ function close() {
   emit('close')
 }
 
-watch(() => [props.show, props.scope, props.supplierId] as const, () => {
+watch(() => [props.show, props.scope, props.supplierId, props.intelligenceFilter] as const, () => {
   reset()
   if (props.show) void loadOrder()
 }, { immediate: true })

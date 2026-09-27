@@ -36,7 +36,7 @@ func TestUpstreamStoragePurgePostgres(t *testing.T) {
 CREATE TABLE api_keys(id BIGINT PRIMARY KEY,user_id BIGINT NOT NULL,key TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',updated_at TIMESTAMPTZ,deleted_at TIMESTAMPTZ);
 CREATE TABLE usage_logs(id BIGSERIAL PRIMARY KEY,created_at TIMESTAMPTZ NOT NULL,account_id BIGINT NOT NULL,group_id BIGINT,user_id BIGINT NOT NULL DEFAULT 1,api_key_id BIGINT NOT NULL DEFAULT 1,requested_model TEXT,model TEXT NOT NULL DEFAULT 'model',request_id TEXT,actual_cost NUMERIC NOT NULL DEFAULT 0,total_cost NUMERIC NOT NULL DEFAULT 0,account_stats_cost NUMERIC,account_rate_multiplier NUMERIC,billing_type SMALLINT NOT NULL DEFAULT 0);`)
 	require.NoError(t, err)
-	for _, file := range []string{"242_upstream_center.sql", "243_upstream_finance.sql", "244_upstream_remote_billing.sql", "245_intelligence_monitor.sql", "246_intelligence_monitor_oauth.sql", "251_upstream_manual_order.sql", "253_upstream_newapi_credentials.sql", "254_upstream_storage_retention.sql"} {
+	for _, file := range []string{"242_upstream_center.sql", "243_upstream_finance.sql", "244_upstream_remote_billing.sql", "245_intelligence_monitor.sql", "246_intelligence_monitor_oauth.sql", "251_upstream_manual_order.sql", "253_upstream_newapi_credentials.sql", "254_upstream_storage_retention.sql", "257_intelligence_candy_monitor.sql", "258_intelligence_candy_schedule.sql", "259_intelligence_local_key_ownership.sql"} {
 		body, err := migrations.FS.ReadFile(file)
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, string(body))
@@ -76,7 +76,9 @@ INSERT INTO intelligence_monitor_plans(id,name,source_type,account_id,created_by
 INSERT INTO intelligence_monitor_runs(plan_id,plan_name,status,trigger,model,reasoning_effort,prompt,source_type,source_name,source_endpoint,api_mode,timeout_seconds,html,raw_text) VALUES
 (21,'Retain art','succeeded','manual','m','high','draw','upstream','Current child','https://example.com','responses',300,'<html>retained</html>','raw retained'),
 (23,'Local plan','succeeded','manual','m','high','draw','local_group','group','','responses',300,'<html>delete</html>','delete raw'),
-(24,'OAuth plan','succeeded','manual','m','high','draw','openai_oauth','OAuth','','responses',300,'<html>oauth</html>','oauth raw');`)
+(24,'OAuth plan','succeeded','manual','m','high','draw','openai_oauth','OAuth','','responses',300,'<html>oauth</html>','oauth raw');
+INSERT INTO intelligence_monitor_runs(plan_id,plan_name,status,trigger,model,reasoning_effort,prompt,source_type,source_name,source_endpoint,api_mode,timeout_seconds,test_kind,correct,answer,raw_text)
+SELECT plan_id,plan_name,status,trigger,model,reasoning_effort,'candy prompt',source_type,source_name,source_endpoint,api_mode,timeout_seconds,'candy',TRUE,'retained answer','candy explanation' FROM intelligence_monitor_runs;`)
 	require.NoError(t, err)
 	repo := &upstreamCenterRepository{db: db}
 	page, err := repo.ListStorageArchives(ctx)
@@ -95,7 +97,7 @@ INSERT INTO intelligence_monitor_runs(plan_id,plan_name,status,trigger,model,rea
 	require.ErrorIs(t, err, service.ErrUpstreamStorageBusy)
 	require.Equal(t, int64(5), count(`SELECT COUNT(*) FROM upstream_monitor_history`))
 	_, err = db.ExecContext(ctx, `UPDATE upstream_targets SET balance_lease_until=NULL WHERE id=11;
-UPDATE intelligence_monitor_runs SET status='pending' WHERE plan_id=21`)
+UPDATE intelligence_monitor_runs SET status='pending' WHERE plan_id=21 AND test_kind='candy'`)
 	require.NoError(t, err)
 	_, err = repo.PurgeStorage(ctx, service.UpstreamStoragePurgeInput{Kind: "supplier", ID: 1, ConfirmName: "Archive me"})
 	require.ErrorIs(t, err, service.ErrUpstreamStorageBusy)
@@ -118,6 +120,15 @@ UPDATE intelligence_monitor_runs SET status='pending' WHERE plan_id=21`)
 	require.Equal(t, int64(2), count(`SELECT COUNT(*) FROM upstream_finance_ledger`))
 	require.Equal(t, int64(1), count(`SELECT COUNT(*) FROM intelligence_monitor_plans WHERE id=21 AND NOT enabled AND next_run_at IS NULL AND upstream_target_id IS NULL AND api_key_encrypted=''`))
 	require.Equal(t, int64(1), count(`SELECT COUNT(*) FROM intelligence_monitor_runs WHERE plan_id=21 AND html='<html>retained</html>'`))
+	require.Equal(t, int64(1), count(`SELECT COUNT(*) FROM intelligence_monitor_runs WHERE plan_id=21 AND test_kind='candy' AND answer='retained answer'`), "supplier purge also preserves completed candy snapshots")
+	_, err = db.ExecContext(ctx, `UPDATE intelligence_monitor_runs SET status='pending' WHERE plan_id=23 AND test_kind='candy'`)
+	require.NoError(t, err)
+	_, err = repo.PurgeStorage(ctx, service.UpstreamStoragePurgeInput{Kind: "intelligence", ID: 23, ConfirmName: "Local plan"})
+	require.ErrorIs(t, err, service.ErrUpstreamStorageBusy, "pending candy prevents deleting the plan or its dedicated key")
+	require.Equal(t, int64(1), count(`SELECT COUNT(*) FROM api_keys WHERE id=201 AND status='active'`))
+	require.Equal(t, int64(2), count(`SELECT COUNT(*) FROM intelligence_monitor_runs WHERE plan_id=23`))
+	_, err = db.ExecContext(ctx, `UPDATE intelligence_monitor_runs SET status='succeeded' WHERE plan_id=23 AND test_kind='candy'`)
+	require.NoError(t, err)
 	keys, err := repo.PurgeStorage(ctx, service.UpstreamStoragePurgeInput{Kind: "intelligence", ID: 23, ConfirmName: "Local plan"})
 	require.NoError(t, err)
 	require.Equal(t, []string{"dedicated-key"}, keys)
@@ -139,7 +150,7 @@ func TestUpstreamStoragePurgeOAuthCurrentAccountNamePostgres(t *testing.T) {
 	db, ctx, otherDB := upstreamStorageTestDB(t)
 	_, err := db.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN name VARCHAR(100) NOT NULL DEFAULT 'Account'`)
 	require.NoError(t, err)
-	for _, file := range []string{"245_intelligence_monitor.sql", "246_intelligence_monitor_oauth.sql"} {
+	for _, file := range []string{"245_intelligence_monitor.sql", "246_intelligence_monitor_oauth.sql", "257_intelligence_candy_monitor.sql", "258_intelligence_candy_schedule.sql", "259_intelligence_local_key_ownership.sql"} {
 		body, err := migrations.FS.ReadFile(file)
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, string(body))

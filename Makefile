@@ -6,11 +6,20 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/tokenRefresh.spec.ts \
 	src/api/__tests__/admin.system.poolUpdate.spec.ts \
 	src/api/__tests__/admin.upstreamCenter.storage.spec.ts \
+	src/api/__tests__/admin.intelligenceMonitor.candy.spec.ts \
 	src/components/common/__tests__/VersionBadge.spec.ts \
 	src/components/admin/upstream/IntelligenceArtifactPreview.spec.ts \
 	src/components/admin/upstream/IntelligenceHistoryDialog.spec.ts \
 	src/components/admin/upstream/IntelligencePlanCard.spec.ts \
 	src/components/admin/upstream/IntelligenceMonitorPanel.spec.ts \
+	src/components/admin/upstream/IntelligenceCandyBar.spec.ts \
+	src/components/admin/upstream/IntelligenceCandyDetailDialog.spec.ts \
+	src/components/admin/upstream/IntelligenceExecutionSource.spec.ts \
+	src/components/admin/upstream/IntelligenceLocalCard.spec.ts \
+	src/components/admin/upstream/IntelligenceLocalSource.spec.ts \
+	src/components/admin/upstream/intelligenceCandy.spec.ts \
+	src/components/admin/upstream/UpstreamIntelligenceDialog.spec.ts \
+	src/components/admin/upstream/UpstreamOrderDialog.spec.ts \
 	src/components/admin/upstream/intelligenceArtworkLoader.spec.ts \
 	src/components/admin/upstream/monitorReconcile.spec.ts \
 	src/composables/__tests__/useMonitorRefresh.spec.ts \

@@ -188,7 +188,7 @@ func detachUpstreamIntelligencePlans(ctx context.Context, tx *sql.Tx, targetIDs 
 	if err = rejectActiveIntelligenceRuns(ctx, tx, planIDs); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE intelligence_monitor_plans SET enabled=FALSE,next_run_at=NULL,upstream_target_id=NULL,api_key_encrypted='',updated_at=clock_timestamp() WHERE id=ANY($1)`, pq.Array(planIDs))
+	_, err = tx.ExecContext(ctx, `UPDATE intelligence_monitor_plans SET enabled=FALSE,next_run_at=NULL,candy_next_run_at=NULL,upstream_target_id=NULL,api_key_encrypted='',updated_at=clock_timestamp() WHERE id=ANY($1)`, pq.Array(planIDs))
 	return err
 }
 
@@ -206,7 +206,8 @@ func rejectActiveIntelligenceRuns(ctx context.Context, tx *sql.Tx, planIDs []int
 func purgeIntelligenceStorage(ctx context.Context, tx *sql.Tx, in service.UpstreamStoragePurgeInput) ([]string, error) {
 	var name, sourceType string
 	var keyID, ownerID, accountID *int64
-	if err := tx.QueryRowContext(ctx, `SELECT name,local_api_key_id,local_key_owner_id,source_type,account_id FROM intelligence_monitor_plans WHERE id=$1 FOR UPDATE`, in.ID).Scan(&name, &keyID, &ownerID, &sourceType, &accountID); err != nil {
+	var borrowed bool
+	if err := tx.QueryRowContext(ctx, `SELECT name,local_api_key_id,local_key_owner_id,source_type,account_id,local_api_key_borrowed FROM intelligence_monitor_plans WHERE id=$1 FOR UPDATE`, in.ID).Scan(&name, &keyID, &ownerID, &sourceType, &accountID, &borrowed); err != nil {
 		return nil, upstreamStorageQueryError(err)
 	}
 	if sourceType == "openai_oauth" && accountID != nil {
@@ -232,7 +233,7 @@ func purgeIntelligenceStorage(ctx context.Context, tx *sql.Tx, in service.Upstre
 		return nil, err
 	}
 	keys := []string{}
-	if keyID != nil && ownerID != nil {
+	if keyID != nil && ownerID != nil && !borrowed {
 		var key string
 		err := tx.QueryRowContext(ctx, `UPDATE api_keys SET status='disabled',updated_at=NOW() WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL RETURNING key`, *keyID, *ownerID).Scan(&key)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

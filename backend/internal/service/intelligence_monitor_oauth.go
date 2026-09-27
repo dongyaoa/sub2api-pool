@@ -59,6 +59,10 @@ func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Contex
 }
 
 func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, run *IntelligenceMonitorRun) (*int, string, string) {
+	prompt, maxOutputTokens, validTest := intelligenceTestRequest(run)
+	if !validTest {
+		return nil, "", "unsupported intelligence test"
+	}
 	if msg, _ := run.SourceSnapshot["resolution_error"].(string); msg != "" {
 		return nil, "", msg
 	}
@@ -110,9 +114,9 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	defer cancel()
 	payload, _ := json.Marshal(map[string]any{
 		"model":             IntelligenceMonitorModel,
-		"input":             []map[string]any{{"role": "user", "content": []map[string]string{{"type": "input_text", "text": IntelligenceMonitorPrompt}}}},
+		"input":             []map[string]any{{"role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}}},
 		"reasoning":         map[string]string{"effort": IntelligenceMonitorReasoning},
-		"max_output_tokens": 24000, "stream": false, "store": false,
+		"max_output_tokens": maxOutputTokens, "stream": false, "store": false,
 	})
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1/v1/responses", bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")

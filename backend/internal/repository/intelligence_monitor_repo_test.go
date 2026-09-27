@@ -6,6 +6,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +17,7 @@ func TestIntelligenceRepositoryArchiveDisablesDedicatedKeyTransactionally(t *tes
 	repo := &intelligenceMonitorRepository{db: db}
 	mock.ExpectBegin()
 	mock.ExpectExec(`SELECT pg_advisory_xact_lock\(251,0\)`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT local_api_key_id FROM intelligence_monitor_plans .*FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"local_api_key_id"}).AddRow(22))
+	mock.ExpectQuery(`SELECT local_api_key_id,local_api_key_borrowed FROM intelligence_monitor_plans .*FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"local_api_key_id", "borrowed"}).AddRow(22, false))
 	mock.ExpectQuery(`SELECT EXISTS.*intelligence_monitor_runs`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"busy"}).AddRow(false))
 	mock.ExpectExec(`UPDATE api_keys SET status='disabled'`).WithArgs(int64(22)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE intelligence_monitor_plans SET deleted_at=.*api_key_encrypted=''`).WithArgs(int64(3)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -32,7 +33,7 @@ func TestIntelligenceRepositoryArchivePreservesRunningGeneration(t *testing.T) {
 	repo := &intelligenceMonitorRepository{db: db}
 	mock.ExpectBegin()
 	mock.ExpectExec(`SELECT pg_advisory_xact_lock\(251,0\)`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT local_api_key_id FROM intelligence_monitor_plans .*FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"local_api_key_id"}).AddRow(22))
+	mock.ExpectQuery(`SELECT local_api_key_id,local_api_key_borrowed FROM intelligence_monitor_plans .*FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"local_api_key_id", "borrowed"}).AddRow(22, false))
 	mock.ExpectQuery(`SELECT EXISTS.*intelligence_monitor_runs`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"busy"}).AddRow(true))
 	mock.ExpectRollback()
 	require.ErrorIs(t, repo.ArchivePlan(context.Background(), 3), service.ErrIntelligenceBusy)
@@ -61,9 +62,9 @@ func TestIntelligenceRepositoryCompletionLocksPlanFirstAndClearsCredential(t *te
 	repo := &intelligenceMonitorRepository{db: db}
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT id FROM intelligence_monitor_plans WHERE id=\$1 FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(3))
-	mock.ExpectQuery(`UPDATE intelligence_monitor_runs SET status=.*request_key_encrypted=''`).WithArgs(int64(11), "worker-token", "failed", nil, "cancelled", "", "", "null", "{}").WillReturnRows(sqlmock.NewRows([]string{"plan_id"}).AddRow(3))
-	mock.ExpectExec(`UPDATE intelligence_monitor_plans SET last_run_at=`).WithArgs(int64(3)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`DELETE FROM intelligence_monitor_runs .*status IN \('succeeded','failed'\).*OFFSET \$2`).WithArgs(int64(3), 20).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`UPDATE intelligence_monitor_runs SET status=.*request_key_encrypted=''`).WithArgs(int64(11), "worker-token", "failed", nil, "cancelled", "", "", "null", "{}", nil, "").WillReturnRows(sqlmock.NewRows([]string{"plan_id", "test_kind"}).AddRow(3, "pelican"))
+	mock.ExpectExec(`UPDATE intelligence_monitor_plans p SET last_run_at=`).WithArgs(pq.Array([]int64{3}), "pelican").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM intelligence_monitor_runs .*status IN \('succeeded','failed'\).*OFFSET \$2`).WithArgs(int64(3), 20, 60).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	run := &service.IntelligenceMonitorRun{ID: 11, PlanID: 3, LeaseToken: "worker-token", Status: "failed", Error: "cancelled", SourceSnapshot: map[string]any{}}
 	require.NoError(t, repo.CompleteRun(context.Background(), run))

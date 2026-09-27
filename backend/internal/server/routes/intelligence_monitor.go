@@ -17,6 +17,7 @@ func registerIntelligenceMonitorRoutes(admin *gin.RouterGroup, h *handler.Handle
 	group.PUT("/plans/:id", api.UpdatePlan)
 	group.DELETE("/plans/:id", api.DeletePlan)
 	group.POST("/plans/:id/run", api.Run)
+	group.POST("/plans/:id/candy/run", api.RunCandy)
 	group.GET("/runs", api.ListRuns)
 	group.GET("/runs/:id", api.GetRun)
 }

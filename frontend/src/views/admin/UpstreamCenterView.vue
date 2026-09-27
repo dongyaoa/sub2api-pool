@@ -2,12 +2,13 @@
   <AppLayout>
     <div class="mx-auto w-full min-w-0 max-w-[1600px] space-y-4 pb-6">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 dark:border-dark-700">
-        <div class="flex min-w-0 gap-3 overflow-x-auto sm:gap-5" role="tablist" :aria-label="t('upstreamCenter.title')"><button v-for="item in tabs" :id="`upstream-tab-${item}`" :key="item" type="button" role="tab" :aria-selected="tab === item" aria-controls="upstream-panel" class="relative flex shrink-0 items-center gap-1.5 border-b-2 pb-3 pt-1 text-sm transition-colors" :class="tab === item ? 'border-primary-600 font-semibold text-primary-700 dark:border-primary-400 dark:text-primary-300' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200'" @click="tab = item"><Icon :name="item === 'suppliers' ? 'server' : item === 'monitors' ? 'chart' : item === 'oauth' ? 'shield' : 'lightbulb'" size="sm" />{{ item === 'oauth' ? t('intelligenceMonitor.oauth.title') : t(`upstreamCenter.tabs.${item}`) }}<span v-if="item === 'suppliers' || item === 'monitors'" class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-normal text-gray-500 dark:bg-dark-800 dark:text-dark-400">{{ item === 'suppliers' ? overview?.suppliers.length || 0 : overview?.monitors.length || 0 }}</span></button></div>
+        <div class="flex min-w-0 gap-3 overflow-x-auto sm:gap-5" role="tablist" :aria-label="t('upstreamCenter.title')"><button v-for="item in tabs" :id="`upstream-tab-${item}`" :key="item" type="button" role="tab" :aria-selected="tab === item" aria-controls="upstream-panel" class="relative flex shrink-0 items-center gap-1.5 border-b-2 pb-3 pt-1 text-sm transition-colors" :class="tab === item ? 'border-primary-600 font-semibold text-primary-700 dark:border-primary-400 dark:text-primary-300' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200'" @click="tab = item"><Icon :name="item === 'suppliers' ? 'server' : item === 'monitors' ? 'chart' : item === 'oauth' ? 'shield' : item === 'local' ? 'grid' : 'lightbulb'" size="sm" />{{ item === 'oauth' ? t('intelligenceMonitor.oauth.title') : t(`upstreamCenter.tabs.${item}`) }}<span v-if="item === 'suppliers' || item === 'monitors'" class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-normal text-gray-500 dark:bg-dark-800 dark:text-dark-400">{{ item === 'suppliers' ? overview?.suppliers.length || 0 : overview?.monitors.length || 0 }}</span></button></div>
         <div class="mb-2 flex items-center gap-2"><button type="button" class="btn btn-secondary btn-sm" data-testid="upstream-storage" @click="storageDialog = true"><Icon name="database" size="sm" class="mr-1.5" />{{ t('upstreamCenter.storage.title') }}</button><button v-if="tab === 'suppliers' || tab === 'monitors'" type="button" class="btn btn-primary btn-sm" @click="tab === 'suppliers' ? openSupplier() : openTarget()"><Icon name="plus" size="sm" class="mr-1.5" />{{ t(tab === 'suppliers' ? 'upstreamCenter.addSupplier' : 'upstreamCenter.addMonitor') }}</button></div>
       </div>
       <div v-if="error" role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-900 dark:bg-rose-500/10 dark:text-rose-400"><span>{{ error }}</span><button type="button" class="font-medium underline" @click="reload()">{{ t('upstreamCenter.retry') }}</button></div>
       <div id="upstream-panel" role="tabpanel" :aria-labelledby="`upstream-tab-${tab}`" :aria-busy="loading" class="space-y-4">
         <IntelligenceMonitorPanel v-if="visitedMonitorTabs.intelligence" v-show="tab === 'intelligence'" :hidden="tab !== 'intelligence'" :active="tab === 'intelligence'" :overview="overview" :refresh-key="storageRevision" @refresh-overview="reload()" />
+        <IntelligenceMonitorPanel v-if="visitedMonitorTabs.local" v-show="tab === 'local'" :hidden="tab !== 'local'" :active="tab === 'local'" local-only :overview="overview" :refresh-key="storageRevision" @refresh-overview="reload()" />
         <IntelligenceMonitorPanel v-if="visitedMonitorTabs.oauth" v-show="tab === 'oauth'" :hidden="tab !== 'oauth'" :active="tab === 'oauth'" oauth-only :overview="overview" :refresh-key="storageRevision" @refresh-overview="reload()" />
         <template v-if="tab === 'suppliers' || tab === 'monitors'">
           <section v-if="overview" class="grid grid-cols-2 gap-3 lg:grid-cols-4" :aria-label="t(tab === 'suppliers' ? 'upstreamCenter.finance.title' : 'upstreamCenter.tabs.monitors')">
@@ -78,12 +79,12 @@ import { reconcileMonitorData } from '@/components/admin/upstream/monitorReconci
 const UpstreamIntelligenceDialog = defineAsyncComponent(() => import('@/components/admin/upstream/UpstreamIntelligenceDialog.vue'))
 const { t } = useI18n()
 const app = useAppStore()
-const tabs = ['suppliers', 'monitors', 'intelligence', 'oauth'] as const
+const tabs = ['suppliers', 'monitors', 'intelligence', 'local', 'oauth'] as const
 const windows: UpstreamWindow[] = ['24h', '7d', '30d']
 const tab = ref<typeof tabs[number]>('suppliers'), window = ref<UpstreamWindow>('24h'), search = ref('')
-const visitedMonitorTabs = ref({ intelligence: false, oauth: false })
+const visitedMonitorTabs = ref({ intelligence: false, local: false, oauth: false })
 watch(tab, value => {
-  if (value === 'intelligence' || value === 'oauth') visitedMonitorTabs.value[value] = true
+  if (value === 'intelligence' || value === 'local' || value === 'oauth') visitedMonitorTabs.value[value] = true
 })
 const overview = ref<UpstreamOverview | null>(null), error = ref(''), updatedAt = ref('')
 const selectedSupplierId = ref<number | null>(null)
@@ -161,7 +162,7 @@ const { loading, refresh: reload } = useMonitorRefresh({
 watch(window, () => void reload())
 watch(tab, (value, previous) => {
   search.value = ''
-  if ((value === 'suppliers' || value === 'monitors') && (previous === 'intelligence' || previous === 'oauth')) void reload()
+  if ((value === 'suppliers' || value === 'monitors') && (previous === 'intelligence' || previous === 'local' || previous === 'oauth')) void reload()
 })
 const supplierDialog = ref(false), targetDialog = ref(false), editingSupplier = ref<UpstreamSupplier | null>(null), editingTarget = ref<UpstreamTarget | null>(null), targetSupplier = ref<UpstreamSupplier | null>(null)
 function openSupplier(supplier: UpstreamSupplier | null = null) { editingSupplier.value = supplier; supplierDialog.value = true }

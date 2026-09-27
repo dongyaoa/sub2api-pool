@@ -247,6 +247,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			service.RecordIntelligenceExecutionAccount(c.Request.Context(), account)
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
 		var cyberBlockBodyChat []byte

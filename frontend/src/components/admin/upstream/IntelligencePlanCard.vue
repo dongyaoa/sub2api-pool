@@ -26,10 +26,11 @@
       </div>
       <div class="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-dark-700">
         <button type="button" class="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 disabled:opacity-40 dark:text-primary-400" :disabled="busy || active" @click="emit('run')"><Icon :name="active ? 'clock' : 'play'" size="xs" />{{ t(active ? `intelligenceMonitor.status.${plan.latest_run?.status}` : 'intelligenceMonitor.run') }}</button>
-        <div class="flex items-center gap-0.5"><button class="action" :disabled="busy" :title="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" :aria-label="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" @click="emit('toggle')"><Icon :name="plan.enabled ? 'clock' : 'play'" size="sm" /></button><button class="action" :disabled="busy || active" :title="t('intelligenceMonitor.edit')" :aria-label="t('intelligenceMonitor.edit')" @click="emit('edit')"><Icon name="edit" size="sm" /></button><button class="action hover:!text-rose-500" :disabled="busy || active" :title="t('intelligenceMonitor.archive')" :aria-label="t('intelligenceMonitor.archive')" @click="emit('archive')"><Icon name="trash" size="sm" /></button></div>
+        <div class="flex items-center gap-0.5"><button class="action" :disabled="busy" :title="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" :aria-label="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" @click="emit('toggle')"><Icon :name="plan.enabled ? 'clock' : 'play'" size="sm" /></button><button class="action" :disabled="busy || planActive" :title="t('intelligenceMonitor.edit')" :aria-label="t('intelligenceMonitor.edit')" @click="emit('edit')"><Icon name="edit" size="sm" /></button><button class="action hover:!text-rose-500" :disabled="busy || planActive" :title="t('intelligenceMonitor.archive')" :aria-label="t('intelligenceMonitor.archive')" @click="emit('archive')"><Icon name="trash" size="sm" /></button></div>
       </div>
     </aside>
     <section class="flex min-w-0 flex-col px-4 py-3">
+      <IntelligenceCandyBar v-if="plan.candy_enabled" :plan="plan" :busy="busy" @run="emit('candyRun')" @select="run => emit('candySelect', run)" />
       <div class="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2"><div class="flex items-center gap-2"><span class="text-xs font-medium text-gray-700 dark:text-gray-200">{{ t('intelligenceMonitor.recentWorks') }}</span><span class="text-[10px] text-gray-400">{{ t('intelligenceMonitor.newestFirst') }}</span></div><button type="button" class="text-[11px] text-primary-600 dark:text-primary-400" @click="emit('history')">{{ t('intelligenceMonitor.history') }}<span class="ml-1 text-gray-400">{{ completedWorks.length }}/20</span></button></div>
       <div v-if="works.length" ref="worksScroller" class="flex min-h-0 flex-1 snap-x items-stretch gap-3 overflow-x-auto" :aria-label="t('intelligenceMonitor.recentWorks')">
         <div v-for="(work, index) in works" :key="work.id" class="flex w-[176px] shrink-0 snap-start flex-col overflow-hidden rounded-xl border" :class="index === 0 ? 'border-primary-200 dark:border-primary-600/40' : 'border-gray-100 dark:border-dark-700'">
@@ -55,12 +56,14 @@ import Icon from '@/components/icons/Icon.vue'
 import type { IntelligencePlan, IntelligenceRate, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
+import IntelligenceCandyBar from './IntelligenceCandyBar.vue'
+import { isIntelligencePlanActive } from './intelligenceCandy'
 import { intelligenceRateLabel } from './intelligencePreview'
 import { intelligenceDurationLabel } from './intelligenceDuration'
 import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
 import { dateTime } from './format'
 const props = withDefaults(defineProps<{ plan: IntelligencePlan; overview: UpstreamOverview | null; busy: boolean; visible?: boolean }>(), { visible: true })
-const emit = defineEmits<{ run: []; toggle: []; edit: []; archive: []; history: [runID?: number] }>()
+const emit = defineEmits<{ run: []; candyRun: []; candySelect: [run: IntelligenceRun]; toggle: []; edit: []; archive: []; history: [runID?: number] }>()
 const { t } = useI18n()
 const panelActive = inject(intelligencePanelActiveKey, ref(true))
 const cardActive = computed(() => panelActive.value && props.visible)
@@ -81,6 +84,7 @@ const groupName = computed(() => target.value?.name || props.plan.group_note || 
 const rate = computed<IntelligenceRate>(() => target.value?.balance?.billing as unknown as IntelligenceRate || props.plan.rate_snapshot)
 const isActive = (run: IntelligenceRun) => run.status === 'running' || run.status === 'pending'
 const active = computed(() => !!props.plan.latest_run && isActive(props.plan.latest_run))
+const planActive = computed(() => isIntelligencePlanActive(props.plan))
 const now = ref(Date.now())
 const nextRunTime = computed(() => {
   const timestamp = props.plan.next_run_at ? Date.parse(props.plan.next_run_at) : NaN

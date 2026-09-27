@@ -773,6 +773,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			service.RecordIntelligenceExecutionAccount(c.Request.Context(), account)
 			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
 		var cyberBlockBodyHTTP []byte

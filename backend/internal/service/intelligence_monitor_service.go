@@ -99,14 +99,34 @@ func (s *IntelligenceMonitorService) populatePlanList(ctx context.Context, plans
 					break
 				}
 			}
-			p.RateSnapshot = p.LatestRun.RateSnapshot
-			p.SourceName = p.LatestRun.SourceName
 		}
 		p.RecentRuns = make([]*IntelligenceMonitorRun, 0, IntelligenceMonitorRetainedRuns)
 		for _, run := range runs {
 			if (run.Status == "succeeded" || run.Status == "failed") && len(p.RecentRuns) < IntelligenceMonitorRetainedRuns {
 				p.RecentRuns = append(p.RecentRuns, run)
 			}
+		}
+		p.CandyLatestRun = nil
+		p.CandyRecentRuns = make([]*IntelligenceMonitorRun, 0)
+		if p.CandyEnabled {
+			for _, run := range data.CandyRuns[p.ID] {
+				if p.CandyLatestRun == nil || run.Status == "pending" || run.Status == "running" {
+					p.CandyLatestRun = run
+				}
+				if (run.Status == "succeeded" || run.Status == "failed") && len(p.CandyRecentRuns) < IntelligenceMonitorCandyRetainedRuns {
+					p.CandyRecentRuns = append(p.CandyRecentRuns, run)
+				}
+			}
+		}
+		// Artwork and candy keep separate latest runs, but either can refresh
+		// the plan's source and billing metadata. Preserve an unknown new rate
+		// instead of falling back to an older run from a different source.
+		summaryRun := p.LatestRun
+		if candy := p.CandyLatestRun; candy != nil && (summaryRun == nil || candy.CreatedAt.After(summaryRun.CreatedAt) || (candy.CreatedAt.Equal(summaryRun.CreatedAt) && candy.ID > summaryRun.ID)) {
+			summaryRun = candy
+		}
+		if summaryRun != nil {
+			p.RateSnapshot, p.SourceName = summaryRun.RateSnapshot, summaryRun.SourceName
 		}
 		currentName, hasSource := data.SourceNames[p.ID]
 		if p.SourceType == "openai_oauth" && hasSource {
@@ -121,9 +141,13 @@ func (s *IntelligenceMonitorService) populatePlanList(ctx context.Context, plans
 			}
 		}
 	}
+	if err := s.populateLocalIntelligenceMetadata(ctx, plans); err != nil {
+		return nil, err
+	}
 	return plans, nil
 }
 func (s *IntelligenceMonitorService) decoratePlan(p *IntelligenceMonitorPlan) {
+	p.LocalAPIKeyManaged = p.SourceType == "local_group" && !p.LocalAPIKeyBorrowed
 	p.OAuth = p.SourceType == "openai_oauth"
 	p.Model = IntelligenceMonitorModel
 	p.ReasoningEffort = IntelligenceMonitorReasoning
@@ -142,7 +166,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 	if actorID <= 0 {
 		return nil, ErrIntelligenceInvalid
 	}
-	p := &IntelligenceMonitorPlan{SourceType: "external", APIMode: MonitorAPIModeResponses, IntervalSeconds: IntelligenceMonitorDefaultIntervalSeconds, TimeoutSeconds: IntelligenceMonitorDefaultTimeoutSeconds, CreatedBy: actorID}
+	p := &IntelligenceMonitorPlan{SourceType: "external", APIMode: MonitorAPIModeResponses, IntervalSeconds: IntelligenceMonitorDefaultIntervalSeconds, CandyIntervalSeconds: IntelligenceMonitorCandyDefaultIntervalSeconds, TimeoutSeconds: IntelligenceMonitorDefaultTimeoutSeconds, CreatedBy: actorID}
 	var old *IntelligenceMonitorPlan
 	if id > 0 {
 		var err error
@@ -152,6 +176,10 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		}
 		copy := *p
 		old = &copy
+	}
+	if p.CandyIntervalSeconds == 0 {
+		// Legacy test stores and repository decorators can omit the new field.
+		p.CandyIntervalSeconds = IntelligenceMonitorCandyDefaultIntervalSeconds
 	}
 	if id > 0 && intelligenceEnabledOnly(in) {
 		if p.SourceType == "openai_oauth" {
@@ -186,8 +214,17 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 	applyUpstreamString(&p.GroupNote, in.GroupNote)
 	applyUpstreamString(&p.RateNote, in.RateNote)
 	applyUpstreamString(&p.Notes, in.Notes)
+	if p.SourceType != "local_group" {
+		p.LocalAPIKeyBorrowed = false
+	}
 	if in.Enabled != nil {
 		p.Enabled = *in.Enabled
+	}
+	if in.CandyEnabled != nil {
+		p.CandyEnabled = *in.CandyEnabled
+	}
+	if in.CandyIntervalSeconds != nil {
+		p.CandyIntervalSeconds = *in.CandyIntervalSeconds
 	}
 	if in.IntervalSeconds != nil {
 		p.IntervalSeconds = *in.IntervalSeconds
@@ -221,6 +258,11 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 	}
 	if p.IntervalSeconds < 30 || p.IntervalSeconds > 86400 {
 		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "interval_seconds", "detail": "choose an integer interval between 30 and 86400 seconds"})
+	}
+	switch p.CandyIntervalSeconds {
+	case 180, 300, 600, 900:
+	default:
+		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "candy_interval_seconds", "detail": "choose a candy interval of 180, 300, 600 or 900 seconds"})
 	}
 	if p.TimeoutSeconds < IntelligenceMonitorMinTimeoutSeconds || p.TimeoutSeconds > IntelligenceMonitorMaxTimeoutSeconds {
 		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "timeout_seconds", "detail": "choose an integer timeout between 180 and 900 seconds"})
@@ -300,14 +342,12 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		if group.Status != StatusActive {
 			return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"detail": "the selected group is disabled"})
 		}
-		if old == nil || old.SourceType != "local_group" || !sameUpstreamSupplier(old.GroupID, p.GroupID) {
-			createdKey, err = s.keys.Create(ctx, actorID, CreateAPIKeyRequest{Name: "智商监控 · " + p.Name, GroupID: p.GroupID, IPWhitelist: []string{"127.0.0.1/32", "::1/128"}})
-			if err != nil {
-				return nil, err
-			}
-			p.LocalAPIKeyID = &createdKey.ID
-			p.LocalKeyOwnerID = &createdKey.UserID
+		createdKey, err = s.configureLocalIntelligenceKey(ctx, p, old, actorID, in.LocalAPIKeyID)
+		if err != nil {
+			return nil, err
 		}
+		p.LocalGroupName, p.LocalGroupStatus = group.Name, group.Status
+		p.LocalGroupRateMultiplier = &group.RateMultiplier
 		p.UpstreamTargetID = nil
 		p.Endpoint = ""
 		p.APIKeyEncrypted = ""
@@ -324,7 +364,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		}
 		return nil, err
 	}
-	if old != nil && old.LocalAPIKeyID != nil && !sameUpstreamSupplier(old.LocalAPIKeyID, p.LocalAPIKeyID) && old.LocalKeyOwnerID != nil {
+	if old != nil && !old.LocalAPIKeyBorrowed && old.LocalAPIKeyID != nil && !sameUpstreamSupplier(old.LocalAPIKeyID, p.LocalAPIKeyID) && old.LocalKeyOwnerID != nil {
 		s.cleanupKey(*old.LocalAPIKeyID, *old.LocalKeyOwnerID)
 	}
 	s.decoratePlan(p)
@@ -344,7 +384,7 @@ func (s *IntelligenceMonitorService) cleanupKey(id, owner int64) {
 	}
 }
 func intelligenceEnabledOnly(in IntelligenceMonitorInput) bool {
-	return in.Enabled != nil && in.Name == nil && in.SourceType == nil && in.Endpoint == nil && in.APIKey == nil && len(in.UpstreamTargetID) == 0 && len(in.GroupID) == 0 && len(in.AccountID) == 0 && in.SupplierNote == nil && in.GroupNote == nil && in.RateNote == nil && in.Notes == nil && in.APIMode == nil && in.IntervalSeconds == nil && in.TimeoutSeconds == nil
+	return in.Enabled != nil && in.CandyEnabled == nil && in.CandyIntervalSeconds == nil && len(in.LocalAPIKeyID) == 0 && in.Name == nil && in.SourceType == nil && in.Endpoint == nil && in.APIKey == nil && len(in.UpstreamTargetID) == 0 && len(in.GroupID) == 0 && len(in.AccountID) == 0 && in.SupplierNote == nil && in.GroupNote == nil && in.RateNote == nil && in.Notes == nil && in.APIMode == nil && in.IntervalSeconds == nil && in.TimeoutSeconds == nil
 }
 func (s *IntelligenceMonitorService) DeletePlan(ctx context.Context, id int64) error {
 	plan, err := s.repo.GetPlan(ctx, id)
@@ -354,7 +394,7 @@ func (s *IntelligenceMonitorService) DeletePlan(ctx context.Context, id int64) e
 	if err = s.repo.ArchivePlan(ctx, id); err != nil {
 		return err
 	}
-	if plan.LocalAPIKeyID != nil && plan.LocalKeyOwnerID != nil {
+	if !plan.LocalAPIKeyBorrowed && plan.LocalAPIKeyID != nil && plan.LocalKeyOwnerID != nil {
 		s.cleanupKey(*plan.LocalAPIKeyID, *plan.LocalKeyOwnerID)
 	}
 	return nil
@@ -363,12 +403,31 @@ func (s *IntelligenceMonitorService) DeletePlan(ctx context.Context, id int64) e
 func (s *IntelligenceMonitorService) Enqueue(ctx context.Context, id int64) (*IntelligenceMonitorRun, error) {
 	return s.enqueue(ctx, id, false)
 }
+func (s *IntelligenceMonitorService) EnqueueCandy(ctx context.Context, id int64) (*IntelligenceMonitorRun, error) {
+	return s.enqueueTest(ctx, id, false, IntelligenceMonitorTestCandy)
+}
 func (s *IntelligenceMonitorService) enqueue(ctx context.Context, id int64, scheduled bool) (*IntelligenceMonitorRun, error) {
+	return s.enqueueTest(ctx, id, scheduled, IntelligenceMonitorTestPelican)
+}
+func (s *IntelligenceMonitorService) enqueueTest(ctx context.Context, id int64, scheduled bool, kind string) (*IntelligenceMonitorRun, error) {
+	if kind != IntelligenceMonitorTestPelican && kind != IntelligenceMonitorTestCandy {
+		return nil, ErrIntelligenceInvalid
+	}
 	p, err := s.repo.GetPlan(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	if kind == IntelligenceMonitorTestCandy && !p.CandyEnabled {
+		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "candy_enabled", "detail": "add the candy test to this plan before running it"})
+	}
+	if scheduled && !p.Enabled {
+		return nil, ErrIntelligenceNotFound
+	}
 	run := &IntelligenceMonitorRun{PlanID: id, PlanName: p.Name, Trigger: "manual", Model: IntelligenceMonitorModel, ReasoningEffort: IntelligenceMonitorReasoning, Prompt: IntelligenceMonitorPrompt, SourceType: p.SourceType, SourceName: p.Name, SourceEndpoint: p.Endpoint, APIMode: p.APIMode, TimeoutSeconds: p.TimeoutSeconds, NotesSnapshot: map[string]string{"supplier_note": p.SupplierNote, "group_note": p.GroupNote, "rate_note": p.RateNote, "notes": p.Notes}, SourceSnapshot: map[string]any{"created_by": p.CreatedBy}, PlanUpdatedAt: p.UpdatedAt}
+	run.TestKind = kind
+	if kind == IntelligenceMonitorTestCandy {
+		run.Prompt = IntelligenceMonitorCandyPrompt
+	}
 	if scheduled {
 		run.Trigger = "scheduled"
 	}
@@ -410,6 +469,7 @@ func (s *IntelligenceMonitorService) enqueue(ctx context.Context, id int64, sche
 		run.SourceEndpoint = s.localEndpoint
 		run.SourceSnapshot["group_id"] = p.GroupID
 		run.SourceSnapshot["local_api_key_id"] = p.LocalAPIKeyID
+		run.SourceSnapshot["local_key_owner_id"] = p.LocalKeyOwnerID
 		if p.GroupID != nil {
 			if group, e := s.groups.GetByID(ctx, *p.GroupID); e == nil {
 				run.SourceName = group.Name
@@ -437,6 +497,12 @@ func (s *IntelligenceMonitorService) enqueue(ctx context.Context, id int64, sche
 }
 
 func (s *IntelligenceMonitorService) ListRuns(ctx context.Context, q IntelligenceMonitorRunQuery) (*IntelligenceMonitorRunPage, error) {
+	if q.TestKind == "" {
+		q.TestKind = IntelligenceMonitorTestPelican
+	}
+	if q.TestKind != IntelligenceMonitorTestPelican && q.TestKind != IntelligenceMonitorTestCandy {
+		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "test_kind"})
+	}
 	if q.Page < 1 {
 		q.Page = 1
 	}
@@ -513,6 +579,18 @@ func (s *IntelligenceMonitorService) tick() {
 			slog.Warn("intelligence monitoring enqueue failed", "plan_id", id, "error", err)
 		}
 	}
+	if candyRepo, ok := s.repo.(IntelligenceMonitorCandyScheduleRepository); ok {
+		candyIDs, candyErr := candyRepo.DueCandyPlanIDs(ctx, 10)
+		if candyErr != nil {
+			slog.Warn("intelligence candy schedule failed", "error", candyErr)
+		} else {
+			for _, id := range candyIDs {
+				if _, candyErr = s.enqueueTest(ctx, id, true, IntelligenceMonitorTestCandy); candyErr != nil && !errors.Is(candyErr, ErrIntelligenceBusy) && !errors.Is(candyErr, ErrIntelligenceNotFound) {
+					slog.Warn("intelligence candy enqueue failed", "plan_id", id, "error", candyErr)
+				}
+			}
+		}
+	}
 	for len(s.slots) < cap(s.slots) {
 		run, err := s.repo.ClaimNext(ctx, uuid.NewString())
 		if err != nil {
@@ -582,7 +660,18 @@ func (s *IntelligenceMonitorService) execute(run *IntelligenceMonitorRun) {
 }
 
 func (s *IntelligenceMonitorService) finishIntelligenceRun(run *IntelligenceMonitorRun) {
-	if run.Error == "" {
+	run.Correct, run.Answer = nil, ""
+	if run.TestKind == IntelligenceMonitorTestCandy {
+		run.HTML = ""
+		if run.Error == "" {
+			if strings.TrimSpace(run.RawText) == "" {
+				run.Error = "model returned no text"
+			} else {
+				answer, correct := gradeIntelligenceCandyAnswer(run.RawText)
+				run.Answer, run.Correct, run.Status = answer, &correct, "succeeded"
+			}
+		}
+	} else if run.Error == "" {
 		run.HTML = extractIntelligenceHTML(run.RawText)
 		if run.HTML == "" {
 			run.Error = "model response did not contain an HTML document"
@@ -592,6 +681,7 @@ func (s *IntelligenceMonitorService) finishIntelligenceRun(run *IntelligenceMoni
 	}
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer saveCancel()
+	s.captureIntelligenceExecutionBinding(saveCtx, run)
 	if err := s.repo.CompleteRun(saveCtx, run); err != nil {
 		slog.Error("intelligence monitoring result persistence failed", "run_id", run.ID, "error", err)
 	}

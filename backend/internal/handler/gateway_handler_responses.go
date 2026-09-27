@@ -273,8 +273,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
+			service.RecordIntelligenceExecutionAccount(requestCtx, account)
 			result, err = h.antigravityGatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
 		} else {
+			service.RecordIntelligenceExecutionAccount(requestCtx, account)
 			result, err = h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
 		}
 

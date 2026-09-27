@@ -6,17 +6,18 @@ import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import Select from '@/components/common/Select.vue'
 import IntelligencePlanDialog from './IntelligencePlanDialog.vue'
 
-const mocks = vi.hoisted(() => ({ accounts: vi.fn(), groups: vi.fn(), create: vi.fn(), update: vi.fn() }))
+const mocks = vi.hoisted(() => ({ accounts: vi.fn(), groups: vi.fn(), create: vi.fn(), update: vi.fn(), keys: vi.fn() }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { count?: number }) => params?.count === undefined ? key : `${key}:${params.count}` }) }))
+vi.mock('@/api/keys', () => ({ list: mocks.keys }))
 vi.mock('@/api/admin/accounts', () => ({ list: mocks.accounts }))
 vi.mock('@/api/admin/groups', () => ({ getAll: mocks.groups }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: { create: mocks.create, update: mocks.update }, PELICAN_MODEL: 'gpt-6-astra', PELICAN_REASONING: 'high', PELICAN_PROMPT: 'Pelican animation' }))
-const dialog = defineComponent({ props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' })
+const dialog = defineComponent({ props: ['show', 'title'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' })
 const oauthAccount = (id: number, name: string, fields: Record<string, unknown> = {}) => ({ id, name, platform: 'openai', type: 'oauth', status: 'active', schedulable: true, ...fields })
 const page = (items: unknown[], number = 1, pages = 1) => ({ items, total: pages === 1 ? items.length : pages * 100, page: number, page_size: 100, pages })
 const savedPlan = (fields: Partial<IntelligencePlan> = {}) => ({ id: 3, name: 'OAuth Seven', source_type: 'openai_oauth', account_id: 7, api_mode: 'responses', enabled: true, interval_seconds: 3600, timeout_seconds: 900, supplier_note: '', group_note: '', rate_note: '', notes: '', ...fields }) as IntelligencePlan
 let wrapper: VueWrapper | undefined
-function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; upstreamTargetId: number }> = {}) {
+function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; localOnly: boolean; upstreamTargetId: number }> = {}) {
   wrapper = mount(IntelligencePlanDialog, { attachTo: document.body, props: { show: true, plan: null, overview: null, oauthOnly: true, ...props }, global: { stubs: { BaseDialog: dialog, Icon: true, transition: true } } })
   return wrapper
 }
@@ -33,12 +34,42 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.accounts.mockResolvedValue(page([oauthAccount(7, 'OAuth Seven')]))
   mocks.groups.mockResolvedValue([])
+  mocks.keys.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, pages: 0 })
   mocks.create.mockResolvedValue({})
   mocks.update.mockResolvedValue({})
 })
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; vi.useRealTimers() })
 
 describe('OAuth intelligence plan dialog', () => {
+  it('defaults the independent candy interval to three minutes and offers only 3/5/10/15 minutes', async () => {
+    const view = render(); await flushPromises()
+    await selectOAuth(view)
+    await view.get('#intelligence-candy-enabled').trigger('click')
+    expect(view.findAll('[data-candy-interval]').map(button => button.attributes('data-candy-interval'))).toEqual(['180', '300', '600', '900'])
+    expect(view.get('[data-candy-interval="180"]').attributes('aria-pressed')).toBe('true')
+    await view.get('[data-candy-interval="600"]').trigger('click')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ interval_seconds: 300, candy_interval_seconds: 600, candy_enabled: true }))
+  })
+  it('defaults candy off while preserving scheduled testing, then saves explicit opt-in', async () => {
+    const view = render()
+    await flushPromises()
+    expect(view.get('#intelligence-candy-enabled').attributes('aria-checked')).toBe('false')
+    expect(view.get('#intelligence-enabled').attributes('aria-checked')).toBe('true')
+    expect(view.get('[data-testid="candy-option"]').text()).toContain('intelligenceMonitor.candy.enableHint')
+    await selectOAuth(view)
+    await view.get('#intelligence-candy-enabled').trigger('click')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ candy_enabled: true, enabled: true, source_type: 'openai_oauth' }))
+  })
+
+  it.each([undefined, false, true])('loads legacy or saved candy setting %s and saves an explicit boolean', async candy_enabled => {
+    const view = render({ plan: savedPlan({ candy_enabled }) }); await flushPromises()
+    expect(view.get('#intelligence-candy-enabled').attributes('aria-checked')).toBe(String(Boolean(candy_enabled)))
+    if (candy_enabled) await view.get('#intelligence-candy-enabled').trigger('click')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(3, expect.objectContaining({ candy_enabled: false }))
+  })
   it('requests active lite accounts and collapses the non-searchable selection before saving', async () => {
     mocks.accounts.mockResolvedValue(page(Array.from({ length: 7 }, (_, i) => oauthAccount(i + 1, i === 6 ? 'OAuth Seven' : `OAuth ${i + 1}`))))
     const view = render()
@@ -240,6 +271,45 @@ describe('intelligence plan choices and interval validation', () => {
     { id: 2, name: 'South Relay', website: 'https://south.example', targets: [{ id: 21, name: 'Backup GPT', provider: 'openai', endpoint: 'https://south.example' }] }
   ] } as UpstreamOverview
 
+  it('locks new local plans to local groups, derives the name from an existing administrator key and never sends its raw secret', async () => {
+    mocks.groups.mockResolvedValue([{ id: 5, name: 'My local group', platform: 'openai', rate_multiplier: 0.4 }])
+    mocks.keys.mockResolvedValue({ items: [{ id: 42, name: 'My administrator key', key: 'sk-full-private-secret-1234', group_id: 5, status: 'active', quota: 0 }], total: 1, page: 1, page_size: 100 })
+    const view = render({ oauthOnly: false, localOnly: true }); await flushPromises()
+    expect(view.getComponent(dialog).props('title')).toBe('intelligenceMonitor.local.add')
+    expect(view.find('#intelligence-upstream').exists()).toBe(false)
+    expect(view.text()).not.toContain('intelligenceMonitor.source.external')
+    await selectOption(view, '#intelligence-local-key', 'My administrator key')
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('My local group')
+    expect(view.get('#intelligence-group').attributes('disabled')).toBeDefined()
+    expect(view.html()).not.toContain('full-private-secret')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'local_group', name: 'My local group', group_id: 5, local_api_key_id: 42, api_key: undefined, candy_interval_seconds: 180 }))
+  })
+
+  it('preserves an administrator key while editing and allows explicit return to automatic dedicated key mode', async () => {
+    mocks.groups.mockResolvedValue([{ id: 5, name: 'My local group', platform: 'openai', rate_multiplier: 0.4 }])
+    mocks.keys.mockResolvedValue({ items: [{ id: 42, name: 'My administrator key', key: 'sk-private-1234', group_id: 5, status: 'active', quota: 0 }], total: 1, page: 1, page_size: 100 })
+    const view = render({ oauthOnly: false, localOnly: true, plan: savedPlan({ source_type: 'local_group', group_id: 5, local_api_key_id: 42, local_api_key_managed: false, candy_enabled: true, candy_interval_seconds: 900 }) }); await flushPromises()
+    expect(view.get('#intelligence-local-key').text()).toContain('My administrator key')
+    expect(view.get('[data-candy-interval="900"]').attributes('aria-pressed')).toBe('true')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenLastCalledWith(3, expect.objectContaining({ local_api_key_id: 42, candy_interval_seconds: 900 }))
+    await selectOption(view, '#intelligence-local-key', 'intelligenceMonitor.local.managedKey')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenLastCalledWith(3, expect.objectContaining({ local_api_key_id: null }))
+  })
+
+  it.each(['external', 'local_group', 'upstream', 'locked upstream'] as const)('offers candy opt-in for %s without changing its source', async source => {
+    const source_type = source === 'locked upstream' ? 'upstream' : source
+    const value = savedPlan({ source_type, account_id: null, upstream_target_id: source_type === 'upstream' ? 11 : null, group_id: source_type === 'local_group' ? 5 : null, endpoint: 'https://external.example' })
+    const view = render({ oauthOnly: false, plan: value, overview: upstreamOverview, ...(source === 'locked upstream' ? { upstreamTargetId: 11 } : {}) })
+    await flushPromises()
+    expect(view.get('#intelligence-candy-enabled').attributes('aria-checked')).toBe('false')
+    await view.get('#intelligence-candy-enabled').trigger('click')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(3, expect.objectContaining({ source_type, candy_enabled: true }))
+  })
+
   it('locks a group shortcut to its upstream and emits the created plan without loading unrelated sources', async () => {
     const created = savedPlan({ id: 91, name: 'Primary GPT', source_type: 'upstream', upstream_target_id: 11, account_id: null })
     mocks.create.mockResolvedValueOnce(created)
@@ -364,7 +434,8 @@ describe('intelligence plan choices and interval validation', () => {
     const view = render({ oauthOnly: false, overview: upstreamOverview, plan })
     await flushPromises()
     expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Keep my custom name')
-    expect(view.get('[data-interval="1800"]').attributes('aria-pressed')).toBe('true')
+    expect(view.get('[data-interval="custom"]').attributes('aria-pressed')).toBe('true')
+    expect((view.get('#intelligence-interval-custom').element as HTMLInputElement).value).toBe('1800')
     expect(view.get('[data-timeout="900"]').attributes('aria-pressed')).toBe('true')
     await view.setProps({ overview: { ...upstreamOverview, suppliers: [...upstreamOverview.suppliers] } })
     await view.get('form').trigger('submit')
@@ -399,7 +470,9 @@ describe('intelligence plan choices and interval validation', () => {
     await view.get('#intelligence-upstream').trigger('click')
     await selectOption(view, '#intelligence-upstream', 'GPT Key')
     expect(view.get('#intelligence-upstream').attributes('aria-expanded')).toBe('false')
-    await view.findAll('button').find(button => button.text() === 'intelligenceMonitor.source.local_group')!.trigger('click')
+    expect(view.findAll('button').some(button => button.text() === 'intelligenceMonitor.source.local_group')).toBe(false)
+    await view.setProps({ localOnly: true })
+    await flushPromises()
     await selectOption(view, '#intelligence-group', 'Local GPT')
     await selectOption(view, '#intelligence-api-mode', 'Chat Completions')
     await view.get('#intelligence-name').setValue('Local plan')
@@ -428,6 +501,34 @@ describe('intelligence plan choices and interval validation', () => {
     await view.get('form').trigger('submit')
     await flushPromises()
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, interval_seconds: 300, timeout_seconds: 900 }))
+  })
+
+  it.each(['oauth', 'upstream', 'locked upstream', 'local', 'external'] as const)('offers only 5/10/15 minutes and custom for the %s entry, independently of candy', async entry => {
+    const source_type = entry === 'oauth' ? 'openai_oauth' : entry === 'local' ? 'local_group' : entry === 'external' ? 'external' : 'upstream'
+    const plan = savedPlan({ source_type, account_id: entry === 'oauth' ? 7 : null, upstream_target_id: source_type === 'upstream' ? 11 : null, group_id: entry === 'local' ? 5 : null, endpoint: 'https://external.example', interval_seconds: 300, candy_enabled: true, candy_interval_seconds: 180 })
+    const view = render({ oauthOnly: entry === 'oauth', localOnly: entry === 'local', overview: upstreamOverview, plan, ...(entry === 'locked upstream' ? { upstreamTargetId: 11 } : {}) })
+    await flushPromises()
+    expect(view.findAll('[data-interval]').map(button => button.attributes('data-interval'))).toEqual(['300', '600', '900', 'custom'])
+    expect(view.get('[data-interval="300"]').attributes('aria-pressed')).toBe('true')
+    expect(view.findAll('[data-candy-interval]').map(button => button.attributes('data-candy-interval'))).toEqual(['180', '300', '600', '900'])
+    for (const seconds of [300, 600, 900]) {
+      await view.get(`[data-interval="${seconds}"]`).trigger('click')
+      expect(view.get(`[data-interval="${seconds}"]`).attributes('aria-pressed')).toBe('true')
+      expect(view.get(`[data-interval="${seconds}"]`).text()).toBe(`intelligenceMonitor.minutes:${seconds / 60}`)
+    }
+    expect(view.get('[data-candy-interval="180"]').attributes('aria-pressed')).toBe('true')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ source_type, interval_seconds: 900, candy_interval_seconds: 180 }))
+  })
+
+  it.each([30, 45, 1800, 3600, 7200, 21600, 43200, 86400])('shows a stored %s-second interval as custom without changing it on save', async seconds => {
+    const view = render({ plan: savedPlan({ interval_seconds: seconds }) }); await flushPromises()
+    expect(view.get('[data-interval="custom"]').attributes('aria-pressed')).toBe('true')
+    expect((view.get('#intelligence-interval-custom').element as HTMLInputElement).value).toBe(String(seconds))
+    expect(view.findAll('[data-interval]').map(button => button.attributes('data-interval'))).toEqual(['300', '600', '900', 'custom'])
+    expect(mocks.update).not.toHaveBeenCalled()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(3, expect.objectContaining({ interval_seconds: seconds }))
   })
 
   it.each(['oauth', 'upstream', 'locked upstream'])('preserves a paused %s plan when reopened and saved', async source => {
@@ -480,7 +581,7 @@ describe('intelligence plan choices and interval validation', () => {
     expect(view.get('[data-interval="custom"]').attributes('aria-pressed')).toBe('true')
     expect((view.get('#intelligence-interval-custom').element as HTMLInputElement).value).toBe('45')
     await view.get('#intelligence-interval-custom').setValue('75')
-    await view.get('[data-interval="3600"]').trigger('click')
+    await view.get('[data-interval="600"]').trigger('click')
     await view.get('[data-interval="custom"]').trigger('click')
     expect((view.get('#intelligence-interval-custom').element as HTMLInputElement).value).toBe('75')
     await view.get('#intelligence-enabled').trigger('click')

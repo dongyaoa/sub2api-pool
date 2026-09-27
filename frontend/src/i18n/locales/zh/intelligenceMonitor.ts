@@ -1,12 +1,32 @@
 export default {
   intelligenceMonitor: {
+    candy: {
+      title: '糖果测试', recent: '最近 60 次', run: '立即测试', running: '测试中', pending: '排队中',
+      failed: '请求失败', correct: '回答正确', incorrect: '回答错误', unknown: '尚未评分', answer: '模型答案',
+      detail: '糖果测试记录', response: '完整回复', noResponse: '暂无回复内容', enabled: '添加糖果测试', queued: '糖果测试已加入队列',
+      enableHint: '沿用本计划的模型和 high 思考强度，按独立周期发起糖果测试请求，也可手动执行。',
+      interval: '糖果测试间隔', intervalHint: '默认 3 分钟。定时检测总开关同时控制两项测试；关闭后仍可分别手动执行。',
+      scoringHint: '标准答案为 21，仅用于评分，不包含在发送给模型的题目中。',
+    },
+    local: {
+      groupRate: '分组倍率', search: '搜索分组、计划或 Key',
+      title: '站内监控', add: '添加监控', order: '站内监控排序', emptyTitle: '添加一个站内分组，开始监控',
+      emptyHint: '使用当前管理员已有的 Key，或创建专用监控 Key。鹈鹕作品与糖果记录分别保留，按各自周期持续检测。',
+      key: '监控使用的 Key', keyHint: '只读取当前登录管理员的可用 Key。选择已有 Key 后自动使用其绑定分组，不能修改该 Key 的绑定。',
+      managedKey: '自动创建专用监控 Key', bindingFixed: '分组已绑定', existingHint: '使用所选管理员 Key 经过本站真实路由，遵循该 Key 的分组、权限和计费配置。',
+      managedBadge: '专用 Key', ownBadge: '管理员 Key', keysFailed: '无法读取可用 Key，请刷新重试。', keyUnavailable: '该 Key 已失效或分组不可用，请重新选择。', pelican: '鹈鹕测试',
+    },
+    execution: {
+      title: '本次实际执行来源', completed: '已完成', attempted: '已尝试', account: '执行账号', attemptedAccount: '尝试账号', type: '账号类型', origin: '账号配置站点', attempts: '请求尝试次数',
+      supplier: '关联上游', target: '上游分组', notRecorded: '该历史记录未保存执行账号。', unbound: '该账号未绑定上游分组', ambiguous: '关联多个上游，无法唯一确定', unavailable: '暂时无法查询关联上游', unknown: '未记录上游关联',
+    },
     groupMonitor: {
       open: '智商监控', unsupported: '仅支持 OpenAI 兼容分组', title: '{name} · 智商监控',
       emptyTitle: '为这个分组创建鹈鹕测试', emptyHint: '自动使用当前分组的 Key 与倍率。新计划默认开启定时检测，每 5 分钟一次，保存后开始执行；也可关闭定时，改为手动测试。',
       create: '创建监测计划', sharedHint: '计划与作品同步显示在智商监控中。',
       alreadyExists: '该分组已有关联的智商监控，请关闭设置并刷新列表。',
     },
-    group: '分组', recentWorks: '最近作品', newestFirst: '左新右旧', latest: '最新', retention: '每个计划仅保留最近 20 次结果，旧记录自动清理。',
+    group: '分组', recentWorks: '最近作品', newestFirst: '左新右旧', latest: '最新', retention: '每个计划仅保留最近 20 次作品，旧作品自动清理。',
     oauth: { title: 'OAuth 监控', add: '添加 OAuth 监控', account: 'OAuth 账号', select: '选择 OpenAI OAuth 账号', search: '搜索账号名称…', nameHint: '计划名称与账号管理中的名称保持一致', emptyTitle: '观察每个 OAuth 账号的作品表现', emptyHint: '选择本站 OpenAI OAuth 账号，使用相同的鹈鹕测试，保存最近 20 次作品。', noAccounts: '暂无已启用且状态正常的可调度 OpenAI OAuth 账号', loading: '正在读取全部可用 OAuth 账号…', loadFailed: '无法加载 OAuth 账号，请刷新重试', unavailable: '所选账号已停用或暂不可调度，请刷新后重新选择。', hint: '仅显示已启用、状态正常且当前可调度的真实 OpenAI OAuth 账号。直接使用所选账号执行，复用凭据刷新和代理配置。', more: '下一页', previous: '上一页', fixedModelRequired: '该账号当前模型配置不支持直接使用 gpt-6-astra，请先检查账号管理中的模型白名单或映射。' },
     title: '智商监控', add: '新建监测计划', edit: '编辑监测计划', search: '搜索计划、上游或分组', allSources: '全部来源', allSites: '全部站点', quickSwitch: '快速切换监测站点',
     source: { external: '外部地址', upstream: '上游 Key', local_group: '本站分组', openai_oauth: 'OpenAI OAuth' },

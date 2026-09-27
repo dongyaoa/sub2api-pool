@@ -27,6 +27,20 @@ beforeEach(() => { vi.resetAllMocks(); vi.useFakeTimers({ toFake: ['setInterval'
 afterEach(() => { wrapper?.unmount(); wrapper=undefined; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('upstream center manual ordering', () => {
+  it('opens a dedicated local group tab and retains its panel while other intelligence tabs are shown', async () => {
+    const view = render(); await flushPromises()
+    await view.get('#upstream-tab-local').trigger('click')
+    const local = view.getComponent({ name: 'IntelligenceMonitorPanel' })
+    expect(local.props('localOnly')).toBe(true)
+    expect(local.props('active')).toBe(true)
+    const element = local.element
+    await view.get('#upstream-tab-intelligence').trigger('click')
+    expect(local.props('active')).toBe(false)
+    expect(view.findAllComponents({ name: 'IntelligenceMonitorPanel' })).toHaveLength(2)
+    await view.get('#upstream-tab-local').trigger('click')
+    expect(local.element).toBe(element)
+    expect(local.props('active')).toBe(true)
+  })
   it('opens only the selected group gallery lazily, keeps metadata fresh and unloads it on close or deletion', async () => {
     const view = render(); await flushPromises()
     expect(view.findComponent({ name: 'UpstreamIntelligenceDialog' }).exists()).toBe(false)

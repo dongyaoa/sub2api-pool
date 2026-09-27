@@ -42,6 +42,7 @@
             <div class="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3"><div v-for="item in metadata" :key="item.label" class="min-w-0"><p class="text-[10px] text-gray-400 dark:text-dark-400">{{ t(`intelligenceMonitor.${item.label}`) }}</p><p class="mt-1 break-words text-xs font-medium text-gray-700 dark:text-gray-200">{{ item.value }}</p></div></div>
             <p v-if="detail.error" class="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">{{ detail.error }}</p>
             <p v-if="runNotes" class="mt-3 text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.notes') }}：{{ runNotes }}</p>
+            <IntelligenceExecutionSource :run="detail" />
             <details class="mt-4 border-t border-gray-100 pt-3 dark:border-dark-700"><summary class="cursor-pointer text-[11px] text-gray-500">{{ t('intelligenceMonitor.prompt') }}</summary><p class="mt-2 text-xs leading-6 text-gray-600 dark:text-dark-300">{{ detail.prompt }}</p></details>
           </template>
         </div>
@@ -57,6 +58,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { intelligenceMonitorAPI, type IntelligencePlan, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
+import IntelligenceExecutionSource from './IntelligenceExecutionSource.vue'
 import { intelligenceNotes, intelligenceRateLabel } from './intelligencePreview'
 import { intelligenceDurationLabel } from './intelligenceDuration'
 import { dateTime } from './format'

@@ -106,11 +106,22 @@ func (h *IntelligenceMonitorHandler) ListRuns(c *gin.Context) {
 		planID = &id
 	}
 	page, size := upstreamPagination(c)
-	runs, err := h.svc.ListRuns(c.Request.Context(), service.IntelligenceMonitorRunQuery{PlanID: planID, Page: page, PageSize: size})
+	runs, err := h.svc.ListRuns(c.Request.Context(), service.IntelligenceMonitorRunQuery{PlanID: planID, TestKind: c.Query("test_kind"), Page: page, PageSize: size})
 	if response.ErrorFrom(c, err) {
 		return
 	}
 	response.Success(c, runs)
+}
+func (h *IntelligenceMonitorHandler) RunCandy(c *gin.Context) {
+	id, ok := parseIntelligenceID(c)
+	if !ok {
+		return
+	}
+	run, err := h.svc.EnqueueCandy(c.Request.Context(), id)
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Accepted(c, run)
 }
 func (h *IntelligenceMonitorHandler) GetRun(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")

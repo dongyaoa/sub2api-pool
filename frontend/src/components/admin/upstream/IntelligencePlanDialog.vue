@@ -1,9 +1,9 @@
 <template>
-  <BaseDialog :show="show" :title="t(plan ? 'intelligenceMonitor.edit' : oauthOnly ? 'intelligenceMonitor.oauth.add' : 'intelligenceMonitor.add')" width="wide" :show-close-button="!saving" :close-on-escape="!saving" @close="close">
+  <BaseDialog :show="show" :title="t(plan ? 'intelligenceMonitor.edit' : oauthOnly ? 'intelligenceMonitor.oauth.add' : localOnly ? 'intelligenceMonitor.local.add' : 'intelligenceMonitor.add')" width="wide" :show-close-button="!saving" :close-on-escape="!saving" @close="close">
     <form id="intelligence-plan-form" class="space-y-5" @submit.prevent="save">
       <div class="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/50"><Icon name="lightbulb" size="md" class="text-primary-500"/><div class="min-w-0 flex-1"><p class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ PELICAN_MODEL }} <span class="ml-2 rounded border border-primary-200 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:border-primary-800">{{ PELICAN_REASONING }}</span></p><p class="mt-1 text-xs text-gray-500">{{ t('intelligenceMonitor.form.fixedPrompt') }}</p></div></div>
       <div v-if="!oauthOnly"><label for="intelligence-name" class="input-label">{{ t('intelligenceMonitor.form.name') }}</label><input id="intelligence-name" v-model="form.name" class="input" required maxlength="100" :placeholder="t('intelligenceMonitor.form.namePlaceholder')"/></div>
-      <div v-if="!oauthOnly && !lockedUpstream"><label class="input-label">{{ t('intelligenceMonitor.form.source') }}</label><div class="grid grid-cols-3 gap-2"><button v-for="source in sources" :key="source.value" type="button" class="flex items-center justify-center gap-2 rounded-xl border px-2 py-3 text-xs font-medium transition-colors" :class="form.source_type === source.value ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-600 dark:bg-primary-500/10 dark:text-primary-300' : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-dark-600 dark:text-dark-300'" :aria-pressed="form.source_type === source.value" @click="form.source_type = source.value"><Icon :name="source.icon" size="sm"/>{{ t(`intelligenceMonitor.source.${source.value}`) }}</button></div></div>
+      <div v-if="!oauthOnly && !lockedUpstream && !localOnly"><label class="input-label">{{ t('intelligenceMonitor.form.source') }}</label><div class="grid gap-2" :class="sources.length > 2 ? 'grid-cols-3' : 'grid-cols-2'"><button v-for="source in sources" :key="source.value" type="button" class="flex items-center justify-center gap-2 rounded-xl border px-2 py-3 text-xs font-medium transition-colors" :class="form.source_type === source.value ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-600 dark:bg-primary-500/10 dark:text-primary-300' : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-dark-600 dark:text-dark-300'" :aria-pressed="form.source_type === source.value" @click="form.source_type = source.value"><Icon :name="source.icon" size="sm"/>{{ t(`intelligenceMonitor.source.${source.value}`) }}</button></div></div>
       <div v-if="oauthOnly" class="space-y-3">
         <div class="flex items-center gap-2"><span class="rounded-md bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-600 dark:bg-violet-500/10 dark:text-violet-300">OpenAI OAuth</span><span class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.nameHint') }}</span></div>
         <label class="input-label" for="intelligence-oauth-account">{{ t('intelligenceMonitor.oauth.select') }}</label>
@@ -44,7 +44,7 @@
         </Select>
         <div v-if="selectedTarget" class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500"><span class="truncate">{{ domain(selectedTarget.endpoint) }}</span><span :class="selectedTarget.balance?.billing?.stale ? 'text-amber-600' : 'text-primary-600'">{{ t('intelligenceMonitor.rate') }} {{ upstreamRate(selectedTarget.id) }} · {{ t('intelligenceMonitor.autoRate') }}</span></div>
       </div>
-      <div v-else-if="form.source_type === 'local_group'"><label for="intelligence-group" class="input-label">{{ t('intelligenceMonitor.form.selectGroup') }}</label><Select id="intelligence-group" v-model="form.group_id" :options="groupOptions" :searchable="false" :loading="groupsLoading" :disabled="groupsLoading" :placeholder="t(groupsLoading ? 'common.loading' : 'intelligenceMonitor.form.selectGroup')" :empty-text="t('intelligenceMonitor.form.noGroups')" :aria-label="t('intelligenceMonitor.form.selectGroup')"/><p class="mt-2 text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.form.sourceHint') }}</p><p v-if="groupError" role="alert" class="mt-1 text-xs text-rose-500">{{ groupError }}</p></div>
+      <div v-else-if="form.source_type === 'local_group'"><IntelligenceLocalSource v-if="show" ref="localSource" :groups="groups" :groups-loading="groupsLoading" :group-id="form.group_id" :local-key-id="form.local_api_key_id" :saved-key-name="plan?.local_api_key_name" :saved-key-mask="plan?.api_key_masked" :managed-key-ids="managedKeyIds" @select="selectLocalSource"/><p v-if="groupError" role="alert" class="mt-1 text-xs text-rose-500">{{ groupError }}</p></div>
       <template v-else>
         <div class="grid gap-4 sm:grid-cols-2"><div><label for="intelligence-endpoint" class="input-label">{{ t('intelligenceMonitor.form.endpoint') }}</label><input id="intelligence-endpoint" v-model="form.endpoint" class="input" type="url" placeholder="https://api.example.com" required/></div><div><label for="intelligence-key" class="input-label">{{ t('intelligenceMonitor.form.key') }}</label><input id="intelligence-key" v-model="form.api_key" class="input" type="password" autocomplete="new-password" :required="!plan || plan.source_type !== 'external'" :placeholder="plan?.source_type === 'external' ? t('intelligenceMonitor.form.keepKey') : 'sk-…'"/></div></div>
         <div class="grid gap-3 sm:grid-cols-3"><div><label for="intelligence-supplier-note" class="input-label">{{ t('intelligenceMonitor.form.supplierNote') }}</label><input id="intelligence-supplier-note" v-model="form.supplier_note" class="input" maxlength="200" :placeholder="t('intelligenceMonitor.form.supplierPlaceholder')"/></div><div><label for="intelligence-group-note" class="input-label">{{ t('intelligenceMonitor.form.groupNote') }}</label><input id="intelligence-group-note" v-model="form.group_note" class="input" maxlength="200" :placeholder="t('intelligenceMonitor.form.groupPlaceholder')"/></div><div><label for="intelligence-rate-note" class="input-label">{{ t('intelligenceMonitor.form.rateNote') }}</label><input id="intelligence-rate-note" v-model="form.rate_note" class="input" maxlength="200" :placeholder="t('intelligenceMonitor.form.ratePlaceholder')"/></div></div>
@@ -55,11 +55,12 @@
       </div>
       <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-700">
         <div class="flex items-center justify-between gap-4"><div><label for="intelligence-enabled" class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('intelligenceMonitor.form.enabled') }}</label><p class="mt-1 text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.form.scheduleHint') }}</p></div><Toggle id="intelligence-enabled" v-model="form.enabled"/></div>
-        <fieldset v-if="form.enabled" class="mt-4"><legend class="input-label">{{ t('intelligenceMonitor.form.interval') }}</legend><div class="grid grid-cols-3 gap-2 sm:grid-cols-4"><button v-for="seconds in intervals" :key="seconds" type="button" class="duration-choice" :class="intervalChoice === seconds && 'duration-choice-selected'" :data-interval="seconds" :aria-pressed="intervalChoice === seconds" @click="chooseInterval(seconds)">{{ durationLabel(seconds) }}</button><button type="button" class="duration-choice" :class="intervalChoice === 'custom' && 'duration-choice-selected'" data-interval="custom" :aria-pressed="intervalChoice === 'custom'" @click="chooseInterval('custom')">{{ t('intelligenceMonitor.form.customInterval') }}</button></div>
+        <fieldset v-if="form.enabled" class="mt-4"><legend class="input-label">{{ t('intelligenceMonitor.form.interval') }}</legend><div class="grid grid-cols-2 gap-2 sm:grid-cols-4"><button v-for="seconds in intervals" :key="seconds" type="button" class="duration-choice" :class="intervalChoice === seconds && 'duration-choice-selected'" :data-interval="seconds" :aria-pressed="intervalChoice === seconds" @click="chooseInterval(seconds)">{{ durationLabel(seconds) }}</button><button type="button" class="duration-choice" :class="intervalChoice === 'custom' && 'duration-choice-selected'" data-interval="custom" :aria-pressed="intervalChoice === 'custom'" @click="chooseInterval('custom')">{{ t('intelligenceMonitor.form.customInterval') }}</button></div>
           <div v-if="intervalChoice === 'custom'" class="mt-3"><label for="intelligence-interval-custom" class="input-label">{{ t('intelligenceMonitor.form.customSeconds') }}</label><input id="intelligence-interval-custom" v-model="customInterval" type="text" inputmode="numeric" class="input" :aria-invalid="Boolean(intervalError)" aria-describedby="intelligence-interval-hint intelligence-interval-error" :placeholder="t('intelligenceMonitor.form.intervalPlaceholder')" @input="intervalError = ''"/></div>
           <p id="intelligence-interval-hint" class="mt-2 text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.form.intervalHint') }}</p>
         </fieldset><p v-if="intervalError" id="intelligence-interval-error" role="alert" class="mt-2 text-xs text-rose-500">{{ intervalError }}</p>
       </div>
+      <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-700" data-testid="candy-option"><div class="flex items-center justify-between gap-4"><div><label for="intelligence-candy-enabled" class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('intelligenceMonitor.candy.enabled') }}</label><p class="mt-1 text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.candy.enableHint') }}</p></div><Toggle id="intelligence-candy-enabled" v-model="form.candy_enabled"/></div><fieldset v-if="form.candy_enabled" class="mt-4"><legend class="input-label">{{ t('intelligenceMonitor.candy.interval') }}</legend><div class="grid grid-cols-4 gap-2"><button v-for="seconds in candyIntervals" :key="seconds" type="button" class="duration-choice" :class="form.candy_interval_seconds === seconds && 'duration-choice-selected'" :data-candy-interval="seconds" :aria-pressed="form.candy_interval_seconds === seconds" @click="form.candy_interval_seconds = seconds">{{ durationLabel(seconds) }}</button></div><p class="mt-2 text-xs text-gray-500">{{ t('intelligenceMonitor.candy.intervalHint') }}</p></fieldset></div>
       <div><label for="intelligence-notes" class="input-label">{{ t('intelligenceMonitor.notes') }}</label><textarea id="intelligence-notes" v-model="form.notes" class="input min-h-[76px]" maxlength="2000" :placeholder="t('intelligenceMonitor.form.notesPlaceholder')"/></div>
       <details class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900/50"><summary class="cursor-pointer text-xs font-medium text-gray-500">{{ t('intelligenceMonitor.prompt') }}</summary><p class="mt-2 text-xs leading-6 text-gray-600 dark:text-dark-300">{{ PELICAN_PROMPT }}</p></details>
       <p v-if="error" role="alert" class="rounded-lg bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">{{ error }}</p>
@@ -82,13 +83,17 @@ import { list as listAccounts } from '@/api/admin/accounts'
 import { extractApiErrorCode, extractApiErrorMessage, extractApiErrorMetadata } from '@/utils/apiError'
 import { intelligenceRateLabel } from './intelligencePreview'
 import { domain } from './format'
-const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; upstreamTargetId?: number }>()
+import IntelligenceLocalSource from './IntelligenceLocalSource.vue'
+const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; localOnly?: boolean; managedKeyIds?: number[]; upstreamTargetId?: number }>()
 const emit = defineEmits<{ close: []; saved: [plan?: IntelligencePlan] }>()
 const { t } = useI18n()
 const lockedUpstream = computed(() => props.upstreamTargetId !== undefined)
 const oauthOnly = computed(() => Boolean(props.oauthOnly && !lockedUpstream.value))
-const sources: {value:IntelligenceSource;icon:'server'|'link'|'grid'}[] = [{ value:'upstream',icon:'server' },{ value:'local_group',icon:'grid' },{ value:'external',icon:'link' }]
-const intervals = [300,900,1800,3600,7200,21600,43200,86400]
+const localOnly = computed(() => Boolean(props.localOnly && !lockedUpstream.value && !oauthOnly.value))
+const localSource = ref<InstanceType<typeof IntelligenceLocalSource> | null>(null)
+const candyIntervals = [180, 300, 600, 900]
+const sources = computed<{value:IntelligenceSource;icon:'server'|'link'|'grid'}[]>(() => [{ value:'upstream',icon:'server' }, ...(props.plan?.source_type === 'local_group' ? [{ value:'local_group' as const,icon:'grid' as const }] : []),{ value:'external',icon:'link' }])
+const intervals = [300, 600, 900]
 const timeoutOptions = computed(() => {
   const presets = [300, 600, 900]
   const saved = props.plan?.timeout_seconds
@@ -97,8 +102,8 @@ const timeoutOptions = computed(() => {
     : presets
 })
 const protocolOptions = [{ value: 'responses', label: 'Responses' }, { value: 'chat_completions', label: 'Chat Completions' }]
-const defaults = (): IntelligencePlanInput => ({ name:'',source_type:oauthOnly.value?'openai_oauth':'upstream',account_id:null,endpoint:'',api_key:'',upstream_target_id:null,group_id:null,supplier_note:'',group_note:'',rate_note:'',notes:'',api_mode:'responses',enabled:true,interval_seconds:300,timeout_seconds:600 })
-const form = reactive<IntelligencePlanInput>(defaults()), groups = ref<AdminGroup[]>([]), saving = ref(false), error = ref(''), groupError = ref(''), groupsLoading = ref(false)
+const defaults = (): IntelligencePlanInput & { candy_enabled: boolean; candy_interval_seconds: number } => ({ name:'',source_type:oauthOnly.value?'openai_oauth':localOnly.value?'local_group':'upstream',account_id:null,endpoint:'',api_key:'',upstream_target_id:null,group_id:null,local_api_key_id:null,supplier_note:'',group_note:'',rate_note:'',notes:'',api_mode:'responses',enabled:true,candy_enabled:false,candy_interval_seconds:180,interval_seconds:300,timeout_seconds:600 })
+const form = reactive(defaults()), groups = ref<AdminGroup[]>([]), saving = ref(false), error = ref(''), groupError = ref(''), groupsLoading = ref(false)
 const intervalChoice = ref<number | 'custom'>(300), customInterval = ref('300'), intervalError = ref('')
 const eligibleSuppliers = computed(() => (props.overview?.suppliers || []).map(supplier => ({ ...supplier, targets: supplier.targets.filter(target => target.provider === 'openai') })).filter(supplier => supplier.targets.length))
 const selectedTarget = computed(() => eligibleSuppliers.value.flatMap(supplier => supplier.targets).find(target => target.id === form.upstream_target_id))
@@ -115,7 +120,13 @@ function selectUpstream(value: string | number | boolean | null) {
   form.name = target.name
   error.value = ''
 }
-const groupOptions = computed(() => groups.value.map(group => ({ value: group.id, label: `${group.name} · ${group.rate_multiplier}×` })))
+function selectLocalSource(value: { groupId: number | null; keyId: number | null; name?: string }) {
+  const changedGroup = form.group_id !== value.groupId
+  form.group_id = value.groupId
+  form.local_api_key_id = value.keyId
+  if (value.name && (changedGroup || !form.name.trim())) form.name = value.name
+  error.value = ''
+}
 function durationLabel(seconds: number) {
   return seconds % 3600 === 0 ? t('intelligenceMonitor.hours', { count: seconds / 3600 })
     : seconds % 60 === 0 ? t('intelligenceMonitor.minutes', { count: seconds / 60 })
@@ -174,11 +185,16 @@ async function loadAccounts() {
 let generation = 0
 function cancelLoading() { generation++; accountController?.abort(); accountsLoading.value = false; groupsLoading.value = false }
 function close() { if (!saving.value) { cancelLoading(); emit('close') } }
-watch([() => props.show, () => props.upstreamTargetId, () => props.plan?.id], async ([show]) => {
+watch([() => props.show, () => props.upstreamTargetId, () => props.plan?.id, () => props.localOnly, () => props.oauthOnly], async ([show]) => {
   cancelLoading()
   if (!show) return
   const current = generation
   Object.assign(form, defaults(), props.plan ? { ...props.plan, api_key:'' } : {})
+  form.candy_enabled = Boolean(props.plan?.candy_enabled)
+  form.candy_interval_seconds = candyIntervals.includes(props.plan?.candy_interval_seconds ?? 180) ? props.plan?.candy_interval_seconds ?? 180 : 180
+  // Existing managed keys remain automatic; explicit administrator keys retain their binding.
+  form.local_api_key_id = props.plan?.local_api_key_managed ? null : props.plan?.local_api_key_id ?? null
+  if (localOnly.value) { form.source_type = 'local_group'; form.account_id = null; form.upstream_target_id = null }
   if (lockedUpstream.value) {
     form.source_type = 'upstream'
     form.upstream_target_id = props.upstreamTargetId
@@ -207,6 +223,8 @@ async function save() {
     if (!selectedTarget.value) { error.value = t('intelligenceMonitor.sourceMissing'); return }
   }
   if (oauthOnly.value && (accountsLoading.value || !accountsReady.value)) return
+  if (localOnly.value) form.source_type = 'local_group'
+  if (form.source_type === 'local_group' && !localSource.value?.validate()) return
   if (!oauthOnly.value && !form.name.trim()) { error.value=t('intelligenceMonitor.form.requiredName'); return }
   if ((oauthOnly.value && !form.account_id) || (form.source_type==='upstream' && !form.upstream_target_id) || (form.source_type==='local_group' && !form.group_id)) { error.value=t('intelligenceMonitor.form.requiredSource'); return }
   if (oauthOnly.value && (!selectedAccount.value || !eligibleAccount(selectedAccount.value))) { form.account_id = null; form.name = ''; accountSelectionError.value = t('intelligenceMonitor.oauth.unavailable'); return }
@@ -223,7 +241,7 @@ async function save() {
     if (!form.api_key?.trim() && (!props.plan || props.plan.source_type !== 'external')) { error.value=t('intelligenceMonitor.form.requiredKey'); return }
   }
   saving.value=true
-  const input: IntelligencePlanInput = { name:oauthOnly.value?'':form.name.trim(),source_type:oauthOnly.value?'openai_oauth':form.source_type,account_id:oauthOnly.value?form.account_id:null,endpoint:form.source_type==='external' ? form.endpoint?.trim() : undefined,api_key:form.source_type==='external' ? form.api_key?.trim() || undefined : undefined,upstream_target_id:form.source_type==='upstream' ? form.upstream_target_id : null,group_id:form.source_type==='local_group' ? form.group_id : null,supplier_note:form.supplier_note.trim(),group_note:form.group_note.trim(),rate_note:form.rate_note.trim(),notes:form.notes.trim(),api_mode:oauthOnly.value?'responses':form.api_mode,enabled:form.enabled,interval_seconds:form.interval_seconds,timeout_seconds:form.timeout_seconds }
+  const input: IntelligencePlanInput = { name:oauthOnly.value?'':form.name.trim(),source_type:oauthOnly.value?'openai_oauth':form.source_type,account_id:oauthOnly.value?form.account_id:null,endpoint:form.source_type==='external' ? form.endpoint?.trim() : undefined,api_key:form.source_type==='external' ? form.api_key?.trim() || undefined : undefined,upstream_target_id:form.source_type==='upstream' ? form.upstream_target_id : null,group_id:form.source_type==='local_group' ? form.group_id : null,local_api_key_id:form.source_type==='local_group' ? form.local_api_key_id ?? null : undefined,supplier_note:form.supplier_note.trim(),group_note:form.group_note.trim(),rate_note:form.rate_note.trim(),notes:form.notes.trim(),api_mode:oauthOnly.value?'responses':form.api_mode,enabled:form.enabled,candy_enabled:Boolean(form.candy_enabled),candy_interval_seconds:form.candy_interval_seconds,interval_seconds:form.interval_seconds,timeout_seconds:form.timeout_seconds }
   try { const saved = props.plan ? await intelligenceMonitorAPI.update(props.plan.id,input) : await intelligenceMonitorAPI.create(input); emit('saved', saved); emit('close') }
   catch (err) {
     const detail = extractApiErrorMetadata(err)?.detail

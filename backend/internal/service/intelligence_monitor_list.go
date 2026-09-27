@@ -3,7 +3,7 @@ package service
 import "context"
 
 func (s *IntelligenceMonitorService) loadPlanListData(ctx context.Context, plans []*IntelligenceMonitorPlan) (*IntelligenceMonitorPlanListData, error) {
-	data := &IntelligenceMonitorPlanListData{Runs: map[int64][]*IntelligenceMonitorRun{}, SourceNames: map[int64]string{}}
+	data := &IntelligenceMonitorPlanListData{Runs: map[int64][]*IntelligenceMonitorRun{}, CandyRuns: map[int64][]*IntelligenceMonitorRun{}, SourceNames: map[int64]string{}}
 	if len(plans) == 0 {
 		return data, nil
 	}
@@ -22,6 +22,13 @@ func (s *IntelligenceMonitorService) loadPlanListData(ctx context.Context, plans
 			return nil, err
 		}
 		data.Runs[p.ID] = page.Items
+		if p.CandyEnabled {
+			candy, err := s.repo.ListRuns(ctx, IntelligenceMonitorRunQuery{PlanID: &p.ID, TestKind: IntelligenceMonitorTestCandy, Page: 1, PageSize: IntelligenceMonitorCandyRetainedRuns + 1})
+			if err != nil {
+				return nil, err
+			}
+			data.CandyRuns[p.ID] = candy.Items
+		}
 		switch p.SourceType {
 		case "openai_oauth":
 			if p.AccountID != nil && s.accounts != nil {
