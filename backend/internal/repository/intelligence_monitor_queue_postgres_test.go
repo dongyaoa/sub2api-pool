@@ -24,10 +24,10 @@ func TestIntelligenceQueuePostgresIndependentPoolsAndFIFO(t *testing.T) {
 		require.NoError(t, repo.Enqueue(ctx, run, false))
 		artwork = append(artwork, run)
 	}
-	// The oldest candy must wait for its own plan, without blocking other keys.
+	// The oldest candy is for a plan whose artwork will still be running.
 	companion := candyRepositoryRun(firstPlan, "candy")
 	require.NoError(t, repo.Enqueue(ctx, companion, false))
-	var candy []*service.IntelligenceMonitorRun
+	candy := []*service.IntelligenceMonitorRun{companion}
 	for i := range 5 {
 		plan := candyRepositoryPlan(t, ctx, repo, fmt.Sprintf("Candy %d", i), false, true)
 		run := candyRepositoryRun(plan, "candy")
@@ -52,7 +52,7 @@ func TestIntelligenceQueuePostgresIndependentPoolsAndFIFO(t *testing.T) {
 		run, err := repo.ClaimNextForKind(ctx, fmt.Sprintf("candy-%d", i), "candy", 4)
 		require.NoError(t, err)
 		require.NotNil(t, run, "eight long drawings must leave the independent candy pool available")
-		require.Equal(t, candy[i].ID, run.ID, "skip only the candy sharing a running plan")
+		require.Equal(t, candy[i].ID, run.ID, "the same plan's drawing must not block its candy request")
 		runningCandy = append(runningCandy, run)
 	}
 	run, err = repo.ClaimNextForKind(ctx, "candy-full", "candy", 4)
@@ -61,8 +61,9 @@ func TestIntelligenceQueuePostgresIndependentPoolsAndFIFO(t *testing.T) {
 	var active, duplicates int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM intelligence_monitor_runs WHERE status='running'`).Scan(&active))
 	require.Equal(t, 12, active)
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT plan_id FROM intelligence_monitor_runs WHERE status='running' GROUP BY plan_id HAVING COUNT(*)>1) duplicate_plans`).Scan(&duplicates))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT plan_id,test_kind FROM intelligence_monitor_runs WHERE status='running' GROUP BY plan_id,test_kind HAVING COUNT(*)>1) duplicate_plans`).Scan(&duplicates))
 	require.Zero(t, duplicates)
+	require.ErrorIs(t, repo.Enqueue(ctx, candyRepositoryRun(firstPlan, "candy"), false), service.ErrIntelligenceBusy)
 	var leaseSeconds float64
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM lease_until-started_at) FROM intelligence_monitor_runs WHERE id=$1`, runningArtwork[0].ID).Scan(&leaseSeconds))
 	require.Equal(t, float64(900+service.IntelligenceMonitorLeaseGraceSeconds), leaseSeconds)
@@ -75,11 +76,10 @@ func TestIntelligenceQueuePostgresIndependentPoolsAndFIFO(t *testing.T) {
 	require.Equal(t, artwork[8].ID, run.ID)
 	runningCandy[0].Status = "failed"
 	require.NoError(t, repo.CompleteRun(ctx, runningCandy[0]))
-	run, err = repo.ClaimNextForKind(ctx, "companion-released", "candy", 4)
+	run, err = repo.ClaimNextForKind(ctx, "candy-released", "candy", 4)
 	require.NoError(t, err)
 	require.NotNil(t, run)
-	require.Equal(t, companion.ID, run.ID, "the previously blocked oldest candy resumes before newer candy")
-	require.ErrorIs(t, repo.Enqueue(ctx, candyRepositoryRun(firstPlan, "candy"), false), service.ErrIntelligenceBusy)
+	require.Equal(t, candy[4].ID, run.ID, "completion releases capacity for the oldest waiting candy")
 }
 
 func TestIntelligenceQueuePostgresConcurrentInstancesRespectPoolLimit(t *testing.T) {
@@ -140,10 +140,10 @@ func TestIntelligenceQueuePostgresConcurrentInstancesRespectPoolLimit(t *testing
 	}
 }
 
-func TestIntelligenceQueuePostgresConcurrentKindsSerializeSamePlan(t *testing.T) {
+func TestIntelligenceQueuePostgresConcurrentKindsRunTogetherForSamePlan(t *testing.T) {
 	db, ctx := intelligenceMonitorTestDB(t)
 	repo := &intelligenceMonitorRepository{db: db}
-	plan := candyRepositoryPlan(t, ctx, repo, "Shared credential", false, true)
+	plan := candyRepositoryPlan(t, ctx, repo, "Shared credential", true, true)
 	for _, kind := range []string{"pelican", "candy"} {
 		require.NoError(t, repo.Enqueue(ctx, candyRepositoryRun(plan, kind), false))
 	}
@@ -162,29 +162,98 @@ func TestIntelligenceQueuePostgresConcurrentKindsSerializeSamePlan(t *testing.T)
 		}()
 	}
 	close(start)
-	var claimed *service.IntelligenceMonitorRun
+	claimed := make(map[string]*service.IntelligenceMonitorRun)
 	for range 2 {
 		select {
 		case result := <-results:
 			require.NoError(t, result.err)
-			if result.run != nil {
-				require.Nil(t, claimed, "independent pools still serialize a shared plan")
-				claimed = result.run
+			require.NotNil(t, result.run, "a different kind running for this plan cannot consume this pool's capacity")
+			require.Equal(t, plan.ID, result.run.PlanID)
+			claimed[result.run.TestKind] = result.run
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	require.Len(t, claimed, 2)
+	for _, kind := range []string{"pelican", "candy"} {
+		require.ErrorIs(t, repo.Enqueue(ctx, candyRepositoryRun(plan, kind), false), service.ErrIntelligenceBusy)
+		next, err := repo.ClaimNextForKind(ctx, "no-duplicate-"+kind, kind, 4)
+		require.NoError(t, err)
+		require.Nil(t, next, "a claimed request cannot execute twice even with spare pool capacity")
+	}
+	claimed["candy"].Status = "failed"
+	require.NoError(t, repo.CompleteRun(ctx, claimed["candy"]))
+	stored, err := repo.GetPlan(ctx, plan.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.CandyNextRunAt, "candy gets its own next interval while the drawing remains active")
+	require.Nil(t, stored.NextRunAt)
+	require.NoError(t, repo.Enqueue(ctx, candyRepositoryRun(stored, "candy"), false))
+	next, err := repo.ClaimNextForKind(ctx, "second-candy-during-drawing", "candy", 4)
+	require.NoError(t, err)
+	require.NotNil(t, next)
+	require.NotEqual(t, claimed["candy"].ID, next.ID)
+	claimed["pelican"].Status = "failed"
+	require.NoError(t, repo.CompleteRun(ctx, claimed["pelican"]))
+	stored, err = repo.GetPlan(ctx, plan.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.NextRunAt)
+	require.Nil(t, stored.CandyNextRunAt, "completing the drawing cannot alter an active candy's schedule")
+}
+
+func TestIntelligenceQueuePostgresSixtyFourPerPoolAcrossInstances(t *testing.T) {
+	db, ctx := intelligenceMonitorTestDB(t)
+	repo := &intelligenceMonitorRepository{db: db}
+	require.NoError(t, repo.SaveConcurrency(ctx, service.IntelligenceMonitorConcurrency{MaxConcurrency: 64, CandyMaxConcurrency: 64}))
+	for i := range 65 {
+		plan := candyRepositoryPlan(t, ctx, repo, fmt.Sprintf("Sixty-four paired plans %d", i), false, true)
+		for _, kind := range []string{"pelican", "candy"} {
+			require.NoError(t, repo.Enqueue(ctx, candyRepositoryRun(plan, kind), false))
+		}
+	}
+	type result struct {
+		runs []*service.IntelligenceMonitorRun
+		err  error
+	}
+	results := make(chan result, 8)
+	start := make(chan struct{})
+	for i := range 8 {
+		other := &intelligenceMonitorRepository{db: candyRepositoryConnection(t, ctx, db)}
+		kind := []string{"pelican", "candy"}[i%2]
+		go func() {
+			<-start
+			var runs []*service.IntelligenceMonitorRun
+			for {
+				run, err := other.ClaimNextForKind(ctx, fmt.Sprintf("paired-instance-%d", i), kind, 4)
+				if err != nil || run == nil {
+					results <- result{runs: runs, err: err}
+					return
+				}
+				runs = append(runs, run)
+			}
+		}()
+	}
+	close(start)
+	seen := make(map[int64]bool)
+	for range 8 {
+		select {
+		case result := <-results:
+			require.NoError(t, result.err)
+			for _, run := range result.runs {
+				require.False(t, seen[run.ID], "two instances cannot start the same request")
+				seen[run.ID] = true
 			}
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
 	}
-	require.NotNil(t, claimed)
-	otherKind := "candy"
-	if claimed.TestKind == otherKind {
-		otherKind = "pelican"
-	}
-	claimed.Status = "failed"
-	require.NoError(t, repo.CompleteRun(ctx, claimed))
-	next, err := repo.ClaimNextForKind(ctx, "same-plan-after-completion", otherKind, 4)
+	require.Len(t, seen, 128, "both pools must use all configured slots even for the same 64 plans")
+	state, err := repo.GetConcurrency(ctx)
 	require.NoError(t, err)
-	require.NotNil(t, next)
-	require.Equal(t, plan.ID, next.PlanID)
-	require.Equal(t, otherKind, next.TestKind)
+	require.Equal(t, 64, state.PelicanRunning)
+	require.Equal(t, 64, state.CandyRunning)
+	require.Equal(t, 1, state.PelicanPending)
+	require.Equal(t, 1, state.CandyPending)
+	var paired int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT plan_id FROM intelligence_monitor_runs WHERE status='running' GROUP BY plan_id HAVING COUNT(*)=2) paired_plans`).Scan(&paired))
+	require.Equal(t, 64, paired)
 }

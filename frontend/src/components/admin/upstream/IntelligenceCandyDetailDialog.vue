@@ -59,7 +59,7 @@ async function load() {
     if (!closed && !current.signal.aborted && controller === current) error.value = extractApiErrorMessage(cause, t('intelligenceMonitor.loadFailed'))
   } finally { if (controller === current && !closed) loading.value = false }
 }
-watch(() => `${props.run.id}:${props.run.status}:${props.run.finished_at || ''}`, () => { detail.value = null; void load() }, { immediate: true })
+watch([() => props.run.id, () => props.run.status, () => props.run.finished_at, () => props.run.correct, () => props.run.answer], () => { detail.value = null; void load() }, { immediate: true })
 onBeforeUnmount(() => { closed = true; controller?.abort() })
 </script>
 <style scoped>

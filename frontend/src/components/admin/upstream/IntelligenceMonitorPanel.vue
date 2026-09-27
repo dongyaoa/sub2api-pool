@@ -42,7 +42,7 @@ import IntelligenceLocalCard from './IntelligenceLocalCard.vue'
 import IntelligencePlanDialog from './IntelligencePlanDialog.vue'
 import IntelligenceHistoryDialog from './IntelligenceHistoryDialog.vue'
 import IntelligenceCandyDetailDialog from './IntelligenceCandyDetailDialog.vue'
-import { isIntelligencePlanActive, isIntelligenceRunActive } from './intelligenceCandy'
+import { intelligenceRefreshInterval, isIntelligenceRunActive } from './intelligenceCandy'
 import UpstreamOrderDialog from './UpstreamOrderDialog.vue'
 import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
 import { useMonitorRefresh } from '@/composables/useMonitorRefresh'
@@ -118,7 +118,7 @@ let disposed=false
 const {loading,refresh:refreshPlans}=useMonitorRefresh({
   active:()=>props.active,
   paused:()=>orderDialog.value,
-  intervalMs:()=>scopePlans.value.some(isIntelligencePlanActive)?2000:5000,
+  intervalMs:()=>intelligenceRefreshInterval(scopePlans.value),
   request:signal=>intelligenceMonitorAPI.plans(signal),
   apply:result=>{plans.value=reconcileMonitorData(plans.value,result.items||[]);error.value='';loaded.value=true},
   onError:err=>{error.value=extractApiErrorMessage(err,t('intelligenceMonitor.loadFailed'))},

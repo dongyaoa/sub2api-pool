@@ -60,6 +60,21 @@ describe('candy result detail', () => {
     expect(view.get('[data-testid="candy-response"]').text()).toBe('The answer is 21.')
   })
 
+  it('refreshes an open completed record when background regrading corrects its answer', async () => {
+    const original = run(1, { correct: false, answer: '', raw_text: 'The answer is \\boxed{21}.', finished_at: '2026-09-27T01:00:05Z' })
+    mocks.detail.mockResolvedValue(original)
+    const view = render(original); await flushPromises()
+    expect(view.text()).toContain('intelligenceMonitor.candy.incorrect')
+    const corrected = { ...original, correct: true, answer: '21' }
+    mocks.detail.mockResolvedValue(corrected)
+    await view.setProps({ run: corrected }); await flushPromises()
+    expect(mocks.detail).toHaveBeenCalledTimes(2)
+    expect(view.text()).toContain('intelligenceMonitor.candy.correct')
+    expect(view.text()).not.toContain('intelligenceMonitor.candy.incorrect')
+    await view.setProps({ run: { ...corrected, source_name: 'Updated source label' } }); await flushPromises()
+    expect(mocks.detail).toHaveBeenCalledTimes(2)
+  })
+
   it.each(['close', 'unmount'] as const)('aborts on %s and ignores late replies', async event => {
     const response = deferred<IntelligenceRun>(); mocks.detail.mockReturnValueOnce(response.promise)
     const view = render(); const signal = mocks.detail.mock.calls[0]![1] as AbortSignal

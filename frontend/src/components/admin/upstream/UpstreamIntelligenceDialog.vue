@@ -47,7 +47,7 @@ import IntelligencePlanCard from './IntelligencePlanCard.vue'
 import IntelligencePlanDialog from './IntelligencePlanDialog.vue'
 import IntelligenceHistoryDialog from './IntelligenceHistoryDialog.vue'
 import IntelligenceCandyDetailDialog from './IntelligenceCandyDetailDialog.vue'
-import { isIntelligencePlanActive, isIntelligenceRunActive } from './intelligenceCandy'
+import { intelligenceRefreshInterval, isIntelligenceRunActive } from './intelligenceCandy'
 import UpstreamDeleteDialog from './UpstreamDeleteDialog.vue'
 import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
 import { reconcileMonitorData } from './monitorReconcile'
@@ -78,7 +78,7 @@ provide(intelligencePreviewRefreshKey, previewRefresh)
 
 const { loading, refresh } = useMonitorRefresh({
   active: () => !closed.value,
-  intervalMs: () => plans.value.some(isIntelligencePlanActive) ? 2000 : 5000,
+  intervalMs: () => intelligenceRefreshInterval(plans.value),
   request: signal => intelligenceMonitorAPI.plans(signal, props.target.id),
   apply: result => {
     if (!live()) return

@@ -19,10 +19,12 @@ function render(show = true) {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
   api.concurrency.mockResolvedValue(settings())
   api.updateConcurrency.mockImplementation(async input => ({ ...settings(), ...input, source: 'database' }))
 })
-afterEach(() => { wrapper?.unmount(); wrapper = undefined })
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('intelligence concurrency settings', () => {
   it('loads when opened and saves each independent limit, then closes with a success message', async () => {
@@ -72,6 +74,40 @@ describe('intelligence concurrency settings', () => {
     expect((view.get(pelican).element as HTMLInputElement).value).toBe('24')
     expect(view.get('[data-testid="pelican-running"]').text()).toBe('8')
     expect(view.get('[data-testid="pelican-pending"]').text()).toBe('3')
+  })
+
+  it('automatically refreshes counts while visible, preserving edits, and pauses when closed or hidden', async () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get')
+    const view = render(); await flushPromises()
+    await view.get(candy).setValue(64)
+    api.concurrency.mockResolvedValue({ ...settings(), candy_running: 12, candy_pending: 0 })
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(api.concurrency).toHaveBeenCalledTimes(2)
+    expect(view.get('[data-testid="candy-running"]').text()).toBe('12')
+    expect((view.get(candy).element as HTMLInputElement).value).toBe('64')
+    hidden.mockReturnValue(true); document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(api.concurrency).toHaveBeenCalledTimes(2)
+    hidden.mockReturnValue(false); document.dispatchEvent(new Event('visibilitychange')); await flushPromises()
+    expect(api.concurrency).toHaveBeenCalledTimes(3)
+    await view.setProps({ show: false }); await vi.advanceTimersByTimeAsync(10000)
+    expect(api.concurrency).toHaveBeenCalledTimes(3)
+  })
+
+  it('allows saving during a slow status poll and ignores the superseded response', async () => {
+    const view = render(); await flushPromises()
+    let finishPoll!: (value: IntelligenceConcurrency) => void
+    api.concurrency.mockReturnValueOnce(new Promise(resolve => { finishPoll = resolve }))
+    await vi.advanceTimersByTimeAsync(2000)
+    const signal = api.concurrency.mock.calls[1][0] as AbortSignal
+    await view.get(candy).setValue(64)
+    expect(view.get('[data-testid="save-concurrency"]').attributes('disabled')).toBeUndefined()
+    await view.get('[data-testid="save-concurrency"]').trigger('click'); await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(api.updateConcurrency).toHaveBeenCalledWith({ max_concurrency: 8, candy_max_concurrency: 64 })
+    finishPoll({ ...settings(), candy_running: 99 }); await flushPromises()
+    expect(view.get('[data-testid="candy-running"]').text()).toBe('2')
+    expect(view.emitted('close')).toHaveLength(1)
   })
 
   it('blocks saving during loading, supports retry and keeps server validation errors visible', async () => {

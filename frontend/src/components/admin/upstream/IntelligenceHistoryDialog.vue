@@ -112,6 +112,11 @@ async function select(id:number|null){
 }
 function download(){if(!detail.value?.html)return;const url=URL.createObjectURL(new Blob([detail.value.html],{type:'text/html;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`pelican-${detail.value.id}.html`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 watch([()=>props.show,()=>props.plan?.id,()=>props.initialRunId],()=>{listController?.abort();detailController?.abort();clearInterval(timer);runs.value=[];total.value=0;detail.value=null;loading.value=false;detailLoading.value=false;error.value='';initialSelection=props.initialRunId||null;selectedID.value=initialSelection;page.value=1;view.value='preview';if(props.show){void loadRuns();timer=setInterval(()=>{if(!document.hidden&&!loading.value)void loadRuns()},5000)}},{immediate:true})
+// The parent already polls active jobs every second. Follow its completion
+// signal so an open artwork does not wait for the slower history fallback poll.
+watch(() => [props.plan?.latest_run?.id, props.plan?.latest_run?.status, props.plan?.latest_run?.finished_at], (current, previous) => {
+  if (props.show && !document.hidden && !loading.value && (page.value === 1 || current[0] === selectedID.value) && current.some((value, index) => value !== previous[index])) void loadRuns()
+})
 onBeforeUnmount(()=>{listController?.abort();detailController?.abort();clearInterval(timer)})
 </script>
 <style scoped>

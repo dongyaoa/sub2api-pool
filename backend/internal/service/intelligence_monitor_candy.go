@@ -14,6 +14,7 @@ const intelligenceCandyMaxStatement = 2048
 var (
 	intelligenceCandyNumber        = regexp.MustCompile(`[+-]?[0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?`)
 	intelligenceCandyCorrectNumber = regexp.MustCompile(`^\+?0*21(?:\.0+)?$`)
+	intelligenceCandyLatexText     = regexp.MustCompile(`\\(?:text|textrm|textnormal|textbf|textit|mathrm|mathbf|mathit|mathsf|mathnormal|mbox)\s*\{([^{}\n]{0,256})\}`)
 	intelligenceCandyBox           = regexp.MustCompile(`\\boxed\s*\{([^{}\n]{1,128})\}`)
 	intelligenceCandyFinalCue      = regexp.MustCompile(`^(?:最终(?:的)?(?:答案|结果|结论)|最后(?:的)?(?:答案|结果|结论)|(?:the\s+)?final\s+(?:answer|result)\b|最终|最后)\s*(?:(?:为|是|is)\s*)?[:=]?\s*`)
 	intelligenceCandyAnswerCue     = regexp.MustCompile(`^(?:(?:正确)?答案|答|结论|结果|(?:the\s+)?(?:correct\s+)?answer\b)\s*(?:(?:为|是|is)\s*)?[:=]?\s*`)
@@ -88,7 +89,7 @@ func intelligenceCandyParseConclusion(statement string, allowStandalone bool) in
 	if len(statement) > intelligenceCandyMaxStatement {
 		return intelligenceCandyConclusion{}
 	}
-	boxed := intelligenceCandyBox.MatchString(statement)
+	boxed := intelligenceCandyBox.MatchString(intelligenceCandyLatexFormatting(statement))
 	text := intelligenceCandyFormatting(statement)
 	body, priority := intelligenceCandyStripCues(text)
 	invalid := func() intelligenceCandyConclusion { return intelligenceCandyConclusion{priority: priority} }
@@ -109,6 +110,12 @@ func intelligenceCandyParseConclusion(statement string, allowStandalone bool) in
 			return intelligenceCandyConclusion{}
 		}
 		return invalid()
+	}
+	// A box inside a proof, such as 9+12=\boxed{21}, is not a final
+	// conclusion. In particular, do not turn it into a high-priority invalid
+	// answer that prevents a later, clearly worded conclusion from being read.
+	if priority == 0 && len(numbers) > 1 && strings.Contains(body, "=") {
+		return intelligenceCandyConclusion{}
 	}
 	if boxed && priority < 3 {
 		priority = 3
@@ -174,11 +181,27 @@ func intelligenceCandyFormatting(text string) string {
 	text = strings.TrimLeft(text, "#")
 	text = strings.TrimSpace(text)
 	text = strings.TrimPrefix(text, "- ")
+	text = intelligenceCandyLatexFormatting(text)
 	text = intelligenceCandyBox.ReplaceAllString(text, " $1 ")
 	// Replace markup with spaces, never concatenate separated digits (2**1).
 	text = strings.NewReplacer("*", " ", "_", " ", "`", " ", "$", " ", `\(`, " ", `\)`, " ", `\[`, " ", `\]`, " ").Replace(text)
 	text = strings.Join(strings.Fields(text), " ")
 	return strings.Trim(text, " \t.,，:：;；!！。")
+}
+
+// Remove only text/style wrappers, starting with the innermost ones. This
+// accepts common model output such as \boxed{21\text{个}} without interpreting
+// arbitrary LaTeX as a numeric answer. Spaces preserve numeric token boundaries
+// so 2\text{}1 cannot silently become 21. The depth and input size are bounded.
+func intelligenceCandyLatexFormatting(text string) string {
+	for range 8 {
+		next := intelligenceCandyLatexText.ReplaceAllString(text, " $1 ")
+		if next == text {
+			break
+		}
+		text = next
+	}
+	return text
 }
 
 func intelligenceCandyStatements(raw string) []string {

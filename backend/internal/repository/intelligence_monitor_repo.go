@@ -323,7 +323,7 @@ func (r *intelligenceMonitorRepository) claimNext(ctx context.Context, token, ki
 	defer func() { _ = tx.Rollback() }()
 	// Serialize only the short claim transaction. The same lock spans both pools
 	// and legacy callers, so concurrent app instances cannot exceed a pool's
-	// global capacity or execute two kinds for the same plan simultaneously.
+	// global capacity or claim the same run simultaneously.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(245,1)`); err != nil {
 		return nil, err
 	}
@@ -337,11 +337,13 @@ func (r *intelligenceMonitorRepository) claimNext(ctx context.Context, token, ki
 	activeQuery := `SELECT COUNT(*) FROM intelligence_monitor_runs WHERE status='running' AND lease_until>NOW()`
 	var activeArgs []any
 	pendingFilter := ""
+	runningFilter := ""
 	claimArgs := []any{token, service.IntelligenceMonitorLeaseGraceSeconds}
 	if kind != "" {
 		activeQuery += ` AND test_kind=$1`
 		activeArgs = append(activeArgs, kind)
 		pendingFilter = ` AND pending.test_kind=$3`
+		runningFilter = ` AND running.test_kind=pending.test_kind`
 		claimArgs = append(claimArgs, kind)
 	}
 	if err = tx.QueryRowContext(ctx, activeQuery, activeArgs...).Scan(&active); err != nil {
@@ -352,9 +354,11 @@ func (r *intelligenceMonitorRepository) claimNext(ctx context.Context, token, ki
 	}
 	// The execution budget includes source preparation and persistence. Base the
 	// lease on this run's immutable timeout, not the plan's current configuration.
-	// Companion tests share credentials (including OAuth concurrency limits), so
-	// each plan executes serially while independent plans use available workers.
-	run, err := scanIntelligenceRun(tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status='running',started_at=NOW(),lease_token=$1,lease_until=NOW()+make_interval(secs=>timeout_seconds+$2) WHERE id=(SELECT pending.id FROM intelligence_monitor_runs pending WHERE pending.status='pending'`+pendingFilter+` AND NOT EXISTS(SELECT 1 FROM intelligence_monitor_runs running WHERE running.plan_id=pending.plan_id AND running.status='running') ORDER BY pending.created_at,pending.id FOR UPDATE OF pending SKIP LOCKED LIMIT 1) RETURNING `+intelligenceRunColumns, claimArgs...), false)
+	// The two tests for one plan use independent pools. A long drawing must not
+	// hold a ready candy test (or vice versa) while that pool has free capacity.
+	// Same-kind duplicates are also excluded by the active plan/kind index.
+	// Legacy ClaimNext retains its original shared, serial queue contract.
+	run, err := scanIntelligenceRun(tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status='running',started_at=NOW(),lease_token=$1,lease_until=NOW()+make_interval(secs=>timeout_seconds+$2) WHERE id=(SELECT pending.id FROM intelligence_monitor_runs pending WHERE pending.status='pending'`+pendingFilter+` AND NOT EXISTS(SELECT 1 FROM intelligence_monitor_runs running WHERE running.plan_id=pending.plan_id`+runningFilter+` AND running.status='running') ORDER BY pending.created_at,pending.id FOR UPDATE OF pending SKIP LOCKED LIMIT 1) RETURNING `+intelligenceRunColumns, claimArgs...), false)
 	if errors.Is(err, service.ErrIntelligenceNotFound) {
 		return nil, nil
 	}
@@ -387,7 +391,7 @@ func (r *intelligenceMonitorRepository) CompleteRun(ctx context.Context, run *se
 	if err = tx.QueryRowContext(ctx, `SELECT id FROM intelligence_monitor_plans WHERE id=$1 FOR UPDATE`, run.PlanID).Scan(&planID); err != nil {
 		return intelligenceDBError(err)
 	}
-	err = tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status=$3,finished_at=NOW(),duration_ms=EXTRACT(EPOCH FROM (NOW()-started_at))*1000,http_status=$4,error=$5,html=$6,raw_text=$7,rate_snapshot=$8::jsonb,source_snapshot=$9::jsonb,correct=$10,answer=$11,request_key_encrypted='',lease_token='',lease_until=NULL WHERE id=$1 AND lease_token=$2 AND status='running' RETURNING plan_id,test_kind`, run.ID, run.LeaseToken, run.Status, run.HTTPStatus, run.Error, run.HTML, run.RawText, string(rate), string(source), run.Correct, run.Answer).Scan(&planID, &kind)
+	err = tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status=$3,finished_at=NOW(),duration_ms=EXTRACT(EPOCH FROM (NOW()-started_at))*1000,http_status=$4,error=$5,html=$6,raw_text=$7,rate_snapshot=$8::jsonb,source_snapshot=$9::jsonb,correct=$10,answer=$11,candy_grade_version=CASE WHEN test_kind='candy' AND $3::varchar='succeeded' THEN $12 ELSE 0 END,request_key_encrypted='',lease_token='',lease_until=NULL WHERE id=$1 AND lease_token=$2 AND status='running' RETURNING plan_id,test_kind`, run.ID, run.LeaseToken, run.Status, run.HTTPStatus, run.Error, run.HTML, run.RawText, string(rate), string(source), run.Correct, run.Answer, service.IntelligenceMonitorCandyGradeVersion).Scan(&planID, &kind)
 	if err != nil {
 		return intelligenceDBError(err)
 	}

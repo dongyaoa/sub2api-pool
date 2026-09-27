@@ -41,6 +41,7 @@ type IntelligenceMonitorService struct {
 	slots          chan struct{}
 	candySlots     chan struct{}
 	wake           chan struct{}
+	candyWake      chan struct{}
 	scheduleWake   chan struct{}
 }
 
@@ -57,7 +58,7 @@ func NewIntelligenceMonitorService(repo IntelligenceMonitorRepository, encryptor
 	// channels that still belong to running requests.
 	artworkConcurrency, candyConcurrency := IntelligenceMonitorMaxConcurrency, IntelligenceMonitorCandyMaxConcurrency
 	localTransport := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, ResponseHeaderTimeout: requestTimeout, MaxIdleConns: artworkConcurrency + candyConcurrency, MaxIdleConnsPerHost: artworkConcurrency + candyConcurrency, IdleConnTimeout: 90 * time.Second}
-	return &IntelligenceMonitorService{repo: repo, encryptor: encryptor, upstreams: upstreamRepo, groups: groupRepo, keys: apiKeys, finance: finance, cfg: cfg, externalClient: newSSRFSafeHTTPClientWithHeaderTimeout(requestTimeout, requestTimeout), localClient: &http.Client{Timeout: requestTimeout, Transport: localTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, localEndpoint: localEndpoint, ctx: ctx, cancel: cancel, slots: make(chan struct{}, artworkConcurrency), candySlots: make(chan struct{}, candyConcurrency), wake: make(chan struct{}, 1), scheduleWake: make(chan struct{}, 1)}
+	return &IntelligenceMonitorService{repo: repo, encryptor: encryptor, upstreams: upstreamRepo, groups: groupRepo, keys: apiKeys, finance: finance, cfg: cfg, externalClient: newSSRFSafeHTTPClientWithHeaderTimeout(requestTimeout, requestTimeout), localClient: &http.Client{Timeout: requestTimeout, Transport: localTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, localEndpoint: localEndpoint, ctx: ctx, cancel: cancel, slots: make(chan struct{}, artworkConcurrency), candySlots: make(chan struct{}, candyConcurrency), wake: make(chan struct{}, 1), candyWake: make(chan struct{}, 1), scheduleWake: make(chan struct{}, 1)}
 }
 
 func (s *IntelligenceMonitorService) ListPlans(ctx context.Context) ([]*IntelligenceMonitorPlan, error) {
@@ -528,6 +529,10 @@ func (s *IntelligenceMonitorService) notify() {
 	case s.wake <- struct{}{}:
 	default:
 	}
+	select {
+	case s.candyWake <- struct{}{}:
+	default:
+	}
 }
 func (s *IntelligenceMonitorService) notifySchedule() {
 	select {
@@ -558,9 +563,16 @@ func (s *IntelligenceMonitorService) Start() {
 	s.started = true
 	artwork, candy := intelligenceMonitorConcurrency(s.cfg)
 	slog.Info("intelligence monitoring scheduler started", "deployment_artwork_concurrency", artwork, "deployment_candy_concurrency", candy, "database_overrides_enabled", true)
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.loop()
-	go s.dispatchLoop()
+	go s.candyRegradeLoop()
+	if _, ok := s.repo.(IntelligenceMonitorQueueRepository); ok {
+		s.wg.Add(1)
+		go s.dispatchLoop(IntelligenceMonitorTestPelican)
+		go s.dispatchLoop(IntelligenceMonitorTestCandy)
+	} else {
+		go s.dispatchLoop("")
+	}
 }
 func (s *IntelligenceMonitorService) Stop() {
 	s.mu.Lock()
@@ -623,36 +635,42 @@ func (s *IntelligenceMonitorService) schedule() {
 
 // Dispatch never waits for due-plan scanning, billing/source preparation or
 // retention cleanup. Enqueue and completion wake it immediately; the ticker
-// discovers work and released slots belonging to other app instances.
-func (s *IntelligenceMonitorService) dispatchLoop() {
+// discovers work and released slots belonging to other app instances. Each
+// pool has its own loop and wake channel, so a slow claim in one cannot consume
+// the other pool's dispatch deadline or delay refilling its released slots.
+func (s *IntelligenceMonitorService) dispatchLoop(kind string) {
 	defer s.wg.Done()
+	wake := s.wake
+	if kind == IntelligenceMonitorTestCandy {
+		wake = s.candyWake
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		if s.ctx.Err() != nil {
 			return
 		}
-		s.dispatch()
+		s.dispatch(kind)
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-s.wake:
+		case <-wake:
 		case <-ticker.C:
 		}
 	}
 }
 
-func (s *IntelligenceMonitorService) dispatch() {
+func (s *IntelligenceMonitorService) dispatch(kind string) {
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
-	if repo, ok := s.repo.(IntelligenceMonitorQueueRepository); ok {
+	if repo, ok := s.repo.(IntelligenceMonitorQueueRepository); ok && kind != "" {
 		artwork, candy := intelligenceMonitorConcurrency(s.cfg)
-		// Separate pools prevent a queue of long drawings starving candy tests.
-		s.dispatchPool(ctx, s.candySlots, func(ctx context.Context, token string) (*IntelligenceMonitorRun, error) {
-			return repo.ClaimNextForKind(ctx, token, IntelligenceMonitorTestCandy, candy)
-		})
-		s.dispatchPool(ctx, s.slots, func(ctx context.Context, token string) (*IntelligenceMonitorRun, error) {
-			return repo.ClaimNextForKind(ctx, token, IntelligenceMonitorTestPelican, artwork)
+		slots, limit := s.slots, artwork
+		if kind == IntelligenceMonitorTestCandy {
+			slots, limit = s.candySlots, candy
+		}
+		s.dispatchPool(ctx, slots, func(ctx context.Context, token string) (*IntelligenceMonitorRun, error) {
+			return repo.ClaimNextForKind(ctx, token, kind, limit)
 		})
 		return
 	}

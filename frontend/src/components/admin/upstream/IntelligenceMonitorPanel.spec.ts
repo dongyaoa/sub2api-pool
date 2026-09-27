@@ -77,7 +77,7 @@ describe('intelligence monitoring site tabs', () => {
     expect(view.find('[data-testid="intelligence-site-tabs"]').exists()).toBe(false)
     expect(view.findAllComponents({ name: 'IntelligencePlanCard' })).toHaveLength(0)
     expect(view.findAllComponents({ name: 'IntelligenceLocalCard' })).toHaveLength(2)
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(1000)
     expect(mocks.plans).toHaveBeenCalledTimes(2)
     view.findAllComponents({ name: 'IntelligenceLocalCard' })[1]!.vm.$emit('run'); await flushPromises()
     expect(mocks.run).toHaveBeenCalledWith(8)
@@ -199,7 +199,7 @@ describe('intelligence monitoring manual order', () => {
     expect(mocks.run).toHaveBeenCalledTimes(1)
   })
 
-  it('ignores candy action while disabled and polls candy-only active work every two seconds', async () => {
+  it('ignores candy action while disabled and polls candy-only active work every second', async () => {
     const item = plan(1, 'Candy plan')
     mocks.plans.mockResolvedValue({ items: [item] })
     const view = render(); await flushPromises()
@@ -208,10 +208,10 @@ describe('intelligence monitoring manual order', () => {
     const candy = { id: 101, plan_id: 1, status: 'running', test_kind: 'candy' } as IntelligenceRun
     mocks.plans.mockResolvedValue({ items: [{ ...item, candy_enabled: true, candy_latest_run: candy }] })
     await refreshButton(view).trigger('click'); await flushPromises()
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(1000)
     expect(mocks.plans).toHaveBeenCalledTimes(3)
     mocks.plans.mockResolvedValue({ items: [{ ...item, candy_enabled: true, candy_latest_run: { ...candy, status: 'succeeded', correct: true } }] })
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(1000)
     await vi.advanceTimersByTimeAsync(4999)
     expect(mocks.plans).toHaveBeenCalledTimes(4)
     await vi.advanceTimersByTimeAsync(1)
@@ -229,7 +229,7 @@ describe('intelligence monitoring manual order', () => {
     expect(view.getComponent({ name: 'IntelligenceCandyDetailDialog' }).props('run')).toEqual(candy)
     const completed = { ...candy, status: 'succeeded', correct: false, answer: '20' } as IntelligenceRun
     mocks.plans.mockResolvedValue({ items: [{ ...item, candy_latest_run: completed }] })
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(1000)
     expect(view.getComponent({ name: 'IntelligenceCandyDetailDialog' }).props('run')).toEqual(completed)
     await view.setProps({ active: false })
     expect(view.find('[data-testid="candy-detail"]').exists()).toBe(false)
@@ -249,11 +249,11 @@ describe('intelligence monitoring manual order', () => {
     expect(mocks.showError).not.toHaveBeenCalled()
     expect(mocks.plans).toHaveBeenCalledTimes(1)
   })
-  it('refreshes live generations every two seconds and immediately retries an outstanding manual refresh', async () => {
+  it('refreshes live generations every second and immediately retries an outstanding manual refresh', async () => {
     const running = { ...plan(1, 'Live'), latest_run: { id: 10, plan_id: 1, status: 'running' } as IntelligenceRun }
     mocks.plans.mockResolvedValue({ items: [running] })
     const view = render(); await flushPromises()
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(1000)
     expect(mocks.plans).toHaveBeenCalledTimes(2)
     let resolveOld!: (value: { items: IntelligencePlan[] }) => void
     mocks.plans.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))

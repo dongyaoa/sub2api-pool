@@ -178,8 +178,8 @@ type IntelligenceMonitorCandyScheduleRepository interface {
 }
 
 // Separate durable queues keep long artwork requests from consuming all candy
-// capacity. Implementations must enforce the limit across app instances and
-// continue to serialize the two test kinds belonging to the same plan.
+// capacity. Implementations enforce each limit across app instances and allow
+// both kinds for a plan to execute together, with one active run per kind.
 type IntelligenceMonitorQueueRepository interface {
 	ClaimNextForKind(context.Context, string, string, int) (*IntelligenceMonitorRun, error)
 }

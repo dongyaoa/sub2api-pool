@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
-import { candyHistory, candyResult, isIntelligencePlanActive } from './intelligenceCandy'
+import { candyHistory, candyResult, intelligenceRefreshInterval, isIntelligencePlanActive } from './intelligenceCandy'
 
 const run = (id: number, fields: Partial<IntelligenceRun> = {}) => ({ id, test_kind: 'candy', status: 'succeeded', correct: true, ...fields }) as IntelligenceRun
 const plan = (fields: Partial<IntelligencePlan> = {}) => ({ latest_run: null, ...fields }) as IntelligencePlan
@@ -36,5 +36,17 @@ describe('candy record state', () => {
     expect(isIntelligencePlanActive(plan({ latest_run: run(1, { test_kind: 'pelican', status: 'running' }) }))).toBe(true)
     expect(isIntelligencePlanActive(plan({ candy_latest_run: run(2, { status: 'pending' }) }))).toBe(true)
     expect(isIntelligencePlanActive(plan({ latest_run: run(1), candy_latest_run: run(2) }))).toBe(false)
+  })
+
+  it('polls running and imminent tests every second and leaves inactive schedules at five seconds', () => {
+    const now = Date.parse('2026-09-27T12:00:00Z')
+    const inSeconds = (seconds: number) => new Date(now + seconds * 1000).toISOString()
+    expect(intelligenceRefreshInterval([plan({ latest_run: run(1, { status: 'running' }) })], now)).toBe(1000)
+    expect(intelligenceRefreshInterval([plan({ candy_latest_run: run(2, { status: 'pending' }) })], now)).toBe(1000)
+    expect(intelligenceRefreshInterval([plan({ enabled: true, next_run_at: inSeconds(5) })], now)).toBe(1000)
+    expect(intelligenceRefreshInterval([plan({ enabled: true, candy_enabled: true, candy_next_run_at: inSeconds(-1) })], now)).toBe(1000)
+    expect(intelligenceRefreshInterval([plan({ enabled: true, next_run_at: inSeconds(60) })], now)).toBe(5000)
+    expect(intelligenceRefreshInterval([plan({ enabled: false, candy_enabled: true, candy_next_run_at: inSeconds(0) })], now)).toBe(5000)
+    expect(intelligenceRefreshInterval([plan({ enabled: true, candy_enabled: false, candy_next_run_at: inSeconds(0), next_run_at: 'invalid' })], now)).toBe(5000)
   })
 })

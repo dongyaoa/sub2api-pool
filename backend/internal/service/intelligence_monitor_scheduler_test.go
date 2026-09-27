@@ -28,6 +28,7 @@ type intelligenceSchedulerRepository struct {
 	active    map[int64]*IntelligenceMonitorRun
 	completed chan *IntelligenceMonitorRun
 	due       func(context.Context) ([]int64, error)
+	claimWait func(context.Context, string) error
 }
 
 func (r *intelligenceSchedulerRepository) GetPlan(_ context.Context, id int64) (*IntelligenceMonitorPlan, error) {
@@ -41,6 +42,16 @@ func (r *intelligenceSchedulerRepository) GetPlan(_ context.Context, id int64) (
 func (r *intelligenceSchedulerRepository) Enqueue(_ context.Context, run *IntelligenceMonitorRun, _ bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, active := range r.active {
+		if active.PlanID == run.PlanID && active.TestKind == run.TestKind {
+			return ErrIntelligenceBusy
+		}
+	}
+	for _, pending := range r.pending {
+		if pending.PlanID == run.PlanID && pending.TestKind == run.TestKind {
+			return ErrIntelligenceBusy
+		}
+	}
 	r.nextID++
 	run.ID, run.Status = r.nextID, "pending"
 	copy := *run
@@ -49,6 +60,11 @@ func (r *intelligenceSchedulerRepository) Enqueue(_ context.Context, run *Intell
 }
 
 func (r *intelligenceSchedulerRepository) ClaimNextForKind(ctx context.Context, token, kind string, limit int) (*IntelligenceMonitorRun, error) {
+	if r.claimWait != nil {
+		if err := r.claimWait(ctx, kind); err != nil {
+			return nil, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -69,7 +85,7 @@ func (r *intelligenceSchedulerRepository) ClaimNextForKind(ctx context.Context, 
 		}
 		busy := false
 		for _, active := range r.active {
-			busy = busy || active.PlanID == run.PlanID
+			busy = busy || (active.PlanID == run.PlanID && active.TestKind == run.TestKind)
 		}
 		if busy {
 			continue
@@ -144,8 +160,9 @@ func (tr *intelligenceSchedulerTransport) RoundTrip(request *http.Request) (*htt
 
 func newIntelligenceSchedulerFixture(t *testing.T, cfg *config.Config) (*IntelligenceMonitorService, *intelligenceSchedulerRepository, *intelligenceSchedulerTransport) {
 	t.Helper()
-	repo := &intelligenceSchedulerRepository{active: make(map[int64]*IntelligenceMonitorRun), completed: make(chan *IntelligenceMonitorRun, 64)}
-	transport := &intelligenceSchedulerTransport{started: make(chan *intelligenceSchedulerRequest, 64)}
+	capacity := IntelligenceMonitorMaxConcurrency + IntelligenceMonitorCandyMaxConcurrency
+	repo := &intelligenceSchedulerRepository{active: make(map[int64]*IntelligenceMonitorRun), completed: make(chan *IntelligenceMonitorRun, capacity)}
+	transport := &intelligenceSchedulerTransport{started: make(chan *intelligenceSchedulerRequest, capacity)}
 	svc := NewIntelligenceMonitorService(repo, upstreamTestEncryptor{}, nil, nil, nil, nil, cfg)
 	svc.externalClient = &http.Client{Transport: transport}
 	t.Cleanup(svc.Stop)
@@ -249,6 +266,80 @@ func TestIntelligenceSchedulerCandyStartsWhileArtworkPoolIsFull(t *testing.T) {
 	require.Equal(t, IntelligenceMonitorTestCandy, awaitIntelligenceSchedulerRequest(t, transport, 500*time.Millisecond).kind)
 	require.EqualValues(t, 12, transport.active.Load())
 	requireNoIntelligenceSchedulerRequest(t, transport)
+}
+
+func TestIntelligenceSchedulerStartsBothKindsForSamePlansAtSixtyFourConcurrency(t *testing.T) {
+	cfg := &config.Config{IntelligenceMonitor: config.IntelligenceMonitorConfig{MaxConcurrency: 64, CandyMaxConcurrency: 64}}
+	svc, repo, transport := newIntelligenceSchedulerFixture(t, cfg)
+	for id := int64(1); id <= 64; id++ {
+		_, err := svc.Enqueue(context.Background(), id)
+		require.NoError(t, err)
+	}
+	svc.Start()
+	deadline := time.Now().Add(2 * time.Second)
+	for range 64 {
+		flight := awaitIntelligenceSchedulerRequest(t, transport, time.Until(deadline))
+		require.Equal(t, IntelligenceMonitorTestPelican, flight.kind)
+	}
+	// Every matching artwork request remains in flight. These companion tests
+	// must start on enqueue, with no wait for a drawing or a scheduler tick.
+	for id := int64(1); id <= 64; id++ {
+		_, err := svc.EnqueueCandy(context.Background(), id)
+		require.NoError(t, err)
+	}
+	deadline = time.Now().Add(time.Second)
+	for range 64 {
+		flight := awaitIntelligenceSchedulerRequest(t, transport, time.Until(deadline))
+		require.Equal(t, IntelligenceMonitorTestCandy, flight.kind)
+	}
+	require.EqualValues(t, 128, transport.active.Load())
+	repo.mu.Lock()
+	active, pending := len(repo.active), len(repo.pending)
+	repo.mu.Unlock()
+	require.Equal(t, 128, active)
+	require.Zero(t, pending, "idle candy capacity must not be blocked by the same plans' drawings")
+	_, err := svc.Enqueue(context.Background(), 1)
+	require.ErrorIs(t, err, ErrIntelligenceBusy, "the same plan and test kind is still deduplicated")
+	_, err = svc.EnqueueCandy(context.Background(), 1)
+	require.ErrorIs(t, err, ErrIntelligenceBusy)
+}
+
+func TestIntelligenceSchedulerSlowClaimCannotDelayOtherPoolOrRefill(t *testing.T) {
+	for _, blockedKind := range []string{IntelligenceMonitorTestPelican, IntelligenceMonitorTestCandy} {
+		t.Run(blockedKind, func(t *testing.T) {
+			cfg := &config.Config{IntelligenceMonitor: config.IntelligenceMonitorConfig{MaxConcurrency: 1, CandyMaxConcurrency: 1}}
+			svc, repo, transport := newIntelligenceSchedulerFixture(t, cfg)
+			entered := make(chan struct{})
+			var once sync.Once
+			repo.claimWait = func(ctx context.Context, kind string) error {
+				if kind != blockedKind {
+					return nil
+				}
+				once.Do(func() { close(entered) })
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			availableKind := IntelligenceMonitorTestPelican
+			if blockedKind == availableKind {
+				availableKind = IntelligenceMonitorTestCandy
+			}
+			for id := int64(1); id <= 2; id++ {
+				_, err := svc.enqueueTest(context.Background(), id, false, availableKind)
+				require.NoError(t, err)
+			}
+			svc.Start()
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("blocked pool never attempted its claim")
+			}
+			first := awaitIntelligenceSchedulerRequest(t, transport, 500*time.Millisecond)
+			require.Equal(t, availableKind, first.kind)
+			close(first.release)
+			second := awaitIntelligenceSchedulerRequest(t, transport, 500*time.Millisecond)
+			require.Equal(t, availableKind, second.kind, "completion must refill the available pool while the other claim remains blocked")
+		})
+	}
 }
 
 func TestIntelligenceSchedulerManualRunBypassesBlockedDueQuery(t *testing.T) {

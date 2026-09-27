@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -68,28 +68,44 @@ const validValue = (value: number | string, max: number) => Number.isInteger(Num
 const valid = computed(() => fields.every(field => validValue(form[field.key], field.max)))
 let session = 0
 let controller: AbortController | undefined
-function close() { if (!saving.value) emit('close') }
-async function load(statusOnly = false) {
-  if (saving.value || refreshing.value || loading.value) return
+let pollTimer: ReturnType<typeof setTimeout> | undefined
+let backgroundLoading = false
+function stopPolling() { clearTimeout(pollTimer); pollTimer = undefined }
+function schedulePolling() {
+  stopPolling()
+  if (props.show && !document.hidden && !saving.value && settings.value) {
+    pollTimer = setTimeout(() => void load(true, true), 2000)
+  }
+}
+function close() { if (!saving.value) { stopPolling(); emit('close') } }
+async function load(statusOnly = false, background = false) {
+  if (!props.show || saving.value || refreshing.value || loading.value || (background && backgroundLoading)) return
+  stopPolling()
   const generation = ++session
   controller?.abort(); controller = new AbortController()
-  if (statusOnly) refreshing.value = true
-  else loading.value = true
-  loadError.value = ''
+  backgroundLoading = background
+  if (!background) {
+    if (statusOnly) refreshing.value = true
+    else loading.value = true
+    loadError.value = ''
+  }
   try {
     const result = await intelligenceMonitorAPI.concurrency(controller.signal)
     if (generation !== session) return
     settings.value = result
+    loadError.value = ''
     if (!statusOnly) Object.assign(form, { max_concurrency: result.max_concurrency, candy_max_concurrency: result.candy_max_concurrency })
   } catch (error) {
     if (generation === session) loadError.value = extractApiErrorMessage(error, t('intelligenceMonitor.concurrency.loadFailed'))
   } finally {
-    if (generation === session) { loading.value = false; refreshing.value = false }
+    if (generation === session) { loading.value = false; refreshing.value = false; backgroundLoading = false; controller = undefined; schedulePolling() }
   }
 }
 async function save() {
   if (!settings.value || !valid.value || loading.value || refreshing.value || saving.value) return
-  const generation = session
+  stopPolling()
+  const generation = ++session
+  controller?.abort(); controller = undefined; backgroundLoading = false
   saving.value = true; saveError.value = ''; loadError.value = ''
   try {
     await intelligenceMonitorAPI.updateConcurrency({ max_concurrency: Number(form.max_concurrency), candy_max_concurrency: Number(form.candy_max_concurrency) })
@@ -98,13 +114,19 @@ async function save() {
     emit('close')
   } catch (error) {
     if (generation === session) saveError.value = extractApiErrorMessage(error, t('intelligenceMonitor.concurrency.saveFailed'))
-  } finally { if (generation === session) saving.value = false }
+  } finally { if (generation === session) { saving.value = false; schedulePolling() } }
 }
 function reset() {
+  stopPolling(); backgroundLoading = false
   session++; controller?.abort(); controller = undefined
   loading.value = false; refreshing.value = false; saving.value = false
   settings.value = null; loadError.value = ''; saveError.value = ''
 }
+function resumePolling() {
+  stopPolling()
+  if (props.show && !document.hidden && settings.value) void load(true, true)
+}
 watch(() => props.show, value => { reset(); if (value) void load() }, { immediate: true })
-onBeforeUnmount(reset)
+onMounted(() => { document.addEventListener('visibilitychange', resumePolling); window.addEventListener('online', resumePolling) })
+onBeforeUnmount(() => { reset(); document.removeEventListener('visibilitychange', resumePolling); window.removeEventListener('online', resumePolling) })
 </script>

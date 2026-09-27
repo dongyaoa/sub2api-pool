@@ -5,7 +5,7 @@ export default {
       pelican: '鹈鹕绘制', candy: '糖果测试', range: '1–{max} 个', running: '运行中', pending: '排队中', refresh: '刷新状态',
       sources: { deployment: '当前使用部署配置', database: '当前使用后台设置' },
       immediate: '保存后立即生效，无需重启。两类测试分别使用独立并发名额。',
-      runningHint: '同一计划不重叠执行。调低并发不会中断当前任务，新任务等待空闲名额。',
+      runningHint: '同一计划的鹈鹕与糖果可同时执行，同类测试不重复运行。调低并发不会中断当前任务，新任务等待空闲名额。',
       invalid: '请输入范围内的整数：鹈鹕 1–256，糖果 1–128。', save: '保存并生效', saved: '并发设置已生效',
       loadFailed: '读取并发设置失败，请重试', saveFailed: '保存并发设置失败，请重试',
     },

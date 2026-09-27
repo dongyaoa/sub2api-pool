@@ -2,6 +2,14 @@ import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligence
 
 export const isIntelligenceRunActive = (run?: IntelligenceRun | null) => !!run && (run.status === 'pending' || run.status === 'running')
 export const isIntelligencePlanActive = (plan: IntelligencePlan) => isIntelligenceRunActive(plan.latest_run) || isIntelligenceRunActive(plan.candy_latest_run)
+// One poll per visible panel, independent of its card count. Speed up while
+// either test is running or is about to become due; keep idle reads lightweight.
+export function intelligenceRefreshInterval(plans: IntelligencePlan[], now = Date.now()) {
+  const imminent = (value?: string | null) => !!value && Date.parse(value) <= now + 5000
+  return plans.some(plan => isIntelligencePlanActive(plan) || (plan.enabled && (
+    imminent(plan.next_run_at) || (plan.candy_enabled && imminent(plan.candy_next_run_at))
+  ))) ? 1000 : 5000
+}
 export function candyResult(run: IntelligenceRun) {
   if (isIntelligenceRunActive(run)) return run.status === 'pending' ? 'pending' : 'running'
   if (run.status === 'failed') return 'failed'

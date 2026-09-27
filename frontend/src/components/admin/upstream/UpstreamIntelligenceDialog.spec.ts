@@ -103,7 +103,7 @@ describe('upstream group intelligence dialog', () => {
     parent.vm.$emit('close'); expect(view.emitted('close')).toBeUndefined()
     const completed = { ...candy, status: 'succeeded', correct: true, answer: '21' } as IntelligenceRun
     mocks.plans.mockResolvedValue({ items: [plan(1, { candy_enabled: true, candy_latest_run: completed })] })
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(1000)
     expect(mocks.plans).toHaveBeenCalledTimes(2)
     expect(child.props('run')).toEqual(completed)
     child.vm.$emit('close'); await flushPromises()
@@ -237,19 +237,19 @@ describe('upstream group intelligence dialog', () => {
     expect(view.emitted('changed')).toBeUndefined()
   })
 
-  it('polls once per dialog, at two seconds for active work and five seconds when idle, preserving unchanged cards', async () => {
+  it('polls once per dialog, at one second for active work and five seconds when idle, preserving unchanged cards', async () => {
     const running = { id: 91, status: 'running' } as IntelligenceRun
     mocks.plans.mockImplementation(() => Promise.resolve({ items: [plan(1, { latest_run: { ...running } }), plan(2)] }))
     const view = render()
     await flushPromises()
     const original = cards(view)[0]!.props('plan')
     const element = cards(view)[0]!.element
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(1000)
     expect(mocks.plans).toHaveBeenCalledTimes(2)
     expect(cards(view)[0]!.props('plan')).toBe(original)
     expect(cards(view)[0]!.element).toBe(element)
     mocks.plans.mockResolvedValue({ items: [plan(1, { latest_run: { ...running, status: 'succeeded' } }), plan(2)] })
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(1000)
     expect(mocks.plans).toHaveBeenCalledTimes(3)
     await vi.advanceTimersByTimeAsync(4999)
     expect(mocks.plans).toHaveBeenCalledTimes(3)

@@ -5,7 +5,7 @@ export default {
       pelican: 'Pelican drawing', candy: 'Candy tests', range: '1–{max} tasks', running: 'Running', pending: 'Queued', refresh: 'Refresh status',
       sources: { deployment: 'Using deployment configuration', database: 'Using saved admin settings' },
       immediate: 'Changes take effect immediately without a restart. Each test type has its own concurrency slots.',
-      runningHint: 'A plan never overlaps its own runs. Lowering the limit lets current tasks finish; new tasks wait for free slots.',
+      runningHint: 'Pelican and candy tests in the same plan can run together; duplicate runs of the same test cannot overlap. Lowering the limit lets current tasks finish; new tasks wait for free slots.',
       invalid: 'Enter whole numbers within the limits: pelican 1–256, candy 1–128.', save: 'Save and apply', saved: 'Concurrency settings applied',
       loadFailed: 'Unable to load concurrency settings. Please retry.', saveFailed: 'Unable to save concurrency settings. Please retry.',
     },

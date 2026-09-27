@@ -278,6 +278,21 @@ describe('intelligence history polling state', () => {
     expectPreservedSelection(view)
   })
 
+  it('loads a completed open artwork immediately from the parent update without waiting for the history timer', async () => {
+    const active = { ...run(111), status: 'running' as const, html: '', finished_at: null }
+    mocks.runs.mockResolvedValue({ items: [active], total: 1, page: 1, page_size: 12 })
+    mocks.detail.mockResolvedValue(active)
+    const view = render({ ...plan(), latest_run: active }); await flushPromises()
+    expect(mocks.detail).toHaveBeenCalledTimes(1)
+    const completed = run(111)
+    mocks.runs.mockResolvedValue({ items: [completed], total: 1, page: 1, page_size: 12 })
+    mocks.detail.mockResolvedValue(completed)
+    await view.setProps({ plan: { ...plan(), latest_run: completed } }); await flushPromises()
+    expect(mocks.runs).toHaveBeenCalledTimes(2)
+    expect(mocks.detail).toHaveBeenCalledTimes(2)
+    expect(view.getComponent(preview).props('run')).toMatchObject({ status: 'succeeded', html: completed.html })
+  })
+
   it('resets to page one and preview when switching to another plan', async () => {
     const view = render()
     await selectSecondPageSource(view)
