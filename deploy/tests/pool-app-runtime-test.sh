@@ -42,7 +42,7 @@ make_binary() {
     cat >> "$destination" <<'SH'
 for argument in "$@"; do
     case "$argument" in
-        --version|-version|--help|-h|--setup) printf '%s:%s:%s\n' "$version" "${POOL_APP_UPDATE_SUPERVISED:-no}" "$*"; exit 0 ;;
+        --version|-version|--licenses|-licenses|--licenses=*|-licenses=*|--help|-h|--setup) printf '%s:%s:%s\n' "$version" "${POOL_APP_UPDATE_SUPERVISED:-no}" "$*"; exit 0 ;;
     esac
 done
 if [ "$version" = broken ]; then exit 17; fi
@@ -91,6 +91,9 @@ make_binary "$fixture/image" image2
 
 stage healthy
 [ "$(run_cli --version)" = 'healthy:no:--version' ] || fail 'CLI used wrong binary'
+for option in --licenses -licenses --licenses=true -licenses=true; do
+    [ "$(run_cli "$option")" = "healthy:no:$option" ] || fail 'license CLI entered update supervision'
+done
 [ -f "$pending" ] || fail 'CLI confirmed update'
 [ ! -f "$TEST_STATE/health-requests" ] || fail 'CLI ran health checks'
 start --config fixture.yaml

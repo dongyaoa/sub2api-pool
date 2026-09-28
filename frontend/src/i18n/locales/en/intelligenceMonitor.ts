@@ -12,10 +12,21 @@ export default {
     candy: {
       title: 'Candy test', recent: 'Latest 60 runs', run: 'Run test', running: 'Testing', pending: 'Queued',
       failed: 'Request failed', correct: 'Correct answer', incorrect: 'Incorrect answer', unknown: 'Not scored', answer: 'Model answer',
+      passed: 'Candy and fingerprint passed', fingerprintFailed: 'Fingerprint did not pass', unverified: 'Dual verification incomplete',
       detail: 'Candy test result', response: 'Full response', noResponse: 'No response yet', enabled: 'Add candy test', queued: 'Candy test queued',
-      enableHint: 'Uses this plan’s model and high reasoning effort, making separate candy requests on its own interval. Manual runs are also available.',
+      enableHint: 'Candy uses this plan’s model with high reasoning. Each round adds 60 short low-effort requests for behavioral fingerprinting, billed as normal requests. Both must pass for a green result.',
       interval: 'Candy test interval', intervalHint: 'Defaults to 3 minutes. The main scheduling switch controls both tests; each can still be run manually when scheduling is off.',
       scoringHint: 'The expected answer, 21, is used only for scoring and is not included in the prompt sent to the model.',
+      fingerprint: {
+        title: 'Behavioral fingerprint', answerVerdict: 'Candy answer', verdict: 'Fingerprint result', model: 'Requested model', nearest: 'Closest baseline',
+        distance: 'JSD distance', pValue: 'p-value', progress: 'Collection progress', valid: 'Valid samples', errors: 'Failed requests',
+        samples: '{done} / {total}', sampling: 'Fingerprint probes use low reasoning effort, independently of the candy question’s high effort.',
+        comparison: 'Baseline comparison', candidate: 'Baseline model', result: 'Comparison verdict', noComparisons: 'No usable comparison results yet.',
+        metricHint: 'A lower JSD means closer response distributions. The p-value tests significance; it is not a model confidence score.',
+        disclaimer: 'A behavioral fingerprint is a statistical comparison, not proof of model identity.', historicalHint: 'This historical run has no fingerprint and does not count as a dual pass.',
+        statuses: { missing: 'Not collected', pending: 'Awaiting collection', collecting: 'Collecting', comparing: 'Comparing', consistent: 'Consistent with requested model', substitution: 'Closer to another model', different: 'Differs from requested model', ambiguous: 'Ambiguous result', unstable: 'Unstable samples', insufficient: 'Insufficient valid samples', no_baseline: 'No matching baseline', failed: 'Collection failed', timeout: 'Collection timed out' },
+        comparisonVerdicts: { match: 'Close', uncertain: 'Uncertain', mismatch: 'Different', insufficient: 'Insufficient samples' },
+      },
     },
     local: {
       groupRate: 'Group multiplier', search: 'Search groups, plans or keys',

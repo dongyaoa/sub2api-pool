@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const IntelligenceMonitorCandyGradeVersion = 2
+const IntelligenceMonitorCandyGradeVersion = 3
 const IntelligenceMonitorCandyMaxGradeBytes = intelligenceCandyMaxInput
 const intelligenceCandyRegradeBatchSize = 32
 

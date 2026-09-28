@@ -62,7 +62,7 @@ func TestIntelligenceRepositoryCompletionLocksPlanFirstAndClearsCredential(t *te
 	repo := &intelligenceMonitorRepository{db: db}
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT id FROM intelligence_monitor_plans WHERE id=\$1 FOR UPDATE`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(3))
-	mock.ExpectQuery(`UPDATE intelligence_monitor_runs SET status=.*request_key_encrypted=''`).WithArgs(int64(11), "worker-token", "failed", nil, "cancelled", "", "", "null", "{}", nil, "", service.IntelligenceMonitorCandyGradeVersion).WillReturnRows(sqlmock.NewRows([]string{"plan_id", "test_kind"}).AddRow(3, "pelican"))
+	mock.ExpectQuery(`UPDATE intelligence_monitor_runs SET status=.*request_key_encrypted=''`).WithArgs(int64(11), "worker-token", "failed", nil, "cancelled", "", "", "null", "{}", nil, "", service.IntelligenceMonitorCandyGradeVersion, "{}", "{}").WillReturnRows(sqlmock.NewRows([]string{"plan_id", "test_kind"}).AddRow(3, "pelican"))
 	mock.ExpectExec(`UPDATE intelligence_monitor_plans p SET last_run_at=`).WithArgs(pq.Array([]int64{3}), "pelican").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`DELETE FROM intelligence_monitor_runs .*status IN \('succeeded','failed'\).*OFFSET \$2`).WithArgs(int64(3), 20, 60).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()

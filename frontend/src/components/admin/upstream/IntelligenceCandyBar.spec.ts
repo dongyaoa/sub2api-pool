@@ -1,10 +1,11 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
+import type { IntelligenceFingerprint, IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import IntelligenceCandyBar from './IntelligenceCandyBar.vue'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: { count?: number }) => values?.count === undefined ? key : `${key}:${values.count}` }) }))
-const run = (id: number, fields: Partial<IntelligenceRun> = {}) => ({ id, plan_id: 1, test_kind: 'candy', status: 'succeeded', correct: true, answer: '21', model: 'gpt-6-astra', reasoning_effort: 'high', created_at: '2026-09-27T01:00:00Z', duration_ms: 1200, ...fields }) as IntelligenceRun
+const fingerprint = (fields: Partial<IntelligenceFingerprint> = {}) => ({ method: 'behavioral-jsd-v1', mode: 'quick', status: 'completed', passed: true, model: 'gpt-6-astra', reasoning_effort: 'low', done: 60, total: 60, valid: 60, errors: 0, attribution: { status: 'consistent', nearest: 'gpt-6-astra', message: '', alpha: 0.01, self_jsd: 0.01, warnings: [], comparisons: [{ model: 'gpt-6-astra', mean_jsd: 0.1256, p_value: 0.5, verdict: 'match', self_jsd: 0.03 }] }, ...fields }) as IntelligenceFingerprint
+const run = (id: number, fields: Partial<IntelligenceRun> = {}) => ({ id, plan_id: 1, test_kind: 'candy', status: 'succeeded', correct: true, answer: '21', model: 'gpt-6-astra', reasoning_effort: 'high', created_at: '2026-09-27T01:00:00Z', duration_ms: 1200, fingerprint: fingerprint(), ...fields }) as IntelligenceRun
 const plan = (fields: Partial<IntelligencePlan> = {}) => ({ id: 1, candy_enabled: true, latest_run: null, ...fields }) as IntelligencePlan
 function render(value: IntelligencePlan, busy = false) {
   return mount(IntelligenceCandyBar, { props: { plan: value, busy }, global: { stubs: { Icon: true, HelpTooltip: { template: '<div><slot name="trigger" /><slot /></div>' } } } })
@@ -17,7 +18,7 @@ describe('compact candy strip', () => {
     const view = render(plan({ candy_latest_run: failed, candy_recent_runs: [failed, incorrect, run(1)] }))
     expect(view.findAll('[data-candy-status]')).toHaveLength(60)
     expect(view.findAll('[data-candy-status="empty"]')).toHaveLength(57)
-    expect(view.get('[data-candy-status="correct"]').classes()).toContain('candy-bar-correct')
+    expect(view.get('[data-candy-status="passed"]').classes()).toContain('candy-bar-correct')
     expect(view.get('[data-candy-status="incorrect"]').classes()).toContain('candy-bar-failed')
     expect(view.get('[data-candy-status="failed"]').classes()).toContain('candy-bar-failed')
     expect(view.text()).toContain('upstream unavailable')
@@ -29,6 +30,23 @@ describe('compact candy strip', () => {
     expect(view.emitted('select')).toEqual([[incorrect]])
     await view.get('[data-testid="candy-run"]').trigger('click')
     expect(view.emitted('run')).toEqual([[]])
+    view.unmount()
+  })
+
+  it('shows legacy and inconclusive records amber, fingerprint mismatch red, and both verdicts in hover content', () => {
+    const mismatched = fingerprint({ passed: false, attribution: { ...fingerprint().attribution!, status: 'substitution', nearest: 'gpt-5.6-sol' } })
+    const view = render(plan({ candy_recent_runs: [run(3, { fingerprint: mismatched }), run(2, { fingerprint: null }), run(1)] }))
+    expect(view.get('[data-candy-status="unverified"]').classes()).toContain('candy-bar-warning')
+    expect(view.get('[data-candy-status="fingerprintFailed"]').classes()).toContain('candy-bar-failed')
+    expect(view.get('[data-candy-status="passed"]').classes()).toContain('candy-bar-correct')
+    expect(view.text()).toContain('intelligenceMonitor.candy.fingerprint.statuses.missing')
+    expect(view.text()).toContain('intelligenceMonitor.candy.fingerprint.statuses.substitution')
+    expect(view.text()).toContain('gpt-6-astra · low')
+    expect(view.text()).toContain('gpt-5.6-sol')
+    expect(view.text()).toContain('JSD 0.1256')
+    expect(view.text()).toContain('p 0.5000')
+    expect(view.text()).toContain('60/60')
+    expect(view.text()).toContain('intelligenceMonitor.candy.correct')
     view.unmount()
   })
 

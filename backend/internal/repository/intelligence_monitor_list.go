@@ -13,7 +13,7 @@ var _ service.IntelligenceMonitorListRepository = (*intelligenceMonitorRepositor
 // Gallery polling does not read artwork, raw model output, or execution secrets.
 // Candy bars also omit the repeated question and detailed snapshots, available
 // through GetRun. Preserve the scanner shape and existing artwork metadata.
-const intelligenceRunSummaryColumns = `id,plan_id,plan_name,status,trigger,model,reasoning_effort,CASE WHEN test_kind='candy' THEN ''::text ELSE prompt END AS prompt,source_type,source_name,source_endpoint,CASE WHEN test_kind='candy' THEN '{}'::jsonb ELSE source_snapshot END AS source_snapshot,rate_snapshot,CASE WHEN test_kind='candy' THEN '{}'::jsonb ELSE notes_snapshot END AS notes_snapshot,api_mode,timeout_seconds,''::text AS request_key_encrypted,''::text AS lease_token,started_at,finished_at,duration_ms,http_status,error,created_at,test_kind,correct,answer`
+const intelligenceRunSummaryColumns = `id,plan_id,plan_name,status,trigger,model,reasoning_effort,CASE WHEN test_kind='candy' THEN ''::text ELSE prompt END AS prompt,source_type,source_name,source_endpoint,CASE WHEN test_kind='candy' THEN '{}'::jsonb ELSE source_snapshot END AS source_snapshot,rate_snapshot,CASE WHEN test_kind='candy' THEN '{}'::jsonb ELSE notes_snapshot END AS notes_snapshot,api_mode,timeout_seconds,''::text AS request_key_encrypted,''::text AS lease_token,started_at,finished_at,duration_ms,http_status,error,created_at,test_kind,correct,answer,fingerprint`
 
 const intelligencePlanSourceNamesSQL = `SELECT p.id,CASE p.source_type
 WHEN 'openai_oauth' THEN a.name WHEN 'upstream' THEN t.name WHEN 'local_group' THEN g.name END,p.candy_enabled

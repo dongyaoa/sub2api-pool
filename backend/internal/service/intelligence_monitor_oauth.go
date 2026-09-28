@@ -59,7 +59,7 @@ func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Contex
 }
 
 func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, run *IntelligenceMonitorRun) (*int, string, string) {
-	prompt, maxOutputTokens, validTest := intelligenceTestRequest(run)
+	prompt, instructions, effort, maxOutputTokens, temperature, validTest := intelligenceTestRequestDefinition(run)
 	if !validTest {
 		return nil, "", "unsupported intelligence test"
 	}
@@ -112,12 +112,22 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	ctx = WithHTTPUpstreamResponseHeaderTimeout(ctx, time.Duration(IntelligenceMonitorMaxTimeoutSeconds)*time.Second)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	payload, _ := json.Marshal(map[string]any{
-		"model":             IntelligenceMonitorModel,
-		"input":             []map[string]any{{"role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}}},
-		"reasoning":         map[string]string{"effort": IntelligenceMonitorReasoning},
-		"max_output_tokens": maxOutputTokens, "stream": false, "store": false,
-	})
+	requestBody := map[string]any{
+		"model":     IntelligenceMonitorModel,
+		"input":     []map[string]any{{"role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}}},
+		"reasoning": map[string]string{"effort": effort},
+		"stream":    false, "store": false,
+	}
+	if maxOutputTokens > 0 {
+		requestBody["max_output_tokens"] = maxOutputTokens
+	}
+	if instructions != "" {
+		requestBody["instructions"] = instructions
+	}
+	if temperature != nil {
+		requestBody["temperature"] = *temperature
+	}
+	payload, _ := json.Marshal(requestBody)
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1/v1/responses", bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
@@ -162,7 +172,7 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	if result.UpstreamModel != "" && result.UpstreamModel != IntelligenceMonitorModel {
 		message = "OAuth gateway used a different model than the fixed comparison model"
 	}
-	if result.ReasoningEffort != nil && *result.ReasoningEffort != IntelligenceMonitorReasoning {
+	if result.ReasoningEffort != nil && *result.ReasoningEffort != effort {
 		message = "OAuth gateway used a different reasoning effort than the fixed comparison setting"
 	}
 	return &status, text, message

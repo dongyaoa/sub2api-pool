@@ -7,6 +7,39 @@ export type IntelligenceSource = 'external' | 'upstream' | 'local_group' | 'open
 export type IntelligenceRunStatus = 'pending' | 'running' | 'succeeded' | 'failed'
 export type IntelligenceTestKind = 'pelican' | 'candy'
 export type IntelligenceRate = Record<string, unknown> | null
+export type IntelligenceFingerprintAttributionStatus = 'consistent' | 'substitution' | 'different' | 'ambiguous' | 'unstable' | 'insufficient' | 'no_baseline'
+export interface IntelligenceFingerprintComparison {
+  model: string
+  mean_jsd: number | null
+  p_value: number | null
+  verdict: string
+  self_jsd: number | null
+  cells?: { cell: string; jsd: number; valid_a: number; valid_b: number }[]
+}
+export interface IntelligenceFingerprint {
+  method: 'behavioral-jsd-v1'
+  mode: 'quick'
+  status: 'pending' | 'collecting' | 'comparing' | 'completed' | 'failed' | 'timeout'
+  passed: boolean | null
+  model: string
+  reasoning_effort: 'low'
+  total: number
+  done: number
+  valid: number
+  errors: number
+  duration_ms?: number
+  error?: string
+  attribution?: {
+    status: IntelligenceFingerprintAttributionStatus
+    message: string
+    nearest?: string
+    alpha: number
+    self_jsd: number | null
+    reference_p_value?: number | null
+    warnings?: string[]
+    comparisons: IntelligenceFingerprintComparison[]
+  }
+}
 export interface IntelligenceOrderInput { scope: 'intelligence' | 'oauth'; ids: number[] }
 export interface IntelligenceConcurrencyInput {
   max_concurrency: number
@@ -47,6 +80,7 @@ export interface IntelligenceRun {
   test_kind?: IntelligenceTestKind
   correct?: boolean | null
   answer?: string
+  fingerprint?: IntelligenceFingerprint | null
   trigger: 'manual' | 'scheduled'
   created_at: string
   started_at: string | null

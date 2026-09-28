@@ -12,10 +12,21 @@ export default {
     candy: {
       title: '糖果测试', recent: '最近 60 次', run: '立即测试', running: '测试中', pending: '排队中',
       failed: '请求失败', correct: '回答正确', incorrect: '回答错误', unknown: '尚未评分', answer: '模型答案',
+      passed: '糖果与指纹均通过', fingerprintFailed: '指纹未通过', unverified: '尚未通过双重验证',
       detail: '糖果测试记录', response: '完整回复', noResponse: '暂无回复内容', enabled: '添加糖果测试', queued: '糖果测试已加入队列',
-      enableHint: '沿用本计划的模型和 high 思考强度，按独立周期发起糖果测试请求，也可手动执行。',
+      enableHint: '糖果使用本计划的模型与 high 思考强度。每轮额外发起 60 个 low 强度短请求采集行为指纹，按正常请求计费；两项都通过才显示绿色。',
       interval: '糖果测试间隔', intervalHint: '默认 3 分钟。定时检测总开关同时控制两项测试；关闭后仍可分别手动执行。',
       scoringHint: '标准答案为 21，仅用于评分，不包含在发送给模型的题目中。',
+      fingerprint: {
+        title: '行为指纹对比', answerVerdict: '糖果答案', verdict: '指纹结果', model: '请求模型', nearest: '最接近基线',
+        distance: 'JSD 距离', pValue: 'p 值', progress: '采集进度', valid: '有效样本', errors: '失败请求',
+        samples: '{done} / {total}', sampling: '指纹采集使用 low 思考强度，与糖果题的 high 独立。',
+        comparison: '基线对比', candidate: '基线模型', result: '对比结论', noComparisons: '暂未生成可用的对比结果。',
+        metricHint: 'JSD 越小表示回答分布越接近；p 值用于判断差异是否显著，不代表模型可信度。',
+        disclaimer: '行为指纹是统计对比，不能作为模型身份的证明。', historicalHint: '该历史记录未采集指纹，不计为双重通过。',
+        statuses: { missing: '未采集', pending: '等待采集', collecting: '采集中', comparing: '对比中', consistent: '与请求模型一致', substitution: '更接近其他模型', different: '与请求模型不符', ambiguous: '无法唯一判断', unstable: '采样不稳定', insufficient: '有效样本不足', no_baseline: '暂无对应基线', failed: '采集失败', timeout: '采集超时' },
+        comparisonVerdicts: { match: '接近', uncertain: '待确认', mismatch: '不符', insufficient: '样本不足' },
+      },
     },
     local: {
       groupRate: '分组倍率', search: '搜索分组、计划或 Key',

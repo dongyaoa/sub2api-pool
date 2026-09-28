@@ -37,7 +37,7 @@ fi
 # CLI commands must neither start a health watcher nor confirm a pending update.
 for argument in "$@"; do
     case "$argument" in
-        -version|--version|-version=*|--version=*|-h|--help|-help|-setup|--setup|-setup=*|--setup=*)
+        -version|--version|-version=*|--version=*|-licenses|--licenses|-licenses=*|--licenses=*|-h|--help|-help|-setup|--setup|-setup=*|--setup=*)
             exec "$runtime_binary" "$@"
             ;;
     esac

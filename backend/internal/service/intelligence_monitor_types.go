@@ -110,37 +110,41 @@ type IntelligenceMonitorInput struct {
 	TimeoutSeconds       *int            `json:"timeout_seconds"`
 }
 type IntelligenceMonitorRun struct {
-	ID                  int64                          `json:"id"`
-	PlanID              int64                          `json:"plan_id"`
-	TestKind            string                         `json:"test_kind"`
-	Correct             *bool                          `json:"correct"`
-	Answer              string                         `json:"answer"`
-	PlanUpdatedAt       time.Time                      `json:"-"`
-	PlanName            string                         `json:"plan_name"`
-	Status              string                         `json:"status"`
-	Trigger             string                         `json:"trigger"`
-	Model               string                         `json:"model"`
-	ReasoningEffort     string                         `json:"reasoning_effort"`
-	Prompt              string                         `json:"prompt"`
-	SourceType          string                         `json:"source_type"`
-	OAuth               bool                           `json:"oauth"`
-	SourceName          string                         `json:"source_name"`
-	SourceEndpoint      string                         `json:"source_endpoint"`
-	SourceSnapshot      map[string]any                 `json:"source_snapshot"`
-	RateSnapshot        *UpstreamRemoteBillingSnapshot `json:"rate_snapshot"`
-	NotesSnapshot       map[string]string              `json:"notes_snapshot"`
-	APIMode             string                         `json:"api_mode"`
-	TimeoutSeconds      int                            `json:"timeout_seconds"`
-	RequestKeyEncrypted string                         `json:"-"`
-	LeaseToken          string                         `json:"-"`
-	StartedAt           *time.Time                     `json:"started_at"`
-	FinishedAt          *time.Time                     `json:"finished_at"`
-	DurationMs          *int64                         `json:"duration_ms"`
-	HTTPStatus          *int                           `json:"http_status"`
-	Error               string                         `json:"error"`
-	HTML                string                         `json:"html,omitempty"`
-	RawText             string                         `json:"raw_text,omitempty"`
-	CreatedAt           time.Time                      `json:"created_at"`
+	ID          int64                          `json:"id"`
+	PlanID      int64                          `json:"plan_id"`
+	TestKind    string                         `json:"test_kind"`
+	Correct     *bool                          `json:"correct"`
+	Answer      string                         `json:"answer"`
+	Fingerprint *IntelligenceFingerprintResult `json:"fingerprint,omitempty"`
+	// Only the worker may select server-owned fingerprint definitions.
+	fingerprintProbeID     string
+	fingerprintPromptIndex int
+	PlanUpdatedAt          time.Time                      `json:"-"`
+	PlanName               string                         `json:"plan_name"`
+	Status                 string                         `json:"status"`
+	Trigger                string                         `json:"trigger"`
+	Model                  string                         `json:"model"`
+	ReasoningEffort        string                         `json:"reasoning_effort"`
+	Prompt                 string                         `json:"prompt"`
+	SourceType             string                         `json:"source_type"`
+	OAuth                  bool                           `json:"oauth"`
+	SourceName             string                         `json:"source_name"`
+	SourceEndpoint         string                         `json:"source_endpoint"`
+	SourceSnapshot         map[string]any                 `json:"source_snapshot"`
+	RateSnapshot           *UpstreamRemoteBillingSnapshot `json:"rate_snapshot"`
+	NotesSnapshot          map[string]string              `json:"notes_snapshot"`
+	APIMode                string                         `json:"api_mode"`
+	TimeoutSeconds         int                            `json:"timeout_seconds"`
+	RequestKeyEncrypted    string                         `json:"-"`
+	LeaseToken             string                         `json:"-"`
+	StartedAt              *time.Time                     `json:"started_at"`
+	FinishedAt             *time.Time                     `json:"finished_at"`
+	DurationMs             *int64                         `json:"duration_ms"`
+	HTTPStatus             *int                           `json:"http_status"`
+	Error                  string                         `json:"error"`
+	HTML                   string                         `json:"html,omitempty"`
+	RawText                string                         `json:"raw_text,omitempty"`
+	CreatedAt              time.Time                      `json:"created_at"`
 }
 type IntelligenceMonitorRunQuery struct {
 	PlanID   *int64

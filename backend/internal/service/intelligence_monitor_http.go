@@ -28,7 +28,7 @@ func (s *IntelligenceMonitorService) generate(ctx context.Context, run *Intellig
 		ctx, trace = newIntelligenceExecutionTrace(ctx)
 		defer func() { run.SourceSnapshot = trace.sourceSnapshot(run.SourceSnapshot, completed) }()
 	}
-	prompt, maxOutputTokens, validTest := intelligenceTestRequest(run)
+	prompt, instructions, effort, maxOutputTokens, temperature, validTest := intelligenceTestRequestDefinition(run)
 	if !validTest {
 		return nil, "", "unsupported intelligence test"
 	}
@@ -44,10 +44,28 @@ func (s *IntelligenceMonitorService) generate(ctx context.Context, run *Intellig
 	// Loopback requests retain their trusted buffered path and its IQ deadline;
 	// switching that path to streaming would re-enable ordinary gateway guards.
 	stream := run.SourceType != "local_group"
-	payload := map[string]any{"model": IntelligenceMonitorModel, "input": prompt, "reasoning": map[string]string{"effort": IntelligenceMonitorReasoning}, "max_output_tokens": maxOutputTokens, "stream": stream}
+	payload := map[string]any{"model": IntelligenceMonitorModel, "input": prompt, "reasoning": map[string]string{"effort": effort}, "stream": stream}
+	if maxOutputTokens > 0 {
+		payload["max_output_tokens"] = maxOutputTokens
+	}
+	if instructions != "" {
+		payload["instructions"] = instructions
+	}
 	if run.APIMode == MonitorAPIModeChatCompletions {
 		path = "/v1/chat/completions"
-		payload = map[string]any{"model": IntelligenceMonitorModel, "messages": []map[string]string{{"role": "user", "content": prompt}}, "reasoning_effort": IntelligenceMonitorReasoning, "max_completion_tokens": maxOutputTokens, "stream": stream}
+		messages := []map[string]string{}
+		if instructions != "" {
+			messages = append(messages, map[string]string{"role": "system", "content": instructions})
+		}
+		messages = append(messages, map[string]string{"role": "user", "content": prompt})
+		payload = map[string]any{"model": IntelligenceMonitorModel, "messages": messages, "reasoning_effort": effort, "stream": stream}
+		if maxOutputTokens > 0 {
+			payload["max_completion_tokens"] = maxOutputTokens
+		}
+	}
+	if temperature != nil {
+		payload["temperature"] = *temperature
+		payload["store"] = false
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

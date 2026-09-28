@@ -77,7 +77,7 @@ func intelligenceMonitorTestDB(t *testing.T, legacySchema ...bool) (*sql.DB, con
 	// required by current repository reads even when testing old timeout schemas.
 	_, err = db.ExecContext(ctx, `ALTER TABLE intelligence_monitor_plans ADD COLUMN IF NOT EXISTS sort_order BIGINT`)
 	require.NoError(t, err)
-	for _, name := range []string{"257_intelligence_candy_monitor.sql", "258_intelligence_candy_schedule.sql", "259_intelligence_local_key_ownership.sql", "260_intelligence_candy_grading_version.sql"} {
+	for _, name := range []string{"257_intelligence_candy_monitor.sql", "258_intelligence_candy_schedule.sql", "259_intelligence_local_key_ownership.sql", "260_intelligence_candy_grading_version.sql", "261_intelligence_candy_fingerprint.sql"} {
 		migration, err = migrations.FS.ReadFile(name)
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, string(migration))

@@ -140,6 +140,15 @@ func (tr *intelligenceSchedulerTransport) RoundTrip(request *http.Request) (*htt
 	if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 		return nil, err
 	}
+	for _, probe := range intelligenceFingerprintQuickProbes() {
+		for _, prompt := range probe.Prompts {
+			if body.Input == prompt {
+				// Scheduler tests block the long candy/pelican request, while
+				// real independent short probes complete within that same slot.
+				return intelligenceFingerprintHTTPReply("47"), nil
+			}
+		}
+	}
 	kind := IntelligenceMonitorTestPelican
 	response := `{"output_text":"<!doctype html><html><body><svg></svg></body></html>","status":"completed"}`
 	if body.Input == IntelligenceMonitorCandyPrompt {
