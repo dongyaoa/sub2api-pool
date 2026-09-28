@@ -9,6 +9,15 @@ import (
 	"testing"
 )
 
+func intelligenceFingerprintHasBaseline(model string) bool {
+	for _, baseline := range intelligenceFingerprintBaselines {
+		if baseline.Model == model {
+			return true
+		}
+	}
+	return false
+}
+
 func TestIntelligenceFingerprintReferenceNormalization(t *testing.T) {
 	for _, tc := range []struct{ kind, raw, answer, category string }{
 		{"int", "**４７**", "47", "valid"},

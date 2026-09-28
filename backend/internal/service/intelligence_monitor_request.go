@@ -2,11 +2,6 @@ package service
 
 // Requests use only server-owned test definitions. A captured prompt or a
 // caller-supplied field must not turn the monitor into an arbitrary tool task.
-func intelligenceTestRequest(run *IntelligenceMonitorRun) (string, int, bool) {
-	prompt, _, _, limit, _, valid := intelligenceTestRequestDefinition(run)
-	return prompt, limit, valid
-}
-
 func intelligenceTestRequestDefinition(run *IntelligenceMonitorRun) (prompt, instructions, effort string, limit int, temperature *float64, valid bool) {
 	if run == nil {
 		return

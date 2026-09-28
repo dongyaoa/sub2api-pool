@@ -62,15 +62,6 @@ func intelligenceFingerprintQuickProbes() []intelligenceFingerprintProbe {
 	return probes
 }
 
-func intelligenceFingerprintHasBaseline(model string) bool {
-	for _, baseline := range intelligenceFingerprintBaselines {
-		if baseline.Model == model {
-			return true
-		}
-	}
-	return false
-}
-
 func mustDecodeIntelligenceFingerprint[T any](data []byte) T {
 	var value T
 	if err := json.Unmarshal(data, &value); err != nil {

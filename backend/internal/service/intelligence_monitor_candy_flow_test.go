@@ -111,7 +111,7 @@ func TestIntelligenceCandyRequestUsesOnlyQuestionAndNoTools(t *testing.T) {
 			require.Contains(t, text, "21")
 		})
 	}
-	_, _, valid := intelligenceTestRequest(&IntelligenceMonitorRun{TestKind: "arbitrary"})
+	_, _, _, _, _, valid := intelligenceTestRequestDefinition(&IntelligenceMonitorRun{TestKind: "arbitrary"})
 	require.False(t, valid)
 }
 
