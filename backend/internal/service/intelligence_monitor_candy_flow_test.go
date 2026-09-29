@@ -111,7 +111,7 @@ func TestIntelligenceCandyRequestUsesOnlyQuestionAndNoTools(t *testing.T) {
 			require.Contains(t, text, "21")
 		})
 	}
-	_, _, _, _, _, valid := intelligenceTestRequestDefinition(&IntelligenceMonitorRun{TestKind: "arbitrary"})
+	_, _, valid := intelligenceTestRequestDefinition(&IntelligenceMonitorRun{TestKind: "arbitrary"})
 	require.False(t, valid)
 }
 
@@ -134,6 +134,77 @@ func TestIntelligenceCandyOAuthUsesQuestionAndAccountGateway(t *testing.T) {
 	require.Equal(t, 200, *status)
 	require.Equal(t, "21", text)
 	require.True(t, slots.released)
+}
+
+func TestIntelligenceCandyExecutionSendsOnlyOneQuestion(t *testing.T) {
+	for _, mode := range []string{MonitorAPIModeResponses, MonitorAPIModeChatCompletions} {
+		for _, reply := range []string{"21", "22"} {
+			t.Run(mode+"/"+reply, func(t *testing.T) {
+				repo := &intelligenceTestRepository{}
+				svc := NewIntelligenceMonitorService(repo, upstreamTestEncryptor{}, nil, nil, nil, nil, nil)
+				defer svc.Stop()
+				calls := 0
+				svc.externalClient = &http.Client{Transport: upstreamModelsTransport(func(request *http.Request) (*http.Response, error) {
+					calls++
+					require.Equal(t, 1, calls, "each candy round sends only the original question")
+					var body map[string]any
+					require.NoError(t, json.NewDecoder(request.Body).Decode(&body))
+					for _, field := range []string{"temperature", "instructions", "tools", "functions"} {
+						require.NotContains(t, body, field)
+					}
+					var payload any = map[string]string{"output_text": reply, "status": "completed"}
+					if mode == MonitorAPIModeResponses {
+						require.Equal(t, IntelligenceMonitorCandyPrompt, body["input"])
+						require.Equal(t, map[string]any{"effort": "high"}, body["reasoning"])
+					} else {
+						require.Equal(t, []any{map[string]any{"role": "user", "content": IntelligenceMonitorCandyPrompt}}, body["messages"])
+						require.Equal(t, "high", body["reasoning_effort"])
+						payload = map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": reply}, "finish_reason": "stop"}}}
+					}
+					encoded, err := json.Marshal(payload)
+					require.NoError(t, err)
+					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(encoded)))}, nil
+				})}
+				run := &IntelligenceMonitorRun{TestKind: IntelligenceMonitorTestCandy, SourceType: "external", SourceEndpoint: "https://8.8.8.8", APIMode: mode, TimeoutSeconds: 600, RequestKeyEncrypted: "encrypted:fixture-secret"}
+				svc.execute(run)
+				require.Equal(t, 1, calls)
+				require.Equal(t, "succeeded", repo.completed.Status)
+				require.Equal(t, reply, repo.completed.RawText)
+				require.Equal(t, reply == "21", *repo.completed.Correct)
+				encoded, err := json.Marshal(repo.completed)
+				require.NoError(t, err)
+				require.NotContains(t, string(encoded), `"fingerprint"`)
+			})
+		}
+	}
+}
+
+func TestIntelligenceCandyOAuthExecutionSendsOnlyOneQuestion(t *testing.T) {
+	svc, _, slots := intelligenceOAuthFixture()
+	defer svc.Stop()
+	repo := &intelligenceTestRepository{}
+	svc.repo = repo
+	calls := 0
+	svc.oauthForward = intelligenceOAuthForwardFunc(func(_ context.Context, c *gin.Context, _ *Account, body []byte) (*OpenAIForwardResult, error) {
+		calls++
+		require.Equal(t, 1, calls)
+		require.Equal(t, IntelligenceMonitorCandyPrompt, gjson.GetBytes(body, "input.0.content.0.text").String())
+		require.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String())
+		for _, field := range []string{"temperature", "instructions", "tools"} {
+			require.False(t, gjson.GetBytes(body, field).Exists())
+		}
+		_, err := c.Writer.WriteString(`{"output_text":"21","status":"completed"}`)
+		require.NoError(t, err)
+		return &OpenAIForwardResult{UpstreamModel: IntelligenceMonitorModel}, nil
+	})
+	run := intelligenceOAuthRun()
+	run.TestKind = IntelligenceMonitorTestCandy
+	svc.execute(run)
+	require.Equal(t, 1, calls)
+	require.True(t, slots.released)
+	require.Equal(t, "succeeded", repo.completed.Status)
+	require.True(t, *repo.completed.Correct)
+	require.Equal(t, "21", repo.completed.RawText)
 }
 
 func TestIntelligenceCandyCompletionSeparatesTransportAndAnswer(t *testing.T) {

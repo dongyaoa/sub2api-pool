@@ -151,7 +151,6 @@ COPY --from=backend-builder --chown=sub2api:sub2api /app/sub2api /app/sub2api
 COPY --from=backend-builder /app/pool-updater /app/pool-updater
 COPY deploy/install-pool-updater.sh deploy/pool-updater-config.py deploy/pool-updater-compose.py deploy/pool-updater.service /app/pool-updater-install/
 COPY --from=backend-builder --chown=sub2api:sub2api /app/backend/resources /app/resources
-COPY backend/internal/service/data/intelligence_fingerprint/LICENSE backend/internal/service/data/intelligence_fingerprint/README.md /app/licenses/intelligence_fingerprint/
 
 # Create data directory
 RUN mkdir -p /app/data && chown sub2api:sub2api /app/data

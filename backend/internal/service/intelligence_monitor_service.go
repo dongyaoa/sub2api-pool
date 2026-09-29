@@ -712,7 +712,6 @@ func (s *IntelligenceMonitorService) execute(run *IntelligenceMonitorRun) {
 	if run.SourceType == "openai_oauth" {
 		requestCtx, requestCancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
 		run.HTTPStatus, run.RawText, run.Error = s.generateOpenAIOAuth(requestCtx, run)
-		s.collectIntelligenceFingerprint(requestCtx, run, "")
 		requestCancel()
 		s.finishIntelligenceRun(run)
 		return
@@ -749,7 +748,6 @@ func (s *IntelligenceMonitorService) execute(run *IntelligenceMonitorRun) {
 			run.Error = sourceError
 		} else {
 			run.HTTPStatus, run.RawText, run.Error = s.generate(requestCtx, run, key)
-			s.collectIntelligenceFingerprint(requestCtx, run, key)
 		}
 		requestCancel()
 	}

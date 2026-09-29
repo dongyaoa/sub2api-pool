@@ -1,4 +1,4 @@
-import type { IntelligenceFingerprint, IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
+import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 
 export const isIntelligenceRunActive = (run?: IntelligenceRun | null) => !!run && (run.status === 'pending' || run.status === 'running')
 export const isIntelligencePlanActive = (plan: IntelligencePlan) => isIntelligenceRunActive(plan.latest_run) || isIntelligenceRunActive(plan.candy_latest_run)
@@ -12,35 +12,18 @@ export function intelligenceRefreshInterval(plans: IntelligencePlan[], now = Dat
 }
 export function candyResult(run: IntelligenceRun) {
   if (isIntelligenceRunActive(run)) return run.status === 'pending' ? 'pending' : 'running'
-  if (run.status === 'failed') return 'failed'
+  if (run.status === 'failed' || (run.http_status != null && run.http_status >= 400)) return 'failed'
   if (run.correct === false) return 'incorrect'
-  const fingerprint = fingerprintResult(run.fingerprint)
-  if (['failed', 'timeout', 'substitution', 'different'].includes(fingerprint)) return 'fingerprintFailed'
-  if (run.correct === true && run.status === 'succeeded' && run.fingerprint?.status === 'completed' && run.fingerprint.passed === true && run.fingerprint.attribution?.status === 'consistent') return 'passed'
-  return run.correct === null || run.correct === undefined ? 'unknown' : 'unverified'
+  return run.status === 'succeeded' && run.correct === true ? 'correct' : 'unknown'
 }
 export function candyAnswerResult(run: IntelligenceRun) {
   return run.correct === true ? 'correct' : run.correct === false ? 'incorrect' : 'unknown'
 }
-export function fingerprintResult(fingerprint?: IntelligenceFingerprint | null) {
-  if (!fingerprint) return 'missing'
-  if (fingerprint.status !== 'completed') return fingerprint.status
-  return fingerprint.attribution?.status || 'insufficient'
-}
 export function candyResultTone(run: IntelligenceRun) {
   const result = candyResult(run)
-  if (result === 'passed') return 'success'
-  if (['incorrect', 'failed', 'fingerprintFailed'].includes(result)) return 'error'
+  if (result === 'correct') return 'success'
+  if (['incorrect', 'failed'].includes(result)) return 'error'
   return ['pending', 'running'].includes(result) ? 'neutral' : 'warning'
-}
-export function fingerprintMetric(value?: number | null) {
-  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(4) : '—'
-}
-export function fingerprintNearestComparison(fingerprint?: IntelligenceFingerprint | null) {
-  return fingerprint?.attribution?.comparisons?.find(row => row.model === fingerprint.attribution?.nearest)
-}
-export function fingerprintDeclaredComparison(fingerprint?: IntelligenceFingerprint | null) {
-  return fingerprint?.attribution?.comparisons?.find(row => row.model === fingerprint.model)
 }
 export function candyHistory(plan: IntelligencePlan): IntelligenceRun[] {
   const latest = plan.candy_latest_run

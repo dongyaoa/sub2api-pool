@@ -1,13 +1,12 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { IntelligenceFingerprint, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
+import type { IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import IntelligenceCandyDetailDialog from './IntelligenceCandyDetailDialog.vue'
 
 const mocks = vi.hoisted(() => ({ detail: vi.fn() }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: mocks }))
 const run = (id = 1, fields: Partial<IntelligenceRun> = {}) => ({ id, plan_id: 4, test_kind: 'candy', status: 'succeeded', correct: true, answer: '21', model: 'gpt-6-astra', reasoning_effort: 'high', created_at: '2026-09-27T01:00:00Z', duration_ms: 1200, raw_text: 'The answer is 21.', ...fields }) as IntelligenceRun
-const fingerprint = (fields: Partial<IntelligenceFingerprint> = {}) => ({ method: 'behavioral-jsd-v1', mode: 'quick', status: 'completed', passed: true, model: 'gpt-6-astra', reasoning_effort: 'low', done: 60, total: 60, valid: 60, errors: 0, attribution: { status: 'consistent', nearest: 'gpt-6-astra', message: 'Consistent distribution', alpha: 0.01, self_jsd: 0.01, warnings: [], comparisons: Array.from({ length: 7 }, (_, i) => ({ model: i === 0 ? 'gpt-6-astra' : `baseline-${i}`, mean_jsd: 0.1256 + i / 10, p_value: 0.5, verdict: i === 0 ? 'match' : 'mismatch', self_jsd: 0.03 })) }, ...fields }) as IntelligenceFingerprint
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }
 let wrapper: VueWrapper | undefined
 function render(value = run()) {
@@ -28,42 +27,38 @@ describe('candy result detail', () => {
     expect(view.get('[data-testid="candy-response"]').text()).toBe(value.raw_text)
     expect(view.find('iframe, script').exists()).toBe(false)
     expect(view.text()).toContain('intelligenceMonitor.candy.correct')
-    expect(view.get('[data-testid="candy-combined-verdict"]').text()).toBe('intelligenceMonitor.candy.unverified')
-    expect(view.text()).toContain('intelligenceMonitor.candy.fingerprint.statuses.missing')
+    expect(view.get('[data-testid="candy-verdict"]').text()).toBe('intelligenceMonitor.candy.correct')
     expect(view.text()).toContain('200')
   })
 
-  it('displays seven baseline comparisons and keeps the combined pass separate from answer correctness', async () => {
-    const value = run(1, { fingerprint: fingerprint() })
+  it('shows only the candy result even when old responses include failed fingerprint metadata', async () => {
+    const value = { ...run(), fingerprint: { status: 'failed', passed: false, error: 'obsolete probe failure' } }
     mocks.detail.mockResolvedValue(value)
     const view = render(value); await flushPromises()
-    expect(view.get('[data-testid="candy-combined-verdict"]').text()).toBe('intelligenceMonitor.candy.passed')
-    expect(view.get('[data-testid="fingerprint-comparisons"]').findAll('tbody tr')).toHaveLength(7)
-    expect(view.text()).toContain('0.1256')
-    expect(view.text()).toContain('0.5000')
-    expect(view.text()).toContain('intelligenceMonitor.candy.fingerprint.comparisonVerdicts.match')
-    expect(view.text()).toContain('intelligenceMonitor.candy.fingerprint.sampling')
+    expect(view.get('[data-testid="candy-verdict"]').text()).toBe('intelligenceMonitor.candy.correct')
+    expect(view.get('[data-testid="candy-verdict"]').classes()).toContain('text-emerald-600')
+    expect(view.find('[data-testid="fingerprint-comparisons"]').exists()).toBe(false)
+    expect(view.text()).not.toContain('fingerprint')
+    expect(view.text()).not.toContain('obsolete probe failure')
     expect(view.get('[data-testid="candy-detail-scroll"]').classes()).toContain('overflow-y-auto')
-    expect(view.text()).toContain('intelligenceMonitor.candy.fingerprint.disclaimer')
+    await view.setProps({ run: { ...value, fingerprint: { ...value.fingerprint, status: 'completed' } } }); await flushPromises()
+    expect(mocks.detail).toHaveBeenCalledTimes(1)
   })
 
-  it('refreshes fingerprint progress and completion without clearing the loaded response', async () => {
-    const collecting = run(1, { status: 'running', fingerprint: fingerprint({ status: 'collecting', done: 20, valid: 20, passed: null, attribution: undefined }) })
-    mocks.detail.mockResolvedValue(collecting)
-    const view = render(collecting); await flushPromises()
-    expect(view.text()).toContain('intelligenceMonitor.candy.fingerprint.statuses.collecting')
+  it('refreshes completion without clearing the loaded response or refetching unchanged records', async () => {
+    const running = run(1, { status: 'running', correct: null })
+    mocks.detail.mockResolvedValue(running)
+    const view = render(running); await flushPromises()
+    expect(view.get('[data-testid="candy-verdict"]').text()).toBe('intelligenceMonitor.candy.running')
     const pending = deferred<IntelligenceRun>(); mocks.detail.mockReturnValueOnce(pending.promise)
-    const comparing = { ...collecting, fingerprint: fingerprint({ status: 'comparing', passed: null, attribution: undefined }) }
-    await view.setProps({ run: comparing })
+    const completed = run(1, { finished_at: '2026-09-27T01:02:00Z' })
+    await view.setProps({ run: completed })
     expect(view.get('[data-testid="candy-response"]').text()).toBe('The answer is 21.')
-    pending.resolve(comparing); await flushPromises()
+    pending.resolve(completed); await flushPromises()
     expect(mocks.detail).toHaveBeenCalledTimes(2)
-    const completed = run(1, { fingerprint: fingerprint(), finished_at: '2026-09-27T01:02:00Z' })
-    mocks.detail.mockResolvedValue(completed)
-    await view.setProps({ run: completed }); await flushPromises()
-    expect(view.get('[data-testid="candy-combined-verdict"]').text()).toBe('intelligenceMonitor.candy.passed')
-    await view.setProps({ run: { ...completed, fingerprint: { ...completed.fingerprint! } } }); await flushPromises()
-    expect(mocks.detail).toHaveBeenCalledTimes(3)
+    expect(view.get('[data-testid="candy-verdict"]').text()).toBe('intelligenceMonitor.candy.correct')
+    await view.setProps({ run: { ...completed } }); await flushPromises()
+    expect(mocks.detail).toHaveBeenCalledTimes(2)
   })
 
   it('aborts the previous record, ignores its late reply and refreshes a queued record when it finishes', async () => {

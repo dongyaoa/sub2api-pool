@@ -12,19 +12,7 @@
             <p class="font-semibold">{{ dateTime(run.started_at || run.created_at) }}</p>
             <p :class="toneClass(run)">{{ t('intelligenceMonitor.candy.' + candyResult(run)) }}<span v-if="run.http_status"> · HTTP {{ run.http_status }}</span></p>
             <p class="break-words">{{ run.model }} · {{ run.reasoning_effort }}</p>
-            <div class="!my-2 space-y-1.5 border-y border-white/10 py-2" data-testid="candy-fingerprint-tooltip">
-              <p class="flex items-start justify-between gap-3"><span class="shrink-0 text-gray-400">{{ t('intelligenceMonitor.candy.fingerprint.answerVerdict') }}</span><span class="text-right" :class="run.correct === true ? 'text-emerald-300' : run.correct === false ? 'text-rose-300' : 'text-gray-300'">{{ t('intelligenceMonitor.candy.' + candyAnswerResult(run)) }} · {{ run.answer || '—' }}</span></p>
-              <p class="flex items-start justify-between gap-3"><span class="shrink-0 text-gray-400">{{ t('intelligenceMonitor.candy.fingerprint.verdict') }}</span><span class="text-right">{{ t('intelligenceMonitor.candy.fingerprint.statuses.' + fingerprintResult(run.fingerprint)) }}</span></p>
-              <template v-if="run.fingerprint">
-                <p class="flex items-start justify-between gap-3"><span class="shrink-0 text-gray-400">{{ t('intelligenceMonitor.candy.fingerprint.model') }}</span><span class="break-all text-right">{{ run.fingerprint.model }} · {{ run.fingerprint.reasoning_effort }}</span></p>
-                <p v-if="fingerprintDeclaredComparison(run.fingerprint)" class="flex flex-wrap justify-between gap-x-3 gap-y-1 font-mono tabular-nums"><span>JSD {{ fingerprintMetric(fingerprintDeclaredComparison(run.fingerprint)?.mean_jsd) }}</span><span>p {{ fingerprintMetric(fingerprintDeclaredComparison(run.fingerprint)?.p_value) }}</span></p>
-                <p class="flex items-start justify-between gap-3"><span class="shrink-0 text-gray-400">{{ t('intelligenceMonitor.candy.fingerprint.nearest') }}</span><span class="break-all text-right">{{ run.fingerprint.attribution?.nearest || '—' }}</span></p>
-                <p v-if="run.fingerprint.attribution?.nearest !== run.fingerprint.model && fingerprintNearestComparison(run.fingerprint)" class="flex flex-wrap justify-between gap-x-3 gap-y-1 font-mono tabular-nums"><span>JSD {{ fingerprintMetric(fingerprintNearestComparison(run.fingerprint)?.mean_jsd) }}</span><span>p {{ fingerprintMetric(fingerprintNearestComparison(run.fingerprint)?.p_value) }}</span></p>
-                <p class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-gray-300"><span>{{ t('intelligenceMonitor.candy.fingerprint.progress') }} {{ run.fingerprint.done }}/{{ run.fingerprint.total }}</span><span>{{ t('intelligenceMonitor.candy.fingerprint.valid') }} {{ run.fingerprint.valid }}</span></p>
-                <p v-if="run.fingerprint.error" class="break-words text-rose-200">{{ run.fingerprint.error }}</p>
-              </template>
-              <p class="text-[10px] leading-4 text-gray-400">{{ t('intelligenceMonitor.candy.fingerprint.disclaimer') }}</p>
-            </div>
+            <p class="break-words">{{ t('intelligenceMonitor.candy.answer') }}: {{ run.answer || '—' }}</p>
             <p>{{ t('intelligenceMonitor.totalDuration') }}: {{ intelligenceDurationLabel(run, t) || '—' }}</p>
             <p v-if="run.error" class="max-h-32 overflow-auto whitespace-pre-wrap break-words text-rose-200">{{ run.error }}</p>
           </div>
@@ -40,7 +28,7 @@ import { useI18n } from 'vue-i18n'
 import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { candyAnswerResult, candyHistory, candyResult, candyResultTone, fingerprintDeclaredComparison, fingerprintMetric, fingerprintNearestComparison, fingerprintResult, isIntelligenceRunActive } from './intelligenceCandy'
+import { candyHistory, candyResult, candyResultTone, isIntelligenceRunActive } from './intelligenceCandy'
 import { intelligenceDurationLabel } from './intelligenceDuration'
 import { dateTime } from './format'
 import { intelligencePanelActiveKey } from './intelligenceMonitorContext'

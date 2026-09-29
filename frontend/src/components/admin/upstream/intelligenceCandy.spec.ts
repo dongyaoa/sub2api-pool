@@ -1,57 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import type { IntelligenceFingerprint, IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
-import { candyAnswerResult, candyHistory, candyResult, candyResultTone, fingerprintMetric, fingerprintResult, intelligenceRefreshInterval, isIntelligencePlanActive } from './intelligenceCandy'
+import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
+import { candyAnswerResult, candyHistory, candyResult, candyResultTone, intelligenceRefreshInterval, isIntelligencePlanActive } from './intelligenceCandy'
 
 const run = (id: number, fields: Partial<IntelligenceRun> = {}) => ({ id, test_kind: 'candy', status: 'succeeded', correct: true, ...fields }) as IntelligenceRun
 const plan = (fields: Partial<IntelligencePlan> = {}) => ({ latest_run: null, ...fields }) as IntelligencePlan
 
 describe('candy record state', () => {
   it.each([
-    [{ correct: true }, 'unverified'], [{ correct: false }, 'incorrect'], [{ correct: null }, 'unknown'],
+    [{ correct: true }, 'correct'], [{ correct: false }, 'incorrect'], [{ correct: null }, 'unknown'],
     [{ status: 'failed', correct: true }, 'failed'], [{ status: 'pending', correct: false }, 'pending'],
-    [{ status: 'running', correct: true }, 'running'],
+    [{ status: 'running', correct: true }, 'running'], [{ http_status: 502, correct: true }, 'failed'],
   ] as const)('uses the server verdict without treating HTTP success as a correct answer: %o', (fields, expected) => {
     expect(candyResult(run(1, fields))).toBe(expected)
   })
 
-  it('requires both the correct answer and a completed passing fingerprint for green', () => {
-    const fingerprint = { status: 'completed', passed: true, attribution: { status: 'consistent' } } as IntelligenceFingerprint
-    expect(candyResult(run(1, { fingerprint }))).toBe('passed')
-    expect(candyResultTone(run(1, { fingerprint }))).toBe('success')
-    expect(candyResult(run(1, { fingerprint, correct: false }))).toBe('incorrect')
-    expect(candyResult(run(1, { fingerprint, status: 'failed' }))).toBe('failed')
-    expect(candyResult(run(1, { fingerprint: { ...fingerprint, status: 'collecting' } }))).toBe('unverified')
-    expect(candyResult(run(1, { fingerprint: { ...fingerprint, attribution: undefined } }))).toBe('unverified')
-    expect(fingerprintResult({ ...fingerprint, attribution: undefined })).toBe('insufficient')
-    expect(candyResultTone(run(1, { fingerprint: { ...fingerprint, attribution: undefined } }))).toBe('warning')
-    expect(candyResultTone(run(1))).toBe('warning')
-    expect(candyAnswerResult(run(1))).toBe('correct')
-    expect(fingerprintResult(null)).toBe('missing')
-  })
-
-  it.each(['ambiguous', 'unstable', 'insufficient', 'no_baseline'] as const)('keeps %s inconclusive rather than claiming a match or mismatch', status => {
-    const fingerprint = { status: 'completed', passed: false, attribution: { status } } as IntelligenceFingerprint
-    expect(candyResult(run(1, { fingerprint }))).toBe('unverified')
-    expect(candyResultTone(run(1, { fingerprint }))).toBe('warning')
-  })
-
-  it.each(['substitution', 'different'] as const)('marks %s red even when candy is correct', status => {
-    const fingerprint = { status: 'completed', passed: false, attribution: { status } } as IntelligenceFingerprint
-    expect(candyResult(run(1, { fingerprint }))).toBe('fingerprintFailed')
-    expect(candyResultTone(run(1, { fingerprint }))).toBe('error')
-  })
-
-  it.each(['failed', 'timeout'] as const)('marks fingerprint %s red without changing answer correctness', status => {
-    const fingerprint = { status, passed: null } as IntelligenceFingerprint
-    expect(candyResult(run(1, { fingerprint }))).toBe('fingerprintFailed')
-    expect(candyAnswerResult(run(1, { fingerprint }))).toBe('correct')
-  })
-
-  it('formats distances without converting them to identity confidence', () => {
-    expect(fingerprintMetric(0.12567)).toBe('0.1257')
-    expect(fingerprintMetric(0)).toBe('0.0000')
-    expect(fingerprintMetric(null)).toBe('—')
-    expect(fingerprintMetric(NaN)).toBe('—')
+  it('ignores obsolete fingerprint data and colors only the candy result', () => {
+    const legacy = { ...run(1), fingerprint: { status: 'failed', passed: false, attribution: { status: 'different' } } }
+    expect(candyResult(legacy)).toBe('correct')
+    expect(candyResultTone(legacy)).toBe('success')
+    expect(candyResult({ ...legacy, correct: false })).toBe('incorrect')
+    expect(candyResultTone({ ...legacy, correct: false })).toBe('error')
+    expect(candyResultTone({ ...legacy, status: 'failed' })).toBe('error')
+    expect(candyResultTone({ ...legacy, correct: null })).toBe('warning')
+    expect(candyAnswerResult(legacy)).toBe('correct')
   })
 
   it('preserves newest-first server order, deduplicates and caps completed history at sixty', () => {

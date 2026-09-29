@@ -59,7 +59,7 @@ func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Contex
 }
 
 func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, run *IntelligenceMonitorRun) (*int, string, string) {
-	prompt, instructions, effort, maxOutputTokens, temperature, validTest := intelligenceTestRequestDefinition(run)
+	prompt, maxOutputTokens, validTest := intelligenceTestRequestDefinition(run)
 	if !validTest {
 		return nil, "", "unsupported intelligence test"
 	}
@@ -115,17 +115,9 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	requestBody := map[string]any{
 		"model":     IntelligenceMonitorModel,
 		"input":     []map[string]any{{"role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}}},
-		"reasoning": map[string]string{"effort": effort},
+		"reasoning": map[string]string{"effort": IntelligenceMonitorReasoning},
 		"stream":    false, "store": false,
-	}
-	if maxOutputTokens > 0 {
-		requestBody["max_output_tokens"] = maxOutputTokens
-	}
-	if instructions != "" {
-		requestBody["instructions"] = instructions
-	}
-	if temperature != nil {
-		requestBody["temperature"] = *temperature
+		"max_output_tokens": maxOutputTokens,
 	}
 	payload, _ := json.Marshal(requestBody)
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1/v1/responses", bytes.NewReader(payload))
@@ -172,7 +164,7 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	if result.UpstreamModel != "" && result.UpstreamModel != IntelligenceMonitorModel {
 		message = "OAuth gateway used a different model than the fixed comparison model"
 	}
-	if result.ReasoningEffort != nil && *result.ReasoningEffort != effort {
+	if result.ReasoningEffort != nil && *result.ReasoningEffort != IntelligenceMonitorReasoning {
 		message = "OAuth gateway used a different reasoning effort than the fixed comparison setting"
 	}
 	return &status, text, message

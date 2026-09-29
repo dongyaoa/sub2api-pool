@@ -165,12 +165,6 @@ jobs:
           version_output=$(docker run --rm --network none "$POOL_IMAGE:$RELEASE_VERSION" --version 2>&1)
           printf '%s\n' "$version_output"
           grep -F "Sub2API $RELEASE_VERSION (commit: $RELEASE_REF," <<< "$version_output"
-          docker run --rm --network none "$POOL_IMAGE:$RELEASE_VERSION" --licenses > "$RUNNER_TEMP/pool-third-party-notices.txt"
-          grep -F 'Copyright (c) 2026 Hao Wang' "$RUNNER_TEMP/pool-third-party-notices.txt"
-          grep -F 'Permission is hereby granted, free of charge' "$RUNNER_TEMP/pool-third-party-notices.txt"
-          docker run --rm --network none --entrypoint cat "$POOL_IMAGE:$RELEASE_VERSION" \
-            /app/licenses/intelligence_fingerprint/LICENSE > "$RUNNER_TEMP/pool-fingerprint-license.txt"
-          cmp backend/internal/service/data/intelligence_fingerprint/LICENSE "$RUNNER_TEMP/pool-fingerprint-license.txt"
           docker run --rm --network none "$POOL_IMAGE:$RELEASE_VERSION" sh -c \
             'test -z "${POOL_APP_UPDATE_SUPERVISED:-}" && test ! -d "$POOL_APP_UPDATE_DIR"'
           /bin/bash deploy/tests/pool-app-docker-test.sh "$POOL_IMAGE:$RELEASE_VERSION"
@@ -263,8 +257,6 @@ jobs:
           docker cp "$extract:/app/sub2api" "$RUNNER_TEMP/pool-app-release/sub2api-linux-amd64"
           asset="$RUNNER_TEMP/pool-app-release/sub2api-linux-amd64"
           chmod +x "$asset"
-          "$asset" --licenses > "$RUNNER_TEMP/pool-app-release/third-party-notices.txt"
-          cmp "$RUNNER_TEMP/pool-third-party-notices.txt" "$RUNNER_TEMP/pool-app-release/third-party-notices.txt"
           sha=$(sha256sum "$asset" | cut -d ' ' -f 1)
           size=$(stat -c %s "$asset")
           test "$size" -gt 0

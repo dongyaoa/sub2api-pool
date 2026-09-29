@@ -2,7 +2,7 @@
   <BaseDialog :show="true" :title="t('intelligenceMonitor.candy.detail')" width="wide" motion="fade" @close="close">
     <div class="candy-detail flex min-h-0 flex-col gap-4" data-testid="candy-detail">
       <div class="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div><p class="text-sm font-semibold" :class="tone === 'success' ? 'text-emerald-600 dark:text-emerald-400' : tone === 'error' ? 'text-rose-600 dark:text-rose-400' : tone === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'" data-testid="candy-combined-verdict">{{ t('intelligenceMonitor.candy.' + result) }}</p><p class="mt-1 text-xs text-gray-500">{{ dateTime(display.started_at || display.created_at) }}</p></div>
+        <div><p class="text-sm font-semibold" :class="tone === 'success' ? 'text-emerald-600 dark:text-emerald-400' : tone === 'error' ? 'text-rose-600 dark:text-rose-400' : tone === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'" data-testid="candy-verdict">{{ t('intelligenceMonitor.candy.' + result) }}</p><p class="mt-1 text-xs text-gray-500">{{ dateTime(display.started_at || display.created_at) }}</p></div>
         <button type="button" class="btn btn-secondary btn-sm" :aria-busy="loading" @click="load"><Icon name="refresh" size="sm" class="mr-1.5" :class="loading && 'animate-spin'" />{{ t('intelligenceMonitor.refresh') }}</button>
       </div>
       <div class="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1" data-testid="candy-detail-scroll">
@@ -15,7 +15,6 @@
       <p v-if="display.error" class="max-h-20 shrink-0 overflow-auto whitespace-pre-wrap break-words text-xs text-rose-600 dark:text-rose-400">{{ display.error }}</p>
       <IntelligenceExecutionSource :run="display" class="!mt-0 max-h-40 shrink-0 overflow-y-auto" />
       <p v-if="error" role="alert" class="shrink-0 text-xs text-rose-600">{{ error }}</p>
-      <IntelligenceCandyFingerprint :fingerprint="display.fingerprint" />
       <section class="overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700">
         <h4 class="shrink-0 border-b border-gray-100 px-4 py-2 text-[11px] font-medium text-gray-500 dark:border-dark-700">{{ t('intelligenceMonitor.candy.response') }}</h4>
         <div v-if="loading && !detail" class="flex min-h-32 items-center justify-center text-xs text-gray-400" role="status">{{ t('common.loading') }}</div>
@@ -37,7 +36,6 @@ import { candyAnswerResult, candyResult, candyResultTone } from './intelligenceC
 import { intelligenceDurationLabel } from './intelligenceDuration'
 import { dateTime } from './format'
 import IntelligenceExecutionSource from './IntelligenceExecutionSource.vue'
-import IntelligenceCandyFingerprint from './IntelligenceCandyFingerprint.vue'
 const props = defineProps<{ run: IntelligenceRun }>()
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
@@ -64,10 +62,7 @@ async function load() {
     if (!closed && !current.signal.aborted && controller === current) error.value = extractApiErrorMessage(cause, t('intelligenceMonitor.loadFailed'))
   } finally { if (controller === current && !closed) loading.value = false }
 }
-watch([() => props.run.id, () => props.run.status, () => props.run.finished_at, () => props.run.correct, () => props.run.answer, () => {
-  const fp = props.run.fingerprint
-  return [fp?.status, fp?.passed, fp?.done, fp?.valid, fp?.errors, fp?.attribution?.status, fp?.attribution?.nearest, fp?.attribution?.reference_p_value].join('|')
-}], (value, previous) => { if (value[0] !== previous?.[0]) detail.value = null; void load() }, { immediate: true })
+watch([() => props.run.id, () => props.run.status, () => props.run.finished_at, () => props.run.correct, () => props.run.answer], (value, previous) => { if (value[0] !== previous?.[0]) detail.value = null; void load() }, { immediate: true })
 onBeforeUnmount(() => { closed = true; controller?.abort() })
 </script>
 <style scoped>

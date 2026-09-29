@@ -163,28 +163,19 @@ func (r *intelligenceMonitorRepository) ArchivePlan(ctx context.Context, id int6
 	return tx.Commit()
 }
 
-const intelligenceRunColumns = `id,plan_id,plan_name,status,trigger,model,reasoning_effort,prompt,source_type,source_name,source_endpoint,source_snapshot,rate_snapshot,notes_snapshot,api_mode,timeout_seconds,request_key_encrypted,lease_token,started_at,finished_at,duration_ms,http_status,error,created_at,test_kind,correct,answer,fingerprint`
+const intelligenceRunColumns = `id,plan_id,plan_name,status,trigger,model,reasoning_effort,prompt,source_type,source_name,source_endpoint,source_snapshot,rate_snapshot,notes_snapshot,api_mode,timeout_seconds,request_key_encrypted,lease_token,started_at,finished_at,duration_ms,http_status,error,created_at,test_kind,correct,answer`
 
 func scanIntelligenceRun(row upstreamScanner, detail bool) (*service.IntelligenceMonitorRun, error) {
 	run := new(service.IntelligenceMonitorRun)
-	var source, rate, notes, fingerprint, fingerprintDetail []byte
+	var source, rate, notes []byte
 	args := []any{&run.ID, &run.PlanID, &run.PlanName, &run.Status, &run.Trigger, &run.Model, &run.ReasoningEffort, &run.Prompt, &run.SourceType, &run.SourceName, &run.SourceEndpoint, &source, &rate, &notes, &run.APIMode, &run.TimeoutSeconds, &run.RequestKeyEncrypted, &run.LeaseToken, &run.StartedAt, &run.FinishedAt, &run.DurationMs, &run.HTTPStatus, &run.Error, &run.CreatedAt, &run.TestKind, &run.Correct, &run.Answer}
-	args = append(args, &fingerprint)
 	if detail {
-		args = append(args, &run.HTML, &run.RawText, &fingerprintDetail)
+		args = append(args, &run.HTML, &run.RawText)
 	}
 	if err := row.Scan(args...); err != nil {
 		return nil, intelligenceDBError(err)
 	}
 	run.OAuth = run.SourceType == "openai_oauth"
-	if detail && len(fingerprintDetail) > 2 && string(fingerprintDetail) != "null" {
-		fingerprint = fingerprintDetail
-	}
-	if len(fingerprint) > 2 && string(fingerprint) != "null" {
-		if err := json.Unmarshal(fingerprint, &run.Fingerprint); err != nil {
-			return nil, err
-		}
-	}
 	if err := json.Unmarshal(source, &run.SourceSnapshot); err != nil {
 		return nil, err
 	}
@@ -199,7 +190,7 @@ func scanIntelligenceRun(row upstreamScanner, detail bool) (*service.Intelligenc
 	return run, nil
 }
 func (r *intelligenceMonitorRepository) GetRun(ctx context.Context, id int64) (*service.IntelligenceMonitorRun, error) {
-	return scanIntelligenceRun(r.db.QueryRowContext(ctx, `SELECT `+intelligenceRunColumns+`,html,raw_text,fingerprint_detail FROM intelligence_monitor_runs WHERE id=$1`, id), true)
+	return scanIntelligenceRun(r.db.QueryRowContext(ctx, `SELECT `+intelligenceRunColumns+`,html,raw_text FROM intelligence_monitor_runs WHERE id=$1`, id), true)
 }
 func (r *intelligenceMonitorRepository) ListRuns(ctx context.Context, q service.IntelligenceMonitorRunQuery) (*service.IntelligenceMonitorRunPage, error) {
 	kind, err := intelligenceTestKind(q.TestKind)
@@ -380,10 +371,6 @@ func (r *intelligenceMonitorRepository) claimNext(ctx context.Context, token, ki
 	return run, nil
 }
 func (r *intelligenceMonitorRepository) CompleteRun(ctx context.Context, run *service.IntelligenceMonitorRun) error {
-	fingerprint, fingerprintDetail, err := intelligenceFingerprintJSON(intelligenceFingerprintForCompletion(run))
-	if err != nil {
-		return err
-	}
 	rate, err := json.Marshal(run.RateSnapshot)
 	if err != nil {
 		return err
@@ -404,7 +391,7 @@ func (r *intelligenceMonitorRepository) CompleteRun(ctx context.Context, run *se
 	if err = tx.QueryRowContext(ctx, `SELECT id FROM intelligence_monitor_plans WHERE id=$1 FOR UPDATE`, run.PlanID).Scan(&planID); err != nil {
 		return intelligenceDBError(err)
 	}
-	err = tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status=$3,finished_at=NOW(),duration_ms=EXTRACT(EPOCH FROM (NOW()-started_at))*1000,http_status=$4,error=$5,html=$6,raw_text=$7,rate_snapshot=$8::jsonb,source_snapshot=$9::jsonb,correct=$10,answer=$11,candy_grade_version=CASE WHEN test_kind='candy' AND $3::varchar='succeeded' THEN $12 ELSE 0 END,fingerprint=$13::jsonb,fingerprint_detail=$14::jsonb,request_key_encrypted='',lease_token='',lease_until=NULL WHERE id=$1 AND lease_token=$2 AND status='running' RETURNING plan_id,test_kind`, run.ID, run.LeaseToken, run.Status, run.HTTPStatus, run.Error, run.HTML, run.RawText, string(rate), string(source), run.Correct, run.Answer, service.IntelligenceMonitorCandyGradeVersion, string(fingerprint), string(fingerprintDetail)).Scan(&planID, &kind)
+	err = tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_runs SET status=$3,finished_at=NOW(),duration_ms=EXTRACT(EPOCH FROM (NOW()-started_at))*1000,http_status=$4,error=$5,html=$6,raw_text=$7,rate_snapshot=$8::jsonb,source_snapshot=$9::jsonb,correct=$10,answer=$11,candy_grade_version=CASE WHEN test_kind='candy' AND $3::varchar='succeeded' THEN $12 ELSE 0 END,request_key_encrypted='',lease_token='',lease_until=NULL WHERE id=$1 AND lease_token=$2 AND status='running' RETURNING plan_id,test_kind`, run.ID, run.LeaseToken, run.Status, run.HTTPStatus, run.Error, run.HTML, run.RawText, string(rate), string(source), run.Correct, run.Answer, service.IntelligenceMonitorCandyGradeVersion).Scan(&planID, &kind)
 	if err != nil {
 		return intelligenceDBError(err)
 	}
@@ -441,7 +428,7 @@ func (r *intelligenceMonitorRepository) ExpireRuns(ctx context.Context) error {
 		return err
 	}
 	if len(ids) > 0 {
-		rows, err = tx.QueryContext(ctx, `UPDATE intelligence_monitor_runs SET status='failed',finished_at=NOW(),duration_ms=EXTRACT(EPOCH FROM (NOW()-started_at))*1000,error='Execution interrupted or lease expired; this request was not automatically retried to avoid duplicate charges',correct=CASE WHEN test_kind='candy' THEN correct ELSE NULL END,answer=CASE WHEN test_kind='candy' THEN answer ELSE '' END,`+intelligenceFingerprintExpiredAssignmentsSQL+`,request_key_encrypted='',lease_token='',lease_until=NULL WHERE plan_id=ANY($1) AND status='running' AND lease_until<NOW() RETURNING plan_id,test_kind`, pq.Array(ids))
+		rows, err = tx.QueryContext(ctx, `UPDATE intelligence_monitor_runs SET status='failed',finished_at=NOW(),duration_ms=EXTRACT(EPOCH FROM (NOW()-started_at))*1000,error='Execution interrupted or lease expired; this request was not automatically retried to avoid duplicate charges',correct=CASE WHEN test_kind='candy' THEN correct ELSE NULL END,answer=CASE WHEN test_kind='candy' THEN answer ELSE '' END,request_key_encrypted='',lease_token='',lease_until=NULL WHERE plan_id=ANY($1) AND status='running' AND lease_until<NOW() RETURNING plan_id,test_kind`, pq.Array(ids))
 		if err != nil {
 			return err
 		}
