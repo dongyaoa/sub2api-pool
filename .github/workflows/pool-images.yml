@@ -169,7 +169,7 @@ jobs:
             'test -z "${POOL_APP_UPDATE_SUPERVISED:-}" && test ! -d "$POOL_APP_UPDATE_DIR"'
           /bin/bash deploy/tests/pool-app-docker-test.sh "$POOL_IMAGE:$RELEASE_VERSION"
 
-      - name: Require successful CI for the release commit
+      - name: Require successful CI and security scan for the release commit
         uses: actions/github-script@v8
         timeout-minutes: 16
         env:
@@ -178,41 +178,59 @@ jobs:
           script: |
             const sha = process.env.RELEASE_REF;
             const deadline = Date.now() + 15 * 60 * 1000;
-            let previousState = '';
-            let runURL = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/backend-ci.yml`;
+            const checks = [
+              { workflow: 'backend-ci.yml', name: 'CI' },
+              { workflow: 'security-scan.yml', name: 'Security Scan' },
+            ].map(check => ({
+              ...check,
+              previousState: '',
+              runURL: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/${check.workflow}`,
+            }));
             while (Date.now() < deadline) {
-              const { data } = await github.rest.actions.listWorkflowRuns({
-                ...context.repo,
-                workflow_id: 'backend-ci.yml',
-                head_sha: sha,
-                event: 'push',
-                per_page: 10,
-              });
-              const run = data.workflow_runs
-                .filter(item => item.head_sha === sha && item.event === 'push')
-                .sort((a, b) => b.id - a.id)[0];
-              if (run) {
-                runURL = run.html_url;
-                const state = `${run.id}:${run.run_attempt}:${run.status}:${run.conclusion}`;
-                if (state !== previousState) {
-                  core.info(`CI for ${sha}: ${run.status} (${run.conclusion || 'pending'}) — ${runURL}`);
-                  previousState = state;
-                }
-                if (run.status === 'completed') {
-                  if (run.conclusion !== 'success') {
-                    core.setFailed(`Publishing blocked: CI concluded ${run.conclusion} for ${sha}. ${runURL}`);
+              // Recheck both workflows on every poll so an older successful run
+              // cannot conceal a newer pending or failed push run for this SHA.
+              const runs = await Promise.all(checks.map(async check => {
+                const { data } = await github.rest.actions.listWorkflowRuns({
+                  ...context.repo,
+                  workflow_id: check.workflow,
+                  head_sha: sha,
+                  event: 'push',
+                  per_page: 10,
+                });
+                return data.workflow_runs
+                  .filter(item => item.head_sha === sha && item.event === 'push')
+                  .sort((a, b) => b.id - a.id || b.run_attempt - a.run_attempt)[0];
+              }));
+              let allPassed = true;
+              for (const [index, check] of checks.entries()) {
+                const run = runs[index];
+                if (run) {
+                  check.runURL = run.html_url;
+                  const state = `${run.id}:${run.run_attempt}:${run.status}:${run.conclusion}`;
+                  if (state !== check.previousState) {
+                    core.info(`${check.name} for ${sha}: ${run.status} (${run.conclusion || 'pending'}) — ${check.runURL}`);
+                    check.previousState = state;
+                  }
+                  if (run.status === 'completed' && run.conclusion !== 'success') {
+                    core.setFailed(`Publishing blocked: ${check.name} concluded ${run.conclusion} for ${sha}. ${check.runURL}`);
                     return;
                   }
-                  core.info(`Release CI passed: ${runURL}`);
-                  return;
+                  if (run.status !== 'completed' || run.conclusion !== 'success') allPassed = false;
+                } else {
+                  allPassed = false;
+                  if (check.previousState !== 'missing') {
+                    core.info(`Waiting for the ${check.workflow} push run for ${sha}. ${check.runURL}`);
+                    check.previousState = 'missing';
+                  }
                 }
-              } else if (previousState !== 'missing') {
-                core.info(`Waiting for the backend-ci.yml push run for ${sha}. ${runURL}`);
-                previousState = 'missing';
+              }
+              if (allPassed) {
+                core.info(`Release CI and Security Scan passed for ${sha}: ${checks.map(check => check.runURL).join(' ')}`);
+                return;
               }
               await new Promise(resolve => setTimeout(resolve, Math.min(30_000, Math.max(0, deadline - Date.now()))));
             }
-            core.setFailed(`Publishing blocked: CI for ${sha} did not pass within 15 minutes. ${runURL}`);
+            core.setFailed(`Publishing blocked: required CI and Security Scan for ${sha} did not both pass within 15 minutes. ${checks.map(check => check.runURL).join(' ')}`);
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3

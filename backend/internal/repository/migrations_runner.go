@@ -135,7 +135,8 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 // 参数：
 //   - ctx: 上下文
 //   - db: 数据库连接
-//   - fsys: 包含迁移文件的文件系统（通常是 embed.FS）
+//   - fsys: 受信任的迁移文件系统。生产入口仅传入编译期嵌入的 migrations.FS；
+//     其他 fs.FS 实现仅用于测试，不得接入用户提供的文件或 SQL。
 func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 	if db == nil {
 		return errors.New("nil sql db")
@@ -262,6 +263,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		}
 
 		// 执行迁移 SQL
+		// #nosec G701 -- Both production callers pass migrations.FS (compile-time embedded SQL); other fs.FS implementations are test fixtures only.
 		if _, err := tx.ExecContext(ctx, content); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %s: %w", name, err)
