@@ -1,8 +1,8 @@
 <template>
   <div class="mb-3 shrink-0 rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-900/40" data-testid="candy-monitor">
     <div class="mb-1.5 flex min-w-0 items-center justify-between gap-2 text-[10px]">
-      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"><span class="shrink-0 font-semibold text-gray-700 dark:text-gray-200">{{ t('intelligenceMonitor.candy.title') }}</span><span class="text-gray-400">{{ t('intelligenceMonitor.candy.recent') }}</span><span v-if="active" class="inline-flex shrink-0 items-center gap-1 text-violet-600 dark:text-violet-300"><Icon name="refresh" size="xs" class="animate-spin" />{{ t('intelligenceMonitor.candy.running') }}</span><template v-else-if="plan.enabled"><span class="text-gray-400">{{ t('intelligenceMonitor.minutes', { count: (plan.candy_interval_seconds || 180) / 60 }) }}</span><time v-if="remaining !== null && remaining > 0" :datetime="plan.candy_next_run_at || undefined" class="font-mono font-semibold tabular-nums text-violet-600 dark:text-violet-300" data-testid="candy-countdown">{{ countdown }}</time><span v-else class="text-gray-400">{{ t('intelligenceMonitor.waitingSchedule') }}</span></template><span v-else class="text-gray-400">{{ t('intelligenceMonitor.manual') }}</span></div>
-      <button type="button" class="shrink-0 font-semibold text-violet-600 disabled:opacity-40 dark:text-violet-300" :disabled="busy || planActive" data-testid="candy-run" @click="emit('run')">{{ t('intelligenceMonitor.candy.run') }}</button>
+      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"><span class="shrink-0 font-semibold text-gray-700 dark:text-gray-200">{{ t('intelligenceMonitor.candy.title') }}</span><span class="text-gray-400">{{ t('intelligenceMonitor.candy.recent') }}</span><span v-if="active" class="inline-flex shrink-0 items-center gap-1 text-violet-600 dark:text-violet-300"><Icon name="refresh" size="xs" class="animate-spin" />{{ t('intelligenceMonitor.candy.running') }}</span><span v-else-if="monitoringPaused" class="text-amber-600 dark:text-amber-400">{{ t('intelligenceMonitor.oauth.monitoringPaused') }}</span><template v-else-if="plan.enabled"><span class="text-gray-400">{{ t('intelligenceMonitor.minutes', { count: (plan.candy_interval_seconds || 180) / 60 }) }}</span><time v-if="remaining !== null && remaining > 0" :datetime="plan.candy_next_run_at || undefined" class="font-mono font-semibold tabular-nums text-violet-600 dark:text-violet-300" data-testid="candy-countdown">{{ countdown }}</time><span v-else class="text-gray-400">{{ t('intelligenceMonitor.waitingSchedule') }}</span></template><span v-else class="text-gray-400">{{ t('intelligenceMonitor.manual') }}</span></div>
+      <button type="button" class="shrink-0 font-semibold text-violet-600 disabled:opacity-40 dark:text-violet-300" :disabled="busy || planActive || monitoringPaused" data-testid="candy-run" @click="emit('run')">{{ t('intelligenceMonitor.candy.run') }}</button>
     </div>
     <div class="candy-strip" :style="{ gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))` }" :aria-label="t('intelligenceMonitor.candy.recent')">
       <template v-for="(run, index) in bars" :key="run?.id ?? `empty-${index}`">
@@ -38,8 +38,9 @@ const emit = defineEmits<{ run: []; select: [run: IntelligenceRun] }>()
 const { t } = useI18n()
 const active = computed(() => isIntelligenceRunActive(props.plan.candy_latest_run))
 const planActive = computed(() => isIntelligenceRunActive(props.plan.candy_latest_run))
+const monitoringPaused = computed(() => props.plan.source_type === 'openai_oauth' && !!props.plan.oauth_account_status?.monitoring_paused)
 const panelActive = inject(intelligencePanelActiveKey, ref(true))
-const { remaining, label: countdown } = useIntelligenceCountdown(() => props.plan.candy_next_run_at, () => props.plan.enabled && !active.value && panelActive.value)
+const { remaining, label: countdown } = useIntelligenceCountdown(() => props.plan.candy_next_run_at, () => props.plan.enabled && !active.value && !monitoringPaused.value && panelActive.value)
 const bars = computed(() => {
   const records = candyHistory(props.plan).reverse()
   return [...Array<null>(Math.max(0, 60 - records.length)).fill(null), ...records]

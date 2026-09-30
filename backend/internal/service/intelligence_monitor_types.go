@@ -39,55 +39,59 @@ var (
 	ErrIntelligenceInvalid            = infraerrors.BadRequest("INTELLIGENCE_MONITOR_INVALID", "invalid intelligence monitoring configuration")
 	ErrIntelligenceBusy               = infraerrors.Conflict("INTELLIGENCE_MONITOR_BUSY", "this plan has a pending or running generation; wait for completion")
 	ErrIntelligenceUpstreamPlanExists = infraerrors.Conflict("INTELLIGENCE_UPSTREAM_PLAN_EXISTS", "this upstream group already has an intelligence monitoring plan")
+	ErrIntelligenceOAuthPlanExists    = infraerrors.Conflict("INTELLIGENCE_OAUTH_PLAN_EXISTS", "this OAuth account already has an intelligence monitoring plan")
+	ErrIntelligenceOAuthCoolingDown   = infraerrors.Conflict("INTELLIGENCE_OAUTH_COOLING_DOWN", "OAuth monitoring is paused until the weekly quota recovers")
+	ErrIntelligenceOAuthUnavailable   = infraerrors.Conflict("INTELLIGENCE_OAUTH_UNAVAILABLE", "OAuth monitoring is paused until the account becomes available")
 	ErrIntelligenceFilterUnavailable  = infraerrors.ServiceUnavailable("INTELLIGENCE_MONITOR_FILTER_UNAVAILABLE", "filtered intelligence monitoring is unavailable")
 )
 
 type IntelligenceMonitorPlan struct {
-	ID                       int64                          `json:"id"`
-	Name                     string                         `json:"name"`
-	SourceType               string                         `json:"source_type"`
-	Endpoint                 string                         `json:"endpoint"`
-	APIKeyEncrypted          string                         `json:"-"`
-	APIKeyMasked             string                         `json:"api_key_masked"`
-	UpstreamTargetID         *int64                         `json:"upstream_target_id"`
-	GroupID                  *int64                         `json:"group_id"`
-	AccountID                *int64                         `json:"account_id"`
-	OAuth                    bool                           `json:"oauth"`
-	LocalAPIKeyID            *int64                         `json:"local_api_key_id"`
-	LocalKeyOwnerID          *int64                         `json:"-"`
-	LocalAPIKeyBorrowed      bool                           `json:"-"`
-	LocalAPIKeyManaged       bool                           `json:"local_api_key_managed"`
-	LocalAPIKeyName          string                         `json:"local_api_key_name"`
-	LocalGroupName           string                         `json:"local_group_name"`
-	LocalGroupRateMultiplier *float64                       `json:"local_group_rate_multiplier"`
-	LocalGroupStatus         string                         `json:"local_group_status"`
-	SupplierNote             string                         `json:"supplier_note"`
-	GroupNote                string                         `json:"group_note"`
-	RateNote                 string                         `json:"rate_note"`
-	Notes                    string                         `json:"notes"`
-	APIMode                  string                         `json:"api_mode"`
-	Enabled                  bool                           `json:"enabled"`
-	CandyEnabled             bool                           `json:"candy_enabled"`
-	CandyIntervalSeconds     int                            `json:"candy_interval_seconds"`
-	CandyLastRunAt           *time.Time                     `json:"candy_last_run_at"`
-	CandyNextRunAt           *time.Time                     `json:"candy_next_run_at"`
-	IntervalSeconds          int                            `json:"interval_seconds"`
-	TimeoutSeconds           int                            `json:"timeout_seconds"`
-	CreatedBy                int64                          `json:"created_by"`
-	LastRunAt                *time.Time                     `json:"last_run_at"`
-	NextRunAt                *time.Time                     `json:"next_run_at"`
-	CreatedAt                time.Time                      `json:"created_at"`
-	UpdatedAt                time.Time                      `json:"updated_at"`
-	Model                    string                         `json:"model"`
-	ReasoningEffort          string                         `json:"reasoning_effort"`
-	Prompt                   string                         `json:"prompt"`
-	SourceName               string                         `json:"source_name"`
-	RateSnapshot             *UpstreamRemoteBillingSnapshot `json:"rate_snapshot"`
-	LatestRun                *IntelligenceMonitorRun        `json:"latest_run"`
-	RecentRuns               []*IntelligenceMonitorRun      `json:"recent_runs"`
-	CandyLatestRun           *IntelligenceMonitorRun        `json:"candy_latest_run"`
-	CandyRecentRuns          []*IntelligenceMonitorRun      `json:"candy_recent_runs"`
-	AllowWhileBusy           bool                           `json:"-"`
+	ID                       int64                           `json:"id"`
+	Name                     string                          `json:"name"`
+	SourceType               string                          `json:"source_type"`
+	Endpoint                 string                          `json:"endpoint"`
+	APIKeyEncrypted          string                          `json:"-"`
+	APIKeyMasked             string                          `json:"api_key_masked"`
+	UpstreamTargetID         *int64                          `json:"upstream_target_id"`
+	GroupID                  *int64                          `json:"group_id"`
+	AccountID                *int64                          `json:"account_id"`
+	OAuth                    bool                            `json:"oauth"`
+	OAuthAccountStatus       *IntelligenceOAuthAccountStatus `json:"oauth_account_status,omitempty"`
+	LocalAPIKeyID            *int64                          `json:"local_api_key_id"`
+	LocalKeyOwnerID          *int64                          `json:"-"`
+	LocalAPIKeyBorrowed      bool                            `json:"-"`
+	LocalAPIKeyManaged       bool                            `json:"local_api_key_managed"`
+	LocalAPIKeyName          string                          `json:"local_api_key_name"`
+	LocalGroupName           string                          `json:"local_group_name"`
+	LocalGroupRateMultiplier *float64                        `json:"local_group_rate_multiplier"`
+	LocalGroupStatus         string                          `json:"local_group_status"`
+	SupplierNote             string                          `json:"supplier_note"`
+	GroupNote                string                          `json:"group_note"`
+	RateNote                 string                          `json:"rate_note"`
+	Notes                    string                          `json:"notes"`
+	APIMode                  string                          `json:"api_mode"`
+	Enabled                  bool                            `json:"enabled"`
+	CandyEnabled             bool                            `json:"candy_enabled"`
+	CandyIntervalSeconds     int                             `json:"candy_interval_seconds"`
+	CandyLastRunAt           *time.Time                      `json:"candy_last_run_at"`
+	CandyNextRunAt           *time.Time                      `json:"candy_next_run_at"`
+	IntervalSeconds          int                             `json:"interval_seconds"`
+	TimeoutSeconds           int                             `json:"timeout_seconds"`
+	CreatedBy                int64                           `json:"created_by"`
+	LastRunAt                *time.Time                      `json:"last_run_at"`
+	NextRunAt                *time.Time                      `json:"next_run_at"`
+	CreatedAt                time.Time                       `json:"created_at"`
+	UpdatedAt                time.Time                       `json:"updated_at"`
+	Model                    string                          `json:"model"`
+	ReasoningEffort          string                          `json:"reasoning_effort"`
+	Prompt                   string                          `json:"prompt"`
+	SourceName               string                          `json:"source_name"`
+	RateSnapshot             *UpstreamRemoteBillingSnapshot  `json:"rate_snapshot"`
+	LatestRun                *IntelligenceMonitorRun         `json:"latest_run"`
+	RecentRuns               []*IntelligenceMonitorRun       `json:"recent_runs"`
+	CandyLatestRun           *IntelligenceMonitorRun         `json:"candy_latest_run"`
+	CandyRecentRuns          []*IntelligenceMonitorRun       `json:"candy_recent_runs"`
+	AllowWhileBusy           bool                            `json:"-"`
 }
 type IntelligenceMonitorInput struct {
 	Name                 *string         `json:"name"`

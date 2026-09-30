@@ -47,13 +47,20 @@ func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Contex
 		return invalid("choose an existing OpenAI OAuth account; shadow and synthetic accounts are not supported")
 	}
 	if !account.IsModelSupported(IntelligenceMonitorModel) || account.GetMappedModel(IntelligenceMonitorModel) != IntelligenceMonitorModel {
-		return invalid("the selected account must support the fixed gpt-6-astra model without remapping")
+		_, err := invalid("the selected account must support the fixed gpt-6-astra model without remapping")
+		return account, err
+	}
+	if intelligenceOAuthAccountStatus(account, time.Now()).Status == "weekly_limited" {
+		// Keep the snapshot for the scheduler to defer both tests without a
+		// second account lookup that could observe a different quota state.
+		return account, ErrIntelligenceOAuthCoolingDown
 	}
 	// The picker and save endpoint must not admit an account that execution
 	// would immediately reject. Recheck again at execution because status and
 	// transient limits can change while a generation waits in the queue.
 	if !account.IsSchedulable() {
-		return invalid("the selected OAuth account is disabled, paused, expired, rate limited or cooling down")
+		_, err := invalid("the selected OAuth account is disabled, paused, expired, rate limited or cooling down")
+		return account, err
 	}
 	return account, nil
 }
@@ -72,6 +79,9 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	id := intelligenceSnapshotID(run.SourceSnapshot["account_id"])
 	account, err := s.intelligenceOAuthAccount(ctx, &id)
 	if err != nil {
+		if errors.Is(err, ErrIntelligenceOAuthCoolingDown) {
+			return nil, "", "OAuth monitoring paused: weekly quota is cooling down"
+		}
 		return nil, "", "selected OAuth account is unavailable, not schedulable, or does not support the fixed model"
 	}
 	// Proxy selection mutates only this request's account snapshot. Remove

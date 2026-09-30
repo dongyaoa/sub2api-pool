@@ -59,5 +59,8 @@ describe('candy record state', () => {
     expect(intelligenceRefreshInterval([plan({ enabled: true, next_run_at: inSeconds(60) })], now)).toBe(5000)
     expect(intelligenceRefreshInterval([plan({ enabled: false, candy_enabled: true, candy_next_run_at: inSeconds(0) })], now)).toBe(5000)
     expect(intelligenceRefreshInterval([plan({ enabled: true, candy_enabled: false, candy_next_run_at: inSeconds(0), next_run_at: 'invalid' })], now)).toBe(5000)
+    const cooling = plan({ source_type: 'openai_oauth', enabled: true, candy_enabled: true, next_run_at: inSeconds(-1), candy_next_run_at: inSeconds(-1), oauth_account_status: { status: 'weekly_limited', monitoring_paused: true } })
+    expect(intelligenceRefreshInterval([cooling], now)).toBe(5000)
+    expect(intelligenceRefreshInterval([{ ...cooling, candy_latest_run: run(3, { status: 'running' }) }], now)).toBe(1000)
   })
 })

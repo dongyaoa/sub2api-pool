@@ -10,7 +10,7 @@
         </button>
       </div>
     </div>
-    <div class="flex flex-wrap items-center gap-3"><div class="relative min-w-[180px] flex-1 sm:max-w-sm"><Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-2.5 text-gray-400"/><input v-model="search" class="input !py-2 !pl-9 text-xs" :placeholder="t(localOnly ? 'intelligenceMonitor.local.search' : 'intelligenceMonitor.search')" :aria-label="t(localOnly ? 'intelligenceMonitor.local.search' : 'intelligenceMonitor.search')"/></div><Select v-if="!oauthOnly && !localOnly" v-model="sourceFilter" class="source-filter w-36 max-w-full" :options="sourceOptions" :searchable="false" :aria-label="t('intelligenceMonitor.form.source')" /><div class="ml-auto flex items-center gap-2"><button type="button" class="btn btn-secondary btn-sm" :disabled="scopePlans.length < 2" @click="orderDialog=true"><Icon name="menu" size="sm" class="mr-1.5"/>{{ t('upstreamCenter.order.open') }}</button><button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700" :aria-busy="loading" data-testid="intelligence-refresh" @click="manualRefresh"><Icon name="refresh" size="sm" :class="loading&&'animate-spin'"/>{{ t('intelligenceMonitor.refresh') }}</button><button v-if="localOnly" type="button" class="btn btn-primary btn-sm" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5"/>{{ t(addLabel) }}</button></div></div>
+    <div class="flex flex-wrap items-center gap-3"><div class="relative min-w-[180px] flex-1 sm:max-w-sm"><Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-2.5 text-gray-400"/><input v-model="search" class="input !py-2 !pl-9 text-xs" :placeholder="t(localOnly ? 'intelligenceMonitor.local.search' : 'intelligenceMonitor.search')" :aria-label="t(localOnly ? 'intelligenceMonitor.local.search' : 'intelligenceMonitor.search')"/></div><Select v-if="!oauthOnly && !localOnly" v-model="sourceFilter" class="source-filter w-36 max-w-full" :options="sourceOptions" :searchable="false" :aria-label="t('intelligenceMonitor.form.source')" /><div class="ml-auto flex items-center gap-2"><button v-if="localOnly && !oauthOnly" type="button" class="btn btn-secondary btn-sm" data-testid="open-public-display" @click="publicDisplayDialog = true"><Icon name="eye" size="sm" class="mr-1.5"/>{{ t('intelligenceMonitor.publicDisplay.open') }}</button><button type="button" class="btn btn-secondary btn-sm" :disabled="scopePlans.length < 2" @click="orderDialog=true"><Icon name="menu" size="sm" class="mr-1.5"/>{{ t('upstreamCenter.order.open') }}</button><button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700" :aria-busy="loading" data-testid="intelligence-refresh" @click="manualRefresh"><Icon name="refresh" size="sm" :class="loading&&'animate-spin'"/>{{ t('intelligenceMonitor.refresh') }}</button><button v-if="localOnly" type="button" class="btn btn-primary btn-sm" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5"/>{{ t(addLabel) }}</button></div></div>
     <p v-if="error" role="alert" class="rounded-xl bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-500/10">{{ error }}</p>
     <div v-if="loading&&!loaded" class="space-y-3"><div v-for="n in 3" :key="n" class="card h-56 animate-pulse bg-gray-50 dark:bg-dark-800"/></div>
     <div :id="!oauthOnly && !localOnly ? 'intelligence-site-results' : undefined" :role="!oauthOnly && !localOnly && scopePlans.length ? 'tabpanel' : undefined" :aria-labelledby="!oauthOnly && !localOnly && scopePlans.length ? siteTabID(selectedSite) : undefined">
@@ -20,10 +20,11 @@
       <div v-if="(!loading || loaded) && !visiblePlans.length" class="flex min-h-[330px] flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 text-center dark:border-dark-700 dark:bg-dark-800/30"><div class="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-50 text-primary-500 dark:bg-primary-500/10"><Icon name="lightbulb" size="xl"/></div><h3 class="text-base font-semibold text-gray-800 dark:text-gray-200">{{ t(search||sourceFilter||selectedSite!=='all'?'intelligenceMonitor.noMatches':oauthOnly?'intelligenceMonitor.oauth.emptyTitle':localOnly?'intelligenceMonitor.local.emptyTitle':'intelligenceMonitor.emptyTitle') }}</h3><p v-if="!search&&!sourceFilter&&selectedSite==='all'" class="mt-2 max-w-lg text-xs leading-6 text-gray-500">{{ t(oauthOnly ? 'intelligenceMonitor.oauth.emptyHint' : localOnly ? 'intelligenceMonitor.local.emptyHint' : 'intelligenceMonitor.emptyHint') }}</p><button v-if="!search&&!sourceFilter&&selectedSite==='all'" class="btn btn-primary btn-sm mt-5" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5"/>{{ t(addLabel) }}</button></div>
     </div>
     <p class="text-[10px] text-gray-400 dark:text-dark-500">{{ t('intelligenceMonitor.retention') }}</p>
-    <IntelligencePlanDialog :show="editor" :plan="editing" :overview="overview" :oauth-only="oauthOnly" :local-only="localOnly" :managed-key-ids="managedKeyIDs" @close="editor=false" @saved="saved"/>
+    <IntelligencePlanDialog :show="editor" :plan="editing" :overview="overview" :oauth-only="oauthOnly" :local-only="localOnly" :managed-key-ids="managedKeyIDs" :monitored-account-ids="monitoredAccountIDs" @close="editor=false" @saved="saved"/>
     <IntelligenceHistoryDialog :show="history" :plan="selectedPlan" :initial-run-id="selectedRunID" @close="history=false"/>
     <IntelligenceCandyDetailDialog v-if="selectedCandyRun" :run="selectedCandyRun" @close="selectedCandy = null" />
     <UpstreamOrderDialog :show="orderDialog" :scope="oauthOnly ? 'oauth' : 'intelligence'" :intelligence-filter="localOnly ? 'local' : 'external'" @close="orderDialog=false" @saved="savedOrder"/>
+    <IntelligencePublicDisplayDialog v-if="localOnly && !oauthOnly" :show="publicDisplayDialog" @close="publicDisplayDialog = false" @saved="refreshPublicDisplay" />
     <UpstreamDeleteDialog :show="!!archiving" :item="archiving ? { kind: 'intelligence', id: archiving.id, name: archiving.name } : null" :busy="deleting" :error="deleteError" @close="archiving = null" @confirm="archive" />
   </div>
 </template>
@@ -36,12 +37,14 @@ import Select from '@/components/common/Select.vue'
 import { intelligenceMonitorAPI, PELICAN_MODEL, PELICAN_PROMPT, type IntelligencePlan, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { upstreamCenterAPI, type UpstreamOverview } from '@/api/admin/upstreamCenter'
 import { useAppStore } from '@/stores/app'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { usePelicanMonitorStore } from '@/stores/pelicanMonitor'
+import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import IntelligencePlanCard from './IntelligencePlanCard.vue'
 import IntelligenceLocalCard from './IntelligenceLocalCard.vue'
 import IntelligencePlanDialog from './IntelligencePlanDialog.vue'
 import IntelligenceHistoryDialog from './IntelligenceHistoryDialog.vue'
 import IntelligenceCandyDetailDialog from './IntelligenceCandyDetailDialog.vue'
+import IntelligencePublicDisplayDialog from './IntelligencePublicDisplayDialog.vue'
 import { intelligenceRefreshInterval, isIntelligenceRunActive } from './intelligenceCandy'
 import UpstreamOrderDialog from './UpstreamOrderDialog.vue'
 import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
@@ -60,6 +63,8 @@ const addLabel=computed(()=>props.oauthOnly?'intelligenceMonitor.oauth.add':prop
 const sourceOptions=computed(()=>[{value:'',label:t('intelligenceMonitor.allSources')},...sources.map(value=>({value,label:t(`intelligenceMonitor.source.${value}`)}))])
 const editor=ref(false),editing=ref<IntelligencePlan|null>(null),history=ref(false),selectedID=ref<number|null>(null),selectedRunID=ref<number|null>(null),archiving=ref<IntelligencePlan|null>(null),deleting=ref(false)
 const orderDialog=ref(false)
+const publicDisplayDialog = ref(false)
+function refreshPublicDisplay() { void usePelicanMonitorStore().load(true) }
 const deleteError=ref('')
 watch(archiving, () => { deleteError.value = '' })
 const selectedPlan=computed(()=>plans.value.find(plan=>plan.id===selectedID.value)||null)
@@ -71,6 +76,7 @@ const selectedCandyRun = computed(() => {
   return [plan?.candy_latest_run, ...(plan?.candy_recent_runs || [])].find(run => run?.id === selected.id) || selected
 })
 const scopePlans=computed(()=>plans.value.filter(plan=>props.oauthOnly ? plan.source_type==='openai_oauth' : props.localOnly ? plan.source_type==='local_group' : !['openai_oauth','local_group'].includes(plan.source_type)))
+const monitoredAccountIDs = computed(() => plans.value.filter(plan => plan.source_type === 'openai_oauth' && plan.account_id).map(plan => plan.account_id!))
 const managedKeyIDs = computed(() => plans.value.filter(plan => plan.local_api_key_managed && plan.local_api_key_id).map(plan => plan.local_api_key_id!))
 const selectedSite = ref('all')
 const planSites = computed(() => {
@@ -129,11 +135,27 @@ function openEditor(plan:IntelligencePlan|null=null){editing.value=plan;editor.v
 function openHistory(plan:IntelligencePlan,runID?:number){selectedID.value=plan.id;selectedRunID.value=runID||null;history.value=true}
 function saved(){app.showSuccess(t('intelligenceMonitor.saved'));void load()}
 function savedOrder(){orderDialog.value=false;void load()}
-async function action(id:number,callback:()=>Promise<unknown>){if(disposed||!props.active||busy.value.has(id))return;busy.value=new Set([...busy.value,id]);try{await callback();if(!disposed&&props.active)await load()}catch(err){if(!disposed&&props.active)app.showError(extractApiErrorMessage(err,t('intelligenceMonitor.actionFailed')))}finally{const ids=new Set(busy.value);ids.delete(id);busy.value=ids}}
-function run(plan:IntelligencePlan){if(isIntelligenceRunActive((plans.value.find(item=>item.id===plan.id)||plan).latest_run))return;void action(plan.id,async()=>{const queued=await intelligenceMonitorAPI.run(plan.id);if(disposed||!props.active)return;plans.value=plans.value.map(item=>item.id===plan.id?{...item,latest_run:queued}:item);app.showSuccess(t('intelligenceMonitor.queued'))})}
+async function action(id: number, callback: () => Promise<unknown>) {
+  if (disposed || !props.active || busy.value.has(id)) return
+  busy.value = new Set([...busy.value, id])
+  try {
+    await callback()
+    if (!disposed && props.active) await load()
+  } catch (err) {
+    if (!disposed && props.active) {
+      const code = extractApiErrorCode(err)
+      const paused = code === 'INTELLIGENCE_OAUTH_COOLING_DOWN' || code === 'INTELLIGENCE_OAUTH_UNAVAILABLE'
+      app.showError(paused ? t(code === 'INTELLIGENCE_OAUTH_COOLING_DOWN' ? 'intelligenceMonitor.oauth.cooldownHint' : 'intelligenceMonitor.oauth.unavailableHint') : extractApiErrorMessage(err, t('intelligenceMonitor.actionFailed')))
+      if (paused) await load()
+    }
+  } finally {
+    const ids = new Set(busy.value); ids.delete(id); busy.value = ids
+  }
+}
+function run(plan:IntelligencePlan){const current=plans.value.find(item=>item.id===plan.id)||plan;if(current.oauth_account_status?.monitoring_paused||isIntelligenceRunActive(current.latest_run))return;void action(plan.id,async()=>{const queued=await intelligenceMonitorAPI.run(plan.id);if(disposed||!props.active)return;plans.value=plans.value.map(item=>item.id===plan.id?{...item,latest_run:queued}:item);app.showSuccess(t('intelligenceMonitor.queued'))})}
 function runCandy(plan: IntelligencePlan) {
   const current = plans.value.find(item => item.id === plan.id)
-  if (!current?.candy_enabled || isIntelligenceRunActive(current.candy_latest_run)) return
+  if (!current?.candy_enabled || current.oauth_account_status?.monitoring_paused || isIntelligenceRunActive(current.candy_latest_run)) return
   void action(plan.id, async () => {
     const queued = await intelligenceMonitorAPI.runCandy(plan.id)
     if (disposed || !props.active) return
@@ -141,7 +163,7 @@ function runCandy(plan: IntelligencePlan) {
     app.showSuccess(t('intelligenceMonitor.candy.queued'))
   })
 }
-function toggle(plan:IntelligencePlan){void action(plan.id,()=>intelligenceMonitorAPI.update(plan.id,{enabled:!plan.enabled}))}
+function toggle(plan:IntelligencePlan){const current=plans.value.find(item=>item.id===plan.id)||plan;if(!current.enabled&&current.oauth_account_status?.monitoring_paused)return;void action(plan.id,()=>intelligenceMonitorAPI.update(plan.id,{enabled:!current.enabled}))}
 async function archive(mode:'archive'|'purge'){if(!archiving.value||deleting.value)return;const item=archiving.value;deleting.value=true;deleteError.value='';try{if(mode==='purge')await upstreamCenterAPI.purge({kind:'intelligence',id:item.id,confirm_name:item.name});else await intelligenceMonitorAPI.archive(item.id);if(disposed)return;archiving.value=null;app.showSuccess(t(mode==='purge'?'upstreamCenter.storage.purged':'intelligenceMonitor.archived'));if(props.active)await load()}catch(err){if(!disposed)deleteError.value=extractApiErrorMessage(err,t('upstreamCenter.storage.actionFailed'))}finally{deleting.value=false}}
 watch(() => props.refreshKey, () => { if(props.active)void load() })
 watch(() => props.active, active => {
@@ -150,6 +172,7 @@ watch(() => props.active, active => {
   history.value = false
   selectedCandy.value = null
   orderDialog.value = false
+  publicDisplayDialog.value = false
   if (!deleting.value) archiving.value = null
 })
 onBeforeUnmount(()=>{disposed=true})

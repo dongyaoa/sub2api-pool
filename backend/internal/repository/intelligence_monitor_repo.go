@@ -80,11 +80,12 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 	}
 	var oldSource string
 	var oldTargetID *int64
+	var oldAccountID *int64
 	if p.ID > 0 {
 		var busy bool
 		var oldKeyID *int64
 		var oldBorrowed bool
-		err = tx.QueryRowContext(ctx, `SELECT local_api_key_id,source_type,upstream_target_id,local_api_key_borrowed FROM intelligence_monitor_plans WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, p.ID).Scan(&oldKeyID, &oldSource, &oldTargetID, &oldBorrowed)
+		err = tx.QueryRowContext(ctx, `SELECT local_api_key_id,source_type,upstream_target_id,local_api_key_borrowed,account_id FROM intelligence_monitor_plans WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, p.ID).Scan(&oldKeyID, &oldSource, &oldTargetID, &oldBorrowed, &oldAccountID)
 		if err != nil {
 			return intelligenceDBError(err)
 		}
@@ -111,6 +112,19 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 		}
 		if exists {
 			return service.ErrIntelligenceUpstreamPlanExists
+		}
+	}
+	if p.SourceType == "openai_oauth" && p.AccountID != nil && (p.ID == 0 || oldSource != "openai_oauth" || oldAccountID == nil || *oldAccountID != *p.AccountID) {
+		// Account membership follows the same transaction lock as create, move,
+		// and archive. Paused plans still reserve their account; existing legacy
+		// duplicates may be edited without preventing their later cleanup.
+		var exists bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intelligence_monitor_plans WHERE source_type='openai_oauth' AND account_id=$1 AND deleted_at IS NULL AND id<>$2)`, *p.AccountID, p.ID).Scan(&exists)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return service.ErrIntelligenceOAuthPlanExists
 		}
 	}
 	args := []any{p.Name, p.SourceType, p.Endpoint, p.APIKeyEncrypted, p.UpstreamTargetID, p.GroupID, p.LocalAPIKeyID, p.LocalKeyOwnerID, p.SupplierNote, p.GroupNote, p.RateNote, p.Notes, p.APIMode, p.Enabled, p.IntervalSeconds, p.TimeoutSeconds, p.CreatedBy}

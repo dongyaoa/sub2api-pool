@@ -7,7 +7,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/admin.system.poolUpdate.spec.ts \
 	src/api/__tests__/admin.upstreamCenter.storage.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.candy.spec.ts \
+	src/api/__tests__/pelicanMonitor.spec.ts \
 	src/components/common/__tests__/VersionBadge.spec.ts \
+	src/components/layout/__tests__/AppSidebar.spec.ts \
 	src/components/admin/upstream/IntelligenceArtifactPreview.spec.ts \
 	src/components/admin/upstream/IntelligenceHistoryDialog.spec.ts \
 	src/components/admin/upstream/IntelligencePlanCard.spec.ts \
@@ -26,6 +28,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/composables/__tests__/useMonitorRefresh.spec.ts \
 	src/components/admin/upstream/UpstreamHistoryBar.spec.ts \
 	src/components/admin/upstream/IntelligencePlanDialog.spec.ts \
+	src/components/admin/upstream/IntelligencePublicDisplayDialog.spec.ts \
 	src/components/admin/upstream/UpstreamWallet.spec.ts \
 	src/components/admin/upstream/UpstreamRateBadge.spec.ts \
 	src/components/admin/upstream/UpstreamTargetDialog.spec.ts \
@@ -38,6 +41,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/upstream/intelligencePreview.spec.ts \
 	src/components/admin/upstream/intelligencePreviewRuntime.spec.ts \
 	src/stores/__tests__/app.spec.ts \
+	src/stores/__tests__/pelicanMonitor.spec.ts \
+	src/components/pelican/pelicanFormat.spec.ts \
+	src/components/pelican/pelicanArtworkLoader.spec.ts \
+	src/components/pelican/PelicanArtworkPreview.spec.ts \
+	src/views/user/__tests__/PelicanMonitorView.spec.ts \
 	src/api/__tests__/keys.bulkUpdate.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
 	src/views/user/__tests__/KeysView.spec.ts \

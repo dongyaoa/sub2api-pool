@@ -20,6 +20,14 @@ export interface IntelligenceConcurrency extends IntelligenceConcurrencyInput {
   candy_pending: number
 }
 
+export interface IntelligencePublicDisplaySettings {
+  enabled: boolean
+  title: string
+  description: string
+  notice: string
+  plan_ids: number[]
+}
+
 export interface IntelligencePlanInput {
   name: string
   source_type: IntelligenceSource
@@ -67,6 +75,12 @@ export interface IntelligenceRun {
   raw_text?: string
 }
 export interface IntelligencePlan extends Omit<IntelligencePlanInput, 'api_key'> {
+  oauth_account_status?: {
+    status: 'normal' | 'weekly_limited' | 'unavailable'
+    monitoring_paused: boolean
+    reset_at?: string | null
+    weekly_used_percent?: number | null
+  }
   id: number
   model: string
   reasoning_effort: string
@@ -99,6 +113,12 @@ export interface IntelligenceRunPage {
 }
 const base = '/admin/intelligence-monitors'
 export const intelligenceMonitorAPI = {
+  async publicDisplay(signal?: AbortSignal): Promise<IntelligencePublicDisplaySettings> {
+    return (await apiClient.get(`${base}/public-display`, { signal })).data
+  },
+  async updatePublicDisplay(input: IntelligencePublicDisplaySettings): Promise<IntelligencePublicDisplaySettings> {
+    return (await apiClient.put(`${base}/public-display`, input)).data
+  },
   async concurrency(signal?: AbortSignal): Promise<IntelligenceConcurrency> {
     return (await apiClient.get(`${base}/concurrency`, { signal })).data
   },

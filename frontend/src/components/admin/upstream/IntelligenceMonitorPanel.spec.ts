@@ -8,9 +8,11 @@ const mocks = vi.hoisted(() => ({
   plans: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), run: vi.fn(), runCandy: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
   purge: vi.fn(),
+  publicConfig: vi.fn(),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: mocks.showSuccess, showError: mocks.showError }) }))
+vi.mock('@/stores/pelicanMonitor', () => ({ usePelicanMonitorStore: () => ({ load: mocks.publicConfig }) }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({
   intelligenceMonitorAPI: mocks, PELICAN_MODEL: 'gpt-6-astra', PELICAN_PROMPT: 'Pelican animation',
 }))
@@ -20,8 +22,9 @@ vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
   template: '<div data-testid="plan-card" :data-id="plan.id">{{ plan.name }}</div>',
 } }))
 vi.mock('./IntelligenceLocalCard.vue', () => ({ default: { name: 'IntelligenceLocalCard', props: ['plan', 'busy', 'visible'], template: '<div data-testid="plan-card" :data-id="plan.id">{{ plan.name }}</div>' } }))
-vi.mock('./IntelligencePlanDialog.vue', () => ({ default: { name: 'IntelligencePlanDialog', template: '<div />' } }))
+vi.mock('./IntelligencePlanDialog.vue', () => ({ default: { name: 'IntelligencePlanDialog', props: ['monitoredAccountIds'], template: '<div />' } }))
 vi.mock('./IntelligenceHistoryDialog.vue', () => ({ default: { name: 'IntelligenceHistoryDialog', template: '<div />' } }))
+vi.mock('./IntelligencePublicDisplayDialog.vue', () => ({ default: { name: 'IntelligencePublicDisplayDialog', props: ['show'], emits: ['close', 'saved'], template: '<div v-if="show" data-testid="public-display-dialog" />' } }))
 vi.mock('./IntelligenceCandyDetailDialog.vue', () => ({ default: { name: 'IntelligenceCandyDetailDialog', props: ['run'], emits: ['close'], template: '<div data-testid="candy-detail" />' } }))
 vi.mock('./UpstreamOrderDialog.vue', () => ({ default: {
   name: 'UpstreamOrderDialog', props: ['show', 'scope'], emits: ['close', 'saved'],
@@ -57,6 +60,56 @@ beforeEach(() => {
 })
 
 describe('intelligence monitoring site tabs', () => {
+  it.each([
+    ['INTELLIGENCE_OAUTH_COOLING_DOWN', 'weekly_limited', 'cooldownHint'],
+    ['INTELLIGENCE_OAUTH_UNAVAILABLE', 'unavailable', 'unavailableHint'],
+  ] as const)('refreshes account status after a stale manual request receives %s', async (reason, status, hint) => {
+    const item = { ...plan(4, 'OAuth A', 'openai_oauth'), account_id: 41 }
+    mocks.plans.mockResolvedValueOnce({ items: [item] }).mockResolvedValue({ items: [{ ...item, oauth_account_status: { status, monitoring_paused: true } }] })
+    mocks.run.mockRejectedValueOnce({ reason, message: 'Account paused' })
+    const view = render(true); await flushPromises()
+    view.getComponent({ name: 'IntelligencePlanCard' }).vm.$emit('run'); await flushPromises()
+    expect(mocks.showError).toHaveBeenCalledWith(`intelligenceMonitor.oauth.${hint}`)
+    expect(view.getComponent({ name: 'IntelligencePlanCard' }).props('plan').oauth_account_status).toEqual({ status, monitoring_paused: true })
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+  })
+  it('reserves paused OAuth accounts in the picker and prevents manual runs during weekly cooldown', async () => {
+    const items = [
+      { ...plan(4, 'Weekly account', 'openai_oauth'), account_id: 41, enabled: true, candy_enabled: true, oauth_account_status: { status: 'weekly_limited' as const, monitoring_paused: true } },
+      { ...plan(5, 'Paused account', 'openai_oauth'), account_id: 51, enabled: false },
+    ]
+    mocks.plans.mockResolvedValue({ items })
+    const view = render(true); await flushPromises()
+    expect(view.getComponent({ name: 'IntelligencePlanDialog' }).props('monitoredAccountIds')).toEqual([41, 51])
+    const card = view.getComponent({ name: 'IntelligencePlanCard' })
+    card.vm.$emit('run'); card.vm.$emit('candy-run'); await flushPromises()
+    expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.runCandy).not.toHaveBeenCalled()
+    card.vm.$emit('toggle'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(4, { enabled: false })
+    mocks.plans.mockResolvedValue({ items: [items[1]] })
+    await refreshButton(view).trigger('click'); await flushPromises()
+    expect(view.getComponent({ name: 'IntelligencePlanDialog' }).props('monitoredAccountIds')).toEqual([51])
+  })
+  it.each([[false, false], [true, false]])('hides user-display management outside local monitoring (OAuth %s, local %s)', async (oauth, local) => {
+    const view = render(oauth, local); await flushPromises()
+    expect(view.find('[data-testid="open-public-display"]').exists()).toBe(false)
+    expect(view.findComponent({ name: 'IntelligencePublicDisplayDialog' }).exists()).toBe(false)
+  })
+  it('opens user-display settings only on local monitoring and closes them when leaving the tab', async () => {
+    const view = render(false, true); await flushPromises()
+    await view.get('[data-testid="open-public-display"]').trigger('click')
+    expect(view.getComponent({ name: 'IntelligencePublicDisplayDialog' }).props('show')).toBe(true)
+    await view.setProps({ active: false })
+    expect(view.getComponent({ name: 'IntelligencePublicDisplayDialog' }).props('show')).toBe(false)
+  })
+  it('refreshes user sidebar visibility immediately after saving display settings without scheduling a test', async () => {
+    const view = render(false, true); await flushPromises()
+    view.getComponent({ name: 'IntelligencePublicDisplayDialog' }).vm.$emit('saved')
+    await flushPromises()
+    expect(mocks.publicConfig).toHaveBeenCalledWith(true)
+    expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
   it('pauses retained card previews while the large history dialog is open and resumes on close', async () => {
     const view = render(); await flushPromises()
     const card = view.getComponent({ name: 'IntelligencePlanCard' })

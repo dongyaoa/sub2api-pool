@@ -17,16 +17,26 @@
         <div v-if="!oauth" class="shrink-0 text-right"><p class="text-[10px] text-gray-400">{{ t('intelligenceMonitor.rate') }}</p><p class="mt-0.5 text-lg font-semibold tabular-nums" :class="rate?.stale ? 'text-amber-500' : 'text-primary-600 dark:text-primary-400'">{{ intelligenceRateLabel(rate) || '—' }}</p></div>
       </div>
       <p v-if="plan.rate_note || plan.notes" class="mt-2 line-clamp-1 text-[10px] text-gray-400" :title="[plan.rate_note, plan.notes].filter(Boolean).join(' · ')">{{ [plan.rate_note, plan.notes].filter(Boolean).join(' · ') }}</p>
+      <div v-if="oauth" class="mt-3 rounded-lg border px-2.5 py-2" :class="accountStatusClass" data-testid="oauth-account-status">
+        <div class="flex items-center justify-between gap-2 text-[10px]">
+          <span class="text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.oauth.accountStatus') }}</span>
+          <span class="inline-flex items-center gap-1.5 font-semibold"><span class="h-1.5 w-1.5 rounded-full bg-current" />{{ t(`intelligenceMonitor.oauth.accountStates.${accountStatus?.status || 'unknown'}`) }}</span>
+        </div>
+        <template v-if="monitoringPaused">
+          <p class="mt-1.5 text-[10px] leading-4 opacity-90">{{ t(accountStatus?.status === 'weekly_limited' ? 'intelligenceMonitor.oauth.cooldownHint' : 'intelligenceMonitor.oauth.unavailableHint') }}</p>
+          <p v-if="accountStatus?.reset_at" class="mt-1 text-[10px] tabular-nums"><span class="mr-1 opacity-75">{{ t('intelligenceMonitor.oauth.resetAt') }}</span><time :datetime="accountStatus.reset_at">{{ dateTime(accountStatus.reset_at) }}</time></p>
+        </template>
+      </div>
       <div class="mt-3 flex items-center justify-between gap-2 text-[10px]"><span class="inline-flex items-center gap-1" :class="plan.enabled ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'"><Icon name="clock" size="xs" />{{ plan.enabled ? intervalLabel : t('intelligenceMonitor.manual') }}</span><span class="rounded-md px-1.5 py-0.5 font-medium" :class="statusClass(plan.latest_run?.status)">{{ t(`intelligenceMonitor.status.${plan.latest_run?.status || 'idle'}`) }}</span></div>
-      <div v-if="plan.enabled" class="mt-2 flex min-h-5 items-center justify-between gap-2 text-[10px]" data-testid="intelligence-schedule">
+      <div v-if="plan.enabled && !monitoringPaused" class="mt-2 flex min-h-5 items-center justify-between gap-2 text-[10px]" data-testid="intelligence-schedule">
         <span class="shrink-0 text-gray-400 dark:text-dark-400">{{ t('intelligenceMonitor.nextCheck') }}</span>
         <span v-if="active" class="text-right text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.afterCurrentRun') }}</span>
         <time v-else-if="remainingSeconds !== null && remainingSeconds > 0" :datetime="plan.next_run_at || undefined" :title="dateTime(plan.next_run_at)" class="font-mono text-xs font-semibold tabular-nums text-primary-600 dark:text-primary-400" data-testid="intelligence-countdown">{{ countdownLabel }}</time>
         <span v-else class="text-amber-600 dark:text-amber-400" data-testid="intelligence-waiting-schedule">{{ t('intelligenceMonitor.waitingSchedule') }}</span>
       </div>
       <div class="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-dark-700">
-        <button type="button" class="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 disabled:opacity-40 dark:text-primary-400" :disabled="busy || active" @click="emit('run')"><Icon :name="active ? 'clock' : 'play'" size="xs" />{{ t(active ? `intelligenceMonitor.status.${plan.latest_run?.status}` : 'intelligenceMonitor.run') }}</button>
-        <div class="flex items-center gap-0.5"><button class="action" :disabled="busy" :title="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" :aria-label="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" @click="emit('toggle')"><Icon :name="plan.enabled ? 'clock' : 'play'" size="sm" /></button><button class="action" :disabled="busy || planActive" :title="t('intelligenceMonitor.edit')" :aria-label="t('intelligenceMonitor.edit')" @click="emit('edit')"><Icon name="edit" size="sm" /></button><button class="action hover:!text-rose-500" :disabled="busy || planActive" :title="t('intelligenceMonitor.archive')" :aria-label="t('intelligenceMonitor.archive')" @click="emit('archive')"><Icon name="trash" size="sm" /></button></div>
+        <button type="button" class="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 disabled:opacity-40 dark:text-primary-400" :disabled="busy || active || monitoringPaused" @click="emit('run')"><Icon :name="active ? 'clock' : 'play'" size="xs" />{{ t(active ? `intelligenceMonitor.status.${plan.latest_run?.status}` : 'intelligenceMonitor.run') }}</button>
+        <div class="flex items-center gap-0.5"><button class="action" :disabled="busy || (!plan.enabled && monitoringPaused)" :title="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" :aria-label="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" @click="emit('toggle')"><Icon :name="plan.enabled ? 'clock' : 'play'" size="sm" /></button><button class="action" :disabled="busy || planActive" :title="t('intelligenceMonitor.edit')" :aria-label="t('intelligenceMonitor.edit')" @click="emit('edit')"><Icon name="edit" size="sm" /></button><button class="action hover:!text-rose-500" :disabled="busy || planActive" :title="t('intelligenceMonitor.archive')" :aria-label="t('intelligenceMonitor.archive')" @click="emit('archive')"><Icon name="trash" size="sm" /></button></div>
       </div>
     </aside>
     <section class="flex min-w-0 flex-col px-4 py-3">
@@ -70,6 +80,13 @@ const cardActive = computed(() => panelActive.value && props.visible)
 // Filtered cards retain their artwork DOM; hidden cards must pause playback.
 provide(intelligencePanelActiveKey, cardActive)
 const oauth = computed(() => props.plan.source_type === 'openai_oauth')
+const accountStatus = computed(() => oauth.value ? props.plan.oauth_account_status : undefined)
+const monitoringPaused = computed(() => !!accountStatus.value?.monitoring_paused)
+const accountStatusClass = computed(() => accountStatus.value?.status === 'weekly_limited'
+  ? 'border-amber-200/70 bg-amber-50/70 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-300'
+  : accountStatus.value?.status === 'normal'
+    ? 'border-emerald-100 bg-emerald-50/50 text-emerald-700 dark:border-emerald-500/15 dark:bg-emerald-500/5 dark:text-emerald-300'
+    : 'border-gray-100 bg-gray-50 text-gray-500 dark:border-dark-600 dark:bg-dark-900/40 dark:text-dark-300')
 const sourceBadgeClass = computed(() => ({
   external: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300',
   upstream: 'border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
@@ -102,10 +119,10 @@ function stopCountdown() {
   countdownTimer = undefined
 }
 // Active runs only have a provisional next_run_at; completion sets the actual deadline.
-watch([() => props.plan.enabled, active, nextRunTime, cardActive], () => {
+watch([() => props.plan.enabled, active, nextRunTime, cardActive, monitoringPaused], () => {
   stopCountdown()
   now.value = Date.now()
-  if (!cardActive.value || !props.plan.enabled || active.value || !remainingSeconds.value) return
+  if (!cardActive.value || !props.plan.enabled || monitoringPaused.value || active.value || !remainingSeconds.value) return
   countdownTimer = setInterval(() => {
     now.value = Date.now()
     if (!remainingSeconds.value) stopCountdown()

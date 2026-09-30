@@ -6,7 +6,7 @@ export const isIntelligencePlanActive = (plan: IntelligencePlan) => isIntelligen
 // either test is running or is about to become due; keep idle reads lightweight.
 export function intelligenceRefreshInterval(plans: IntelligencePlan[], now = Date.now()) {
   const imminent = (value?: string | null) => !!value && Date.parse(value) <= now + 5000
-  return plans.some(plan => isIntelligencePlanActive(plan) || (plan.enabled && (
+  return plans.some(plan => isIntelligencePlanActive(plan) || (plan.enabled && !plan.oauth_account_status?.monitoring_paused && (
     imminent(plan.next_run_at) || (plan.candy_enabled && imminent(plan.candy_next_run_at))
   ))) ? 1000 : 5000
 }

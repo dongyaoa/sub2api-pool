@@ -16,6 +16,33 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it('shows weekly cooldown on the left, suspends both tests, and resumes without remounting artwork', async () => {
+    const artwork = run(90)
+    const value = plan({ source_type: 'openai_oauth', enabled: true, candy_enabled: true, latest_run: artwork, recent_runs: [artwork], next_run_at: new Date(Date.now() + 300000).toISOString(), candy_next_run_at: new Date(Date.now() + 180000).toISOString(), oauth_account_status: { status: 'weekly_limited', monitoring_paused: true, reset_at: '2026-10-02T00:00:00Z' } })
+    const view = render(value)
+    const previewElement = view.get('.test-preview').element
+    const status = view.get('aside [data-testid="oauth-account-status"]')
+    expect(status.text()).toContain('intelligenceMonitor.oauth.accountStates.weekly_limited')
+    expect(status.text()).toContain('intelligenceMonitor.oauth.resetAt')
+    expect(view.find('[data-testid="intelligence-schedule"]').exists()).toBe(false)
+    expect(view.find('[data-testid="candy-countdown"]').exists()).toBe(false)
+    const runButton = view.get('aside').findAll('button').find(button => button.text() === 'intelligenceMonitor.run')!
+    expect(runButton.attributes('disabled')).toBeDefined()
+    expect(view.get('[data-testid="candy-run"]').attributes('disabled')).toBeDefined()
+    expect(view.get('[aria-label="intelligenceMonitor.pause"]').attributes('disabled')).toBeUndefined()
+    await runButton.trigger('click')
+    await view.get('[data-testid="candy-run"]').trigger('click')
+    expect(view.emitted('run')).toBeUndefined()
+    expect(view.emitted('candyRun')).toBeUndefined()
+    await view.setProps({ plan: { ...value, oauth_account_status: { status: 'normal', monitoring_paused: false } } })
+    expect(status.text()).toContain('intelligenceMonitor.oauth.accountStates.normal')
+    expect(view.find('[data-testid="intelligence-countdown"]').exists()).toBe(true)
+    expect(view.find('[data-testid="candy-countdown"]').exists()).toBe(true)
+    expect(runButton.attributes('disabled')).toBeUndefined()
+    expect(view.get('[data-testid="candy-run"]').attributes('disabled')).toBeUndefined()
+    expect(view.get('.test-preview').element).toBe(previewElement)
+    view.unmount()
+  })
   it('adds the candy strip only after opt-in and preserves the original card and artwork DOM when absent', async () => {
     const artwork = run(90)
     const view = render(plan({ latest_run: artwork, recent_runs: [artwork] }))

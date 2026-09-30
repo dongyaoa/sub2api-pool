@@ -497,6 +497,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/pelican-monitor',
+    name: 'PelicanMonitor',
+    component: () => import('@/views/user/PelicanMonitorView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'Pelican monitor', titleKey: 'pelicanMonitor.title' }
+  },
+  {
     path: '/admin/subscriptions',
     name: 'AdminSubscriptions',
     component: () => import('@/views/admin/SubscriptionsView.vue'),

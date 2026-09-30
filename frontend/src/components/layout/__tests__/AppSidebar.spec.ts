@@ -80,3 +80,9 @@ describe('AppSidebar subscription feature flag', () => {
     expect(componentSource).toMatch(/path: '\/purchase'[^\n]*label: purchaseNavLabel\.value/)
   })
 })
+
+describe('AppSidebar pelican monitoring entry', () => {
+  it('places the enabled-only user entry immediately below channel status', () => {
+    expect(componentSource).toMatch(/path: '\/monitor'[^\n]*\n\s*\{ path: '\/pelican-monitor'[^\n]*featureFlag: \(\) => pelicanMonitorStore.enabled/)
+  })
+})

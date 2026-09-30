@@ -1,5 +1,13 @@
 export default {
   intelligenceMonitor: {
+    publicDisplay: {
+      open: '用户展示', title: '鹈鹕监测 · 用户展示', enabled: '向用户开放鹈鹕监测', enabledHint: '开启后，用户可在「鹈鹕监测」查看已选分组的作品。',
+      copy: '页面文案', pageTitle: '页面标题', titlePlaceholder: '鹈鹕监测', description: '页面简介', descriptionPlaceholder: '介绍这些分组的监测方式与作品内容', notice: '页面公告', noticePlaceholder: '可填写更新说明或需要告知用户的内容（选填）',
+      copyHint: '这里填写的文案直接展示给用户；计划名称与内部备注不会自动带入。', groups: '展示分组', selectAll: '全选', clear: '清空', paused: '已暂停 · 历史可展示',
+      visibilityHint: '只展示已选分组的鹈鹕作品；不展示密钥、账号或上游信息；暂停计划仍保留历史作品。', empty: '暂无站内监控计划，请先添加一个站内分组。', unnamedGroup: '分组名称暂不可用',
+      unavailable: '已选计划 #{ids} 已不可用，请移除后保存。', removeUnavailable: '移除不可用计划', invalid: '请检查文案长度，并选择最多 200 个有效的站内监控计划。',
+      save: '保存展示设置', saved: '用户展示设置已保存', loadFailed: '无法读取展示设置或监控计划，请重试。', saveFailed: '保存展示设置失败，请重试。',
+    },
     concurrency: {
       title: '并发设置', scope: '统一控制智商监控、站内监控、OAuth 监控及上游弹窗中的所有测试计划。',
       pelican: '鹈鹕绘制', candy: '糖果测试', range: '1–{max} 个', running: '运行中', pending: '排队中', refresh: '刷新状态',
@@ -36,7 +44,7 @@ export default {
       alreadyExists: '该分组已有关联的智商监控，请关闭设置并刷新列表。',
     },
     group: '分组', recentWorks: '最近作品', newestFirst: '左新右旧', latest: '最新', retention: '每个计划仅保留最近 20 次作品，旧作品自动清理。',
-    oauth: { title: 'OAuth 监控', add: '添加 OAuth 监控', account: 'OAuth 账号', select: '选择 OpenAI OAuth 账号', search: '搜索账号名称…', nameHint: '计划名称与账号管理中的名称保持一致', emptyTitle: '观察每个 OAuth 账号的作品表现', emptyHint: '选择本站 OpenAI OAuth 账号，使用相同的鹈鹕测试，保存最近 20 次作品。', noAccounts: '暂无已启用且状态正常的可调度 OpenAI OAuth 账号', loading: '正在读取全部可用 OAuth 账号…', loadFailed: '无法加载 OAuth 账号，请刷新重试', unavailable: '所选账号已停用或暂不可调度，请刷新后重新选择。', hint: '仅显示已启用、状态正常且当前可调度的真实 OpenAI OAuth 账号。直接使用所选账号执行，复用凭据刷新和代理配置。', more: '下一页', previous: '上一页', fixedModelRequired: '该账号当前模型配置不支持直接使用 gpt-6-astra，请先检查账号管理中的模型白名单或映射。' },
+    oauth: { accountStatus: '账号状态', accountStates: { normal: '正常', weekly_limited: '周限额冷却', unavailable: '不可用', unknown: '状态待更新' }, monitoringPaused: '监测已暂停', cooldownHint: '周额度冷却中，恢复后自动继续定时监测。', unavailableHint: '账号不可用，监测已暂停，请检查账号管理。', resetAt: '预计恢复', alreadyAdded: '此账号已添加监控，请选择其他账号。', title: 'OAuth 监控', add: '添加 OAuth 监控', account: 'OAuth 账号', select: '选择 OpenAI OAuth 账号', search: '搜索账号名称…', nameHint: '计划名称与账号管理中的名称保持一致', emptyTitle: '观察每个 OAuth 账号的作品表现', emptyHint: '选择本站 OpenAI OAuth 账号，使用相同的鹈鹕测试，保存最近 20 次作品。', noAccounts: '暂无未添加监控且状态正常的 OpenAI OAuth 账号', loading: '正在读取全部可用 OAuth 账号…', loadFailed: '无法加载 OAuth 账号，请刷新重试', unavailable: '所选账号已停用或暂不可调度，请刷新后重新选择。', hint: '仅显示未添加监控、已启用且状态正常的可调度 OAuth 账号；暂停中的计划也会排除。直接使用所选账号执行，复用凭据刷新和代理配置。', more: '下一页', previous: '上一页', fixedModelRequired: '该账号当前模型配置不支持直接使用 gpt-6-astra，请先检查账号管理中的模型白名单或映射。' },
     title: '智商监控', add: '新建监测计划', edit: '编辑监测计划', search: '搜索计划、上游或分组', allSources: '全部来源', allSites: '全部站点', quickSwitch: '快速切换监测站点',
     source: { external: '外部地址', upstream: '上游 Key', local_group: '本站分组', openai_oauth: 'OpenAI OAuth' },
     status: { pending: '排队中', running: '绘制中', succeeded: '已完成', failed: '失败', idle: '尚未执行' },

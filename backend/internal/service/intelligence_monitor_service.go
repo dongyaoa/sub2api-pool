@@ -24,6 +24,7 @@ type IntelligenceMonitorService struct {
 	upstreams      UpstreamCenterRepository
 	groups         GroupRepository
 	keys           *APIKeyService
+	publicGroups   publicPelicanGroupAuthorizer
 	finance        *UpstreamFinanceService
 	accounts       AccountRepository
 	oauthForward   intelligenceOAuthForwarder
@@ -57,8 +58,12 @@ func NewIntelligenceMonitorService(repo IntelligenceMonitorRepository, encryptor
 	// the live limit when claiming, allowing settings changes without replacing
 	// channels that still belong to running requests.
 	artworkConcurrency, candyConcurrency := IntelligenceMonitorMaxConcurrency, IntelligenceMonitorCandyMaxConcurrency
+	var publicGroups publicPelicanGroupAuthorizer
+	if apiKeys != nil {
+		publicGroups = apiKeys
+	}
 	localTransport := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, ResponseHeaderTimeout: requestTimeout, MaxIdleConns: artworkConcurrency + candyConcurrency, MaxIdleConnsPerHost: artworkConcurrency + candyConcurrency, IdleConnTimeout: 90 * time.Second}
-	return &IntelligenceMonitorService{repo: repo, encryptor: encryptor, upstreams: upstreamRepo, groups: groupRepo, keys: apiKeys, finance: finance, cfg: cfg, externalClient: newSSRFSafeHTTPClientWithHeaderTimeout(requestTimeout, requestTimeout), localClient: &http.Client{Timeout: requestTimeout, Transport: localTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, localEndpoint: localEndpoint, ctx: ctx, cancel: cancel, slots: make(chan struct{}, artworkConcurrency), candySlots: make(chan struct{}, candyConcurrency), wake: make(chan struct{}, 1), candyWake: make(chan struct{}, 1), scheduleWake: make(chan struct{}, 1)}
+	return &IntelligenceMonitorService{repo: repo, encryptor: encryptor, upstreams: upstreamRepo, groups: groupRepo, keys: apiKeys, publicGroups: publicGroups, finance: finance, cfg: cfg, externalClient: newSSRFSafeHTTPClientWithHeaderTimeout(requestTimeout, requestTimeout), localClient: &http.Client{Timeout: requestTimeout, Transport: localTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, localEndpoint: localEndpoint, ctx: ctx, cancel: cancel, slots: make(chan struct{}, artworkConcurrency), candySlots: make(chan struct{}, candyConcurrency), wake: make(chan struct{}, 1), candyWake: make(chan struct{}, 1), scheduleWake: make(chan struct{}, 1)}
 }
 
 func (s *IntelligenceMonitorService) ListPlans(ctx context.Context) ([]*IntelligenceMonitorPlan, error) {
@@ -149,6 +154,9 @@ func (s *IntelligenceMonitorService) populatePlanList(ctx context.Context, plans
 		}
 	}
 	if err := s.populateLocalIntelligenceMetadata(ctx, plans); err != nil {
+		return nil, err
+	}
+	if err := s.populateOAuthMonitorStatus(ctx, plans); err != nil {
 		return nil, err
 	}
 	return plans, nil
@@ -449,7 +457,21 @@ func (s *IntelligenceMonitorService) enqueueTest(ctx context.Context, id int64, 
 		run.SourceSnapshot["account_id"] = p.AccountID
 		run.SourceSnapshot["auth_type"] = "oauth"
 		run.SourceSnapshot["oauth"] = true
-		if account, e := s.intelligenceOAuthAccount(ctx, p.AccountID); e != nil {
+		account, accountErr := s.intelligenceOAuthAccount(ctx, p.AccountID)
+		accountStatus := intelligenceOAuthAccountStatus(account, time.Now())
+		if accountStatus.Status == "weekly_limited" {
+			if err := s.deferOAuthMonitor(ctx, p, accountStatus); err != nil {
+				return nil, err
+			}
+			return nil, ErrIntelligenceOAuthCoolingDown
+		}
+		if accountStatus.Status == "unavailable" {
+			if err := s.deferOAuthMonitor(ctx, p, accountStatus); err != nil {
+				return nil, err
+			}
+			return nil, ErrIntelligenceOAuthUnavailable
+		}
+		if accountErr != nil {
 			run.SourceSnapshot["resolution_error"] = "selected OpenAI OAuth account is unavailable"
 		} else {
 			run.PlanName, run.SourceName = account.Name, account.Name
@@ -615,7 +637,7 @@ func (s *IntelligenceMonitorService) schedule() {
 		slog.Warn("intelligence monitoring schedule failed", "error", err)
 	}
 	for _, id := range ids {
-		if _, err = s.enqueue(ctx, id, true); err != nil && !errors.Is(err, ErrIntelligenceBusy) && !errors.Is(err, ErrIntelligenceNotFound) {
+		if _, err = s.enqueue(ctx, id, true); err != nil && !errors.Is(err, ErrIntelligenceBusy) && !errors.Is(err, ErrIntelligenceNotFound) && !errors.Is(err, ErrIntelligenceOAuthCoolingDown) && !errors.Is(err, ErrIntelligenceOAuthUnavailable) {
 			slog.Warn("intelligence monitoring enqueue failed", "plan_id", id, "error", err)
 		}
 	}
@@ -625,7 +647,7 @@ func (s *IntelligenceMonitorService) schedule() {
 			slog.Warn("intelligence candy schedule failed", "error", candyErr)
 		} else {
 			for _, id := range candyIDs {
-				if _, candyErr = s.enqueueTest(ctx, id, true, IntelligenceMonitorTestCandy); candyErr != nil && !errors.Is(candyErr, ErrIntelligenceBusy) && !errors.Is(candyErr, ErrIntelligenceNotFound) {
+				if _, candyErr = s.enqueueTest(ctx, id, true, IntelligenceMonitorTestCandy); candyErr != nil && !errors.Is(candyErr, ErrIntelligenceBusy) && !errors.Is(candyErr, ErrIntelligenceNotFound) && !errors.Is(candyErr, ErrIntelligenceOAuthCoolingDown) && !errors.Is(candyErr, ErrIntelligenceOAuthUnavailable) {
 					slog.Warn("intelligence candy enqueue failed", "plan_id", id, "error", candyErr)
 				}
 			}

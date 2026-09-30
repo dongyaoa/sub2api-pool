@@ -15,7 +15,7 @@
           <button type="button" class="btn btn-secondary btn-sm" :disabled="accountsLoading || saving" :aria-label="t('intelligenceMonitor.refresh')" @click="loadAccounts"><Icon name="refresh" size="sm" :class="accountsLoading && 'animate-spin'"/></button>
         </div>
         <p v-if="accountsLoading" role="status" class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.loading') }}</p>
-        <p v-else-if="accountsReady && !oauthAccounts.length" class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.noAccounts') }}</p>
+        <p v-else-if="accountsReady && !availableAccounts.length" class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.noAccounts') }}</p>
         <p id="intelligence-oauth-hint" class="text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.oauth.hint') }}</p><p v-if="accountError || accountSelectionError" role="alert" class="text-xs text-rose-500">{{ accountError || accountSelectionError }}</p>
       </div>
       <div v-else-if="lockedUpstream" data-testid="intelligence-locked-upstream" class="rounded-xl border border-primary-100 bg-primary-50/50 p-4 dark:border-primary-900/50 dark:bg-primary-500/5">
@@ -84,7 +84,7 @@ import { extractApiErrorCode, extractApiErrorMessage, extractApiErrorMetadata } 
 import { intelligenceRateLabel } from './intelligencePreview'
 import { domain } from './format'
 import IntelligenceLocalSource from './IntelligenceLocalSource.vue'
-const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; localOnly?: boolean; managedKeyIds?: number[]; upstreamTargetId?: number }>()
+const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; localOnly?: boolean; managedKeyIds?: number[]; monitoredAccountIds?: number[]; upstreamTargetId?: number }>()
 const emit = defineEmits<{ close: []; saved: [plan?: IntelligencePlan] }>()
 const { t } = useI18n()
 const lockedUpstream = computed(() => props.upstreamTargetId !== undefined)
@@ -139,8 +139,16 @@ function chooseInterval(value: number | 'custom') {
 }
 watch(() => form.enabled, () => { intervalError.value = '' })
 const oauthAccounts = ref<AccountListItem[]>([]), accountsLoading = ref(false), accountsReady = ref(false), accountError = ref(''), accountSelectionError = ref('')
-const accountOptions = computed(() => oauthAccounts.value.map(account => ({ value: account.id, label: account.name })))
-const selectedAccount = computed(() => oauthAccounts.value.find(account => account.id === form.account_id))
+const monitoredAccounts = computed(() => new Set(props.monitoredAccountIds || []))
+const availableAccounts = computed(() => oauthAccounts.value.filter(account => account.id === props.plan?.account_id || !monitoredAccounts.value.has(account.id)))
+const accountOptions = computed(() => availableAccounts.value.map(account => ({ value: account.id, label: account.name })))
+const selectedAccount = computed(() => availableAccounts.value.find(account => account.id === form.account_id))
+watch(monitoredAccounts, occupied => {
+  if (!props.show || !oauthOnly.value || !form.account_id || form.account_id === props.plan?.account_id || !occupied.has(form.account_id)) return
+  form.account_id = null
+  form.name = ''
+  accountSelectionError.value = t('intelligenceMonitor.oauth.alreadyAdded')
+})
 let accountController: AbortController | undefined
 function eligibleAccount(account: AccountListItem): boolean {
   const now = Date.now()
@@ -150,7 +158,7 @@ function eligibleAccount(account: AccountListItem): boolean {
     && !(account.auto_pause_on_expired && account.expires_at != null && account.expires_at * 1000 <= now)
 }
 function selectAccount(value: string | number | boolean | null) {
-  const account = oauthAccounts.value.find(item => item.id === value && eligibleAccount(item))
+  const account = availableAccounts.value.find(item => item.id === value && eligibleAccount(item))
   form.account_id = account?.id ?? null
   form.name = account?.name ?? ''
   accountSelectionError.value = account ? '' : t('intelligenceMonitor.oauth.unavailable')
@@ -175,7 +183,7 @@ async function loadAccounts() {
     oauthAccounts.value = [...accounts.values()].filter(eligibleAccount)
     accountsReady.value = true
     if (form.account_id) {
-      const account = oauthAccounts.value.find(item => item.id === form.account_id)
+      const account = availableAccounts.value.find(item => item.id === form.account_id)
       if (account) { form.name = account.name; accountSelectionError.value = '' }
       else { form.account_id = null; form.name = ''; accountSelectionError.value = t('intelligenceMonitor.oauth.unavailable') }
     }
@@ -246,14 +254,21 @@ async function save() {
   catch (err) {
     const detail = extractApiErrorMetadata(err)?.detail
     const detailText = typeof detail === 'string' ? detail.trim() : ''
-    error.value = extractApiErrorCode(err) === 'INTELLIGENCE_UPSTREAM_PLAN_EXISTS'
+    const code = extractApiErrorCode(err)
+    error.value = code === 'INTELLIGENCE_OAUTH_PLAN_EXISTS'
+      ? t('intelligenceMonitor.oauth.alreadyAdded')
+      : code === 'INTELLIGENCE_OAUTH_COOLING_DOWN'
+      ? t('intelligenceMonitor.oauth.cooldownHint')
+      : code === 'INTELLIGENCE_OAUTH_UNAVAILABLE'
+      ? t('intelligenceMonitor.oauth.unavailable')
+      : code === 'INTELLIGENCE_UPSTREAM_PLAN_EXISTS'
       ? t('intelligenceMonitor.groupMonitor.alreadyExists')
       : detailText === 'the selected account must support the fixed gpt-6-astra model without remapping'
       ? t('intelligenceMonitor.oauth.fixedModelRequired')
       : detailText === 'the selected OAuth account is disabled, paused, expired, rate limited or cooling down'
         ? t('intelligenceMonitor.oauth.unavailable')
       : detailText || extractApiErrorMessage(err,t('intelligenceMonitor.saveFailed'))
-    if (oauthOnly.value && extractApiErrorMetadata(err)?.field === 'account_id') void loadAccounts()
+    if (oauthOnly.value && (extractApiErrorMetadata(err)?.field === 'account_id' || code === 'INTELLIGENCE_OAUTH_UNAVAILABLE' || code === 'INTELLIGENCE_OAUTH_COOLING_DOWN')) void loadAccounts()
   }
   finally { saving.value=false }
 }

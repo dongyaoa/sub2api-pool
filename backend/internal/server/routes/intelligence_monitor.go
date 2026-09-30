@@ -13,6 +13,8 @@ func registerIntelligenceMonitorRoutes(admin *gin.RouterGroup, h *handler.Handle
 	group := admin.Group("/intelligence-monitors")
 	group.GET("/concurrency", api.GetConcurrency)
 	group.PUT("/concurrency", api.UpdateConcurrency)
+	group.GET("/public-display", api.GetPublicDisplay)
+	group.PUT("/public-display", api.UpdatePublicDisplay)
 	group.GET("/plans", api.ListPlans)
 	group.POST("/plans", api.CreatePlan)
 	group.PUT("/plans/order", api.SaveOrder)
@@ -22,4 +24,16 @@ func registerIntelligenceMonitorRoutes(admin *gin.RouterGroup, h *handler.Handle
 	group.POST("/plans/:id/candy/run", api.RunCandy)
 	group.GET("/runs", api.ListRuns)
 	group.GET("/runs/:id", api.GetRun)
+}
+
+// Register only beneath the authenticated user router, never public routes.
+func registerPublicPelicanRoutes(authenticated *gin.RouterGroup, h *handler.Handlers) {
+	if h == nil || h.Admin == nil || h.Admin.IntelligenceMonitor == nil {
+		return
+	}
+	api := h.Admin.IntelligenceMonitor
+	group := authenticated.Group("/pelican-monitor")
+	group.GET("/config", api.PublicPelicanConfig)
+	group.GET("", api.ListPublicPelican)
+	group.GET("/runs/:id", api.GetPublicPelicanRun)
 }

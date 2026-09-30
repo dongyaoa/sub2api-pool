@@ -4,6 +4,7 @@ import dashboard from './dashboard'
 import channelMonitorV2 from './channelMonitorV2'
 import upstreamCenter from './upstreamCenter'
 import intelligenceMonitor from './intelligenceMonitor'
+import pelicanMonitor from './pelicanMonitor'
 import admin from './admin'
 import misc from './misc'
 
@@ -14,6 +15,7 @@ export default {
   ...channelMonitorV2,
   ...upstreamCenter,
   ...intelligenceMonitor,
+  ...pelicanMonitor,
   admin,
   ...misc,
 }

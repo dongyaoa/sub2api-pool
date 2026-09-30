@@ -17,7 +17,7 @@ const oauthAccount = (id: number, name: string, fields: Record<string, unknown> 
 const page = (items: unknown[], number = 1, pages = 1) => ({ items, total: pages === 1 ? items.length : pages * 100, page: number, page_size: 100, pages })
 const savedPlan = (fields: Partial<IntelligencePlan> = {}) => ({ id: 3, name: 'OAuth Seven', source_type: 'openai_oauth', account_id: 7, api_mode: 'responses', enabled: true, interval_seconds: 3600, timeout_seconds: 900, supplier_note: '', group_note: '', rate_note: '', notes: '', ...fields }) as IntelligencePlan
 let wrapper: VueWrapper | undefined
-function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; localOnly: boolean; upstreamTargetId: number }> = {}) {
+function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; localOnly: boolean; upstreamTargetId: number; monitoredAccountIds: number[] }> = {}) {
   wrapper = mount(IntelligencePlanDialog, { attachTo: document.body, props: { show: true, plan: null, overview: null, oauthOnly: true, ...props }, global: { stubs: { BaseDialog: dialog, Icon: true, transition: true } } })
   return wrapper
 }
@@ -41,6 +41,36 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; vi.useRealTimers() })
 
 describe('OAuth intelligence plan dialog', () => {
+  it('excludes accounts with existing monitors but retains the current account while editing', async () => {
+    mocks.accounts.mockResolvedValue(page([oauthAccount(7, 'OAuth Seven'), oauthAccount(8, 'Available Eight')]))
+    const view = render({ monitoredAccountIds: [7] }); await flushPromises()
+    await view.get('#intelligence-oauth-account').trigger('click'); await flushPromises()
+    expect(document.body.querySelector('[role="listbox"]')!.textContent).not.toContain('OAuth Seven')
+    expect(document.body.querySelector('[role="listbox"]')!.textContent).toContain('Available Eight')
+    await view.get('#intelligence-oauth-account').trigger('click')
+    await view.setProps({ plan: savedPlan() }); await flushPromises()
+    expect(view.get('#intelligence-oauth-account').text()).toContain('OAuth Seven')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(3, expect.objectContaining({ account_id: 7 }))
+  })
+
+  it('clears an account that became occupied while the add dialog was open', async () => {
+    const view = render(); await flushPromises(); await selectOAuth(view)
+    await view.setProps({ monitoredAccountIds: [7] }); await flushPromises()
+    expect(view.get('#intelligence-oauth-account').text()).not.toContain('OAuth Seven')
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.oauth.alreadyAdded')
+    expect(view.text()).toContain('intelligenceMonitor.oauth.noAccounts')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it('explains a concurrent duplicate binding rejected by the server', async () => {
+    mocks.create.mockRejectedValueOnce({ reason: 'INTELLIGENCE_OAUTH_PLAN_EXISTS', message: 'Conflict' })
+    const view = render(); await flushPromises(); await selectOAuth(view)
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.oauth.alreadyAdded')
+    expect(view.emitted('close')).toBeUndefined()
+  })
   it('defaults the independent candy interval to three minutes and offers only 3/5/10/15 minutes', async () => {
     const view = render(); await flushPromises()
     await selectOAuth(view)
