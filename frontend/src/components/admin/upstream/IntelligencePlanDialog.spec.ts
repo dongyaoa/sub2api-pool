@@ -6,10 +6,10 @@ import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import Select from '@/components/common/Select.vue'
 import IntelligencePlanDialog from './IntelligencePlanDialog.vue'
 
-const mocks = vi.hoisted(() => ({ accounts: vi.fn(), groups: vi.fn(), create: vi.fn(), update: vi.fn(), keys: vi.fn() }))
+const mocks = vi.hoisted(() => ({ accounts: vi.fn(), account: vi.fn(), groups: vi.fn(), create: vi.fn(), update: vi.fn(), keys: vi.fn() }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { count?: number }) => params?.count === undefined ? key : `${key}:${params.count}` }) }))
 vi.mock('@/api/keys', () => ({ list: mocks.keys }))
-vi.mock('@/api/admin/accounts', () => ({ list: mocks.accounts }))
+vi.mock('@/api/admin/accounts', () => ({ list: mocks.accounts, getById: mocks.account }))
 vi.mock('@/api/admin/groups', () => ({ getAll: mocks.groups }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: { create: mocks.create, update: mocks.update }, PELICAN_MODEL: 'gpt-6-astra', PELICAN_REASONING: 'high', PELICAN_PROMPT: 'Pelican animation' }))
 const dialog = defineComponent({ props: ['show', 'title'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' })
@@ -17,7 +17,7 @@ const oauthAccount = (id: number, name: string, fields: Record<string, unknown> 
 const page = (items: unknown[], number = 1, pages = 1) => ({ items, total: pages === 1 ? items.length : pages * 100, page: number, page_size: 100, pages })
 const savedPlan = (fields: Partial<IntelligencePlan> = {}) => ({ id: 3, name: 'OAuth Seven', source_type: 'openai_oauth', account_id: 7, api_mode: 'responses', enabled: true, interval_seconds: 3600, timeout_seconds: 900, supplier_note: '', group_note: '', rate_note: '', notes: '', ...fields }) as IntelligencePlan
 let wrapper: VueWrapper | undefined
-function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; localOnly: boolean; upstreamTargetId: number; monitoredAccountIds: number[] }> = {}) {
+function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; oauthAccountId: number; localOnly: boolean; upstreamTargetId: number; monitoredAccountIds: number[] }> = {}) {
   wrapper = mount(IntelligencePlanDialog, { attachTo: document.body, props: { show: true, plan: null, overview: null, oauthOnly: true, ...props }, global: { stubs: { BaseDialog: dialog, Icon: true, transition: true } } })
   return wrapper
 }
@@ -33,6 +33,7 @@ async function selectOAuth(view: VueWrapper, name = 'OAuth Seven') { await selec
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.accounts.mockResolvedValue(page([oauthAccount(7, 'OAuth Seven')]))
+  mocks.account.mockResolvedValue(oauthAccount(7, 'Fresh OAuth Seven'))
   mocks.groups.mockResolvedValue([])
   mocks.keys.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, pages: 0 })
   mocks.create.mockResolvedValue({})
@@ -41,6 +42,132 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; vi.useRealTimers() })
 
 describe('OAuth intelligence plan dialog', () => {
+  it('loads only the fixed account and creates its default scheduled OAuth plan without a selector', async () => {
+    let resolveAccount!: (value: unknown) => void
+    mocks.account.mockReturnValueOnce(new Promise(resolve => { resolveAccount = resolve }))
+    const view = render({ oauthAccountId: 7 })
+    expect(mocks.account).toHaveBeenCalledWith(7)
+    expect(mocks.accounts).not.toHaveBeenCalled()
+    expect(mocks.groups).not.toHaveBeenCalled()
+    expect(view.find('#intelligence-oauth-account').exists()).toBe(false)
+    expect(view.find('#intelligence-name').exists()).toBe(false)
+    expect(view.find('#intelligence-upstream').exists()).toBe(false)
+    expect(view.find('#intelligence-api-mode').exists()).toBe(false)
+    expect(view.get('[role="status"]').text()).toBe('common.loading')
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await view.get('form').trigger('submit')
+    expect(mocks.create).not.toHaveBeenCalled()
+    resolveAccount(oauthAccount(7, 'Renamed in account management'))
+    await flushPromises()
+    expect(view.get('[data-testid="intelligence-locked-oauth"]').text()).toContain('Renamed in account management')
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    expect(view.get('#intelligence-enabled').attributes('aria-checked')).toBe('true')
+    expect(view.get('[data-interval="300"]').attributes('aria-pressed')).toBe('true')
+    expect(view.get('[data-timeout="600"]').attributes('aria-pressed')).toBe('true')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'openai_oauth', account_id: 7, name: '', api_mode: 'responses', enabled: true, interval_seconds: 300, timeout_seconds: 600, upstream_target_id: null, group_id: null, endpoint: undefined, api_key: undefined }))
+    expect(view.emitted('saved')).toHaveLength(1)
+  })
+
+  it('edits the fixed account existing plan while preserving settings and drafts during account refresh', async () => {
+    const plan = savedPlan({ enabled: false, interval_seconds: 75, timeout_seconds: 900, candy_enabled: true, candy_interval_seconds: 600, notes: 'Saved notes' })
+    const view = render({ oauthAccountId: 7, plan, monitoredAccountIds: [7] })
+    await flushPromises()
+    expect(view.get('[data-testid="intelligence-locked-oauth"]').text()).toContain('Fresh OAuth Seven')
+    expect(view.get('#intelligence-enabled').attributes('aria-checked')).toBe('false')
+    await view.get('#intelligence-notes').setValue('Unsaved notes')
+    mocks.account.mockResolvedValueOnce(oauthAccount(7, 'Latest account name'))
+    await view.get('[aria-label="intelligenceMonitor.refresh"]').trigger('click'); await flushPromises()
+    await view.setProps({ plan: { ...plan, notes: 'Polled notes' } })
+    expect(view.get('[data-testid="intelligence-locked-oauth"]').text()).toContain('Latest account name')
+    expect((view.get('#intelligence-notes').element as HTMLTextAreaElement).value).toBe('Unsaved notes')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ source_type: 'openai_oauth', account_id: 7, enabled: false, interval_seconds: 75, timeout_seconds: 900, candy_enabled: true, candy_interval_seconds: 600, notes: 'Unsaved notes' }))
+    expect(mocks.create).not.toHaveBeenCalled()
+    expect(mocks.accounts).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { status: 'inactive' }, { schedulable: false }, { platform: 'anthropic' }, { type: 'apikey' },
+    { parent_account_id: 1 }, { extra: { synthetic_ui_test: true } },
+    { auto_pause_on_expired: true, expires_at: 1 }, { rate_limit_reset_at: '2999-01-01T00:00:00Z' }
+  ])('keeps the fixed account visible and blocks saving when fresh data is unavailable: %j', async fields => {
+    mocks.account.mockResolvedValueOnce(oauthAccount(7, 'Unavailable fixed account', fields))
+    const view = render({ oauthAccountId: 7 }); await flushPromises()
+    expect(view.get('[data-testid="intelligence-locked-oauth"]').text()).toContain('Unavailable fixed account')
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.oauth.unavailable')
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+    expect(mocks.accounts).not.toHaveBeenCalled()
+    await view.get('[aria-label="intelligenceMonitor.refresh"]').trigger('click'); await flushPromises()
+    expect(view.find('[role="alert"]').exists()).toBe(false)
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 7 }))
+  })
+
+  it('keeps a fixed account when another plan occupies it, then allows retry after the binding is removed', async () => {
+    const view = render({ oauthAccountId: 7 }); await flushPromises()
+    await view.setProps({ monitoredAccountIds: [7] })
+    expect(view.get('[data-testid="intelligence-locked-oauth"]').text()).toContain('Fresh OAuth Seven')
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.oauth.alreadyAdded')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+    await view.setProps({ monitoredAccountIds: [] })
+    expect(view.find('[role="alert"]').exists()).toBe(false)
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 7 }))
+  })
+
+  it('ignores stale single-account responses after switching accounts or reopening the dialog', async () => {
+    let resolveOld!: (value: unknown) => void
+    mocks.account.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+    const view = render({ oauthAccountId: 7 })
+    mocks.account.mockResolvedValueOnce(oauthAccount(8, 'Current Eight'))
+    await view.setProps({ oauthAccountId: 8 }); await flushPromises()
+    resolveOld(oauthAccount(7, 'Stale Seven')); await flushPromises()
+    expect(view.get('[data-testid="intelligence-locked-oauth"]').text()).toContain('Current Eight')
+    expect(view.text()).not.toContain('Stale Seven')
+    let rejectClosed!: (reason: unknown) => void
+    mocks.account.mockReturnValueOnce(new Promise((_, reject) => { rejectClosed = reject }))
+    await view.get('[aria-label="intelligenceMonitor.refresh"]').trigger('click')
+    await view.setProps({ show: false })
+    mocks.account.mockResolvedValueOnce(oauthAccount(8, 'Reopened Eight'))
+    await view.setProps({ show: true }); await flushPromises()
+    rejectClosed(new Error('Cancelled request')); await flushPromises()
+    expect(view.get('[data-testid="intelligence-locked-oauth"]').text()).toContain('Reopened Eight')
+    expect(view.find('[role="alert"]').exists()).toBe(false)
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 8 }))
+    expect(mocks.accounts).not.toHaveBeenCalled()
+  })
+
+  it('retries only the fixed account after a load failure and refreshes it after server eligibility rejection', async () => {
+    mocks.account.mockRejectedValueOnce(new Error('Private account details'))
+    const view = render({ oauthAccountId: 7 }); await flushPromises()
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.oauth.loadFailed')
+    expect(view.text()).not.toContain('Private account details')
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await view.get('[aria-label="intelligenceMonitor.refresh"]').trigger('click'); await flushPromises()
+    mocks.create.mockRejectedValueOnce({ reason: 'INTELLIGENCE_OAUTH_UNAVAILABLE', message: 'Unavailable' })
+    mocks.account.mockResolvedValueOnce(oauthAccount(7, 'Newly paused', { schedulable: false }))
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.account).toHaveBeenCalledTimes(3)
+    expect(mocks.account.mock.calls.every(call => call[0] === 7)).toBe(true)
+    expect(mocks.accounts).not.toHaveBeenCalled()
+    expect(view.get('[data-testid="intelligence-locked-oauth"]').text()).toContain('Newly paused')
+    expect(view.text()).toContain('intelligenceMonitor.oauth.unavailable')
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect(view.emitted('close')).toBeUndefined()
+  })
+
+  it('never rebinds an unrelated edited plan to the fixed account', async () => {
+    const view = render({ oauthAccountId: 7, plan: savedPlan({ account_id: 8 }) }); await flushPromises()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.sourceMissing')
+  })
+
   it('excludes accounts with existing monitors but retains the current account while editing', async () => {
     mocks.accounts.mockResolvedValue(page([oauthAccount(7, 'OAuth Seven'), oauthAccount(8, 'Available Eight')]))
     const view = render({ monitoredAccountIds: [7] }); await flushPromises()

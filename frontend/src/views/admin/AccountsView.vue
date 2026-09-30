@@ -479,7 +479,8 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <UpstreamIntelligenceDialog v-if="pelicanMonitorAccount" :key="pelicanMonitorAccount.id" :account="pelicanMonitorAccount" :overview="null" @close="pelicanMonitorAccount = null" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @pelican-monitor="handlePelicanMonitor" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -509,7 +510,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -559,6 +560,8 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 import type { AccountRecentRequest } from '@/api/admin/accounts'
+
+const UpstreamIntelligenceDialog = defineAsyncComponent(() => import('@/components/admin/upstream/UpstreamIntelligenceDialog.vue'))
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -640,6 +643,7 @@ const statsAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
+const pelicanMonitorAccount = ref<Pick<Account, 'id' | 'name'> | null>(null)
 const togglingSchedulable = ref<number | null>(null)
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
@@ -1454,6 +1458,7 @@ const isAnyModalOpen = computed(() => {
     showTest.value ||
     showStats.value ||
     showSchedulePanel.value ||
+    !!pelicanMonitorAccount.value ||
     showErrorPassthrough.value ||
     showTLSFingerprintProfiles.value
   )
@@ -2404,6 +2409,11 @@ const handleSchedule = async (a: Account) => {
   }
 }
 const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
+const handlePelicanMonitor = (account: Account) => {
+  if (account.platform !== 'openai' || account.type !== 'oauth' || account.parent_account_id != null || account.extra?.synthetic_ui_test === true) return
+  menu.show = false
+  pelicanMonitorAccount.value = { id: account.id, name: account.name }
+}
 const handleReAuth = (a: Account) => { reAuthAcc.value = a; showReAuth.value = true }
 const duplicatingAccountIDs = new Set<number>()
 const handleDuplicateAccount = async (a: Account) => {

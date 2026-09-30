@@ -8,7 +8,14 @@
             <h3 class="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white" :title="plan.name">{{ plan.name }}</h3>
             <span class="shrink-0 whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-3" :class="sourceBadgeClass" :title="t(`intelligenceMonitor.source.${plan.source_type}`)">{{ oauth ? 'OAuth' : t(`intelligenceMonitor.source.${plan.source_type}`) }}</span>
           </div>
-          <p class="mt-1 truncate text-[11px] text-gray-500 dark:text-dark-400" :title="siteName">{{ siteName }}</p>
+          <div v-if="oauth" class="mt-1 flex items-start justify-between gap-2">
+            <p class="shrink-0 text-[11px] leading-4 text-gray-500 dark:text-dark-400">{{ siteName }}</p>
+            <div class="flex min-w-0 flex-wrap justify-end gap-1" role="group" :aria-label="t('intelligenceMonitor.oauth.groups')" data-testid="oauth-account-groups">
+              <span v-for="group in accountStatus?.groups || []" :key="group.id" class="max-w-full truncate rounded-md border border-sky-200/80 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium leading-3 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300" :title="group.name">{{ group.name }}</span>
+              <span v-if="!accountStatus?.groups?.length" class="rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] leading-3 text-gray-400 dark:border-dark-600 dark:bg-dark-900/40">{{ t(accountStatus?.groups ? 'intelligenceMonitor.oauth.ungrouped' : 'intelligenceMonitor.oauth.groupsUnknown') }}</span>
+            </div>
+          </div>
+          <p v-else class="mt-1 truncate text-[11px] text-gray-500 dark:text-dark-400" :title="siteName">{{ siteName }}</p>
         </div>
       </div>
       <p class="mt-2 truncate font-mono text-[10px] text-gray-400 dark:text-dark-400" :title="endpoint">{{ endpoint || '—' }}</p>

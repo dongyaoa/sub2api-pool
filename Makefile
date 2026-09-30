@@ -7,9 +7,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/admin.system.poolUpdate.spec.ts \
 	src/api/__tests__/admin.upstreamCenter.storage.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.candy.spec.ts \
+	src/api/__tests__/admin.intelligenceMonitor.account.spec.ts \
 	src/api/__tests__/pelicanMonitor.spec.ts \
 	src/components/common/__tests__/VersionBadge.spec.ts \
 	src/components/layout/__tests__/AppSidebar.spec.ts \
+	src/components/admin/account/__tests__/AccountActionMenu.pelican.spec.ts \
 	src/components/admin/upstream/IntelligenceArtifactPreview.spec.ts \
 	src/components/admin/upstream/IntelligenceHistoryDialog.spec.ts \
 	src/components/admin/upstream/IntelligencePlanCard.spec.ts \
@@ -38,6 +40,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/upstream/newapi.spec.ts \
 	src/components/admin/upstream/format.spec.ts \
 	src/views/admin/__tests__/UpstreamCenterView.order.spec.ts \
+	src/views/admin/__tests__/AccountsView.lite.spec.ts \
 	src/components/admin/upstream/intelligencePreview.spec.ts \
 	src/components/admin/upstream/intelligencePreviewRuntime.spec.ts \
 	src/stores/__tests__/app.spec.ts \

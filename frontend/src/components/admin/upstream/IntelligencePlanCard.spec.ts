@@ -16,6 +16,25 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it('updates all current OAuth group badges on refresh without remounting artworks', async () => {
+    const artwork = run(90)
+    const value = plan({ source_type: 'openai_oauth', latest_run: artwork, recent_runs: [artwork], oauth_account_status: { status: 'normal', monitoring_paused: false, groups: [{ id: 5, name: 'PLUS' }, { id: 8, name: 'Premium group with a long name' }] } })
+    const view = render(value)
+    const previewElement = view.get('.test-preview').element
+    const badges = view.get('aside [data-testid="oauth-account-groups"]')
+    expect(badges.findAll('span').map(item => item.text())).toEqual(['PLUS', 'Premium group with a long name'])
+    expect(badges.findAll('span')[1]!.attributes('title')).toBe('Premium group with a long name')
+    await view.setProps({ plan: { ...value, oauth_account_status: { status: 'normal', monitoring_paused: false, groups: [{ id: 8, name: 'Renamed group' }] } } })
+    expect(badges.text()).toBe('Renamed group')
+    expect(view.get('.test-preview').element).toBe(previewElement)
+    await view.setProps({ plan: { ...value, oauth_account_status: { status: 'normal', monitoring_paused: false, groups: [] } } })
+    expect(badges.text()).toBe('intelligenceMonitor.oauth.ungrouped')
+    await view.setProps({ plan: { ...value, oauth_account_status: undefined } })
+    expect(badges.text()).toBe('intelligenceMonitor.oauth.groupsUnknown')
+    await view.setProps({ plan: { ...value, source_type: 'external' } })
+    expect(view.find('[data-testid="oauth-account-groups"]').exists()).toBe(false)
+    view.unmount()
+  })
   it('shows weekly cooldown on the left, suspends both tests, and resumes without remounting artwork', async () => {
     const artwork = run(90)
     const value = plan({ source_type: 'openai_oauth', enabled: true, candy_enabled: true, latest_run: artwork, recent_runs: [artwork], next_run_at: new Date(Date.now() + 300000).toISOString(), candy_next_run_at: new Date(Date.now() + 180000).toISOString(), oauth_account_status: { status: 'weekly_limited', monitoring_paused: true, reset_at: '2026-10-02T00:00:00Z' } })

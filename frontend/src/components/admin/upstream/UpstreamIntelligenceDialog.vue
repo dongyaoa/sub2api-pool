@@ -1,10 +1,10 @@
 <template>
-  <BaseDialog :show="true" :title="t('intelligenceMonitor.groupMonitor.title', { name: target.name })" width="extra-wide" motion="fade" :close-on-escape="!childOpen" show-close-button @close="close">
+  <BaseDialog :show="true" :title="t(`${contextMessages}.title`, { name: contextName })" width="extra-wide" motion="fade" :close-on-escape="!childOpen" show-close-button @close="close">
     <div class="group-intelligence-content flex min-h-0 flex-col gap-4" data-testid="group-intelligence-content">
       <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
         <div class="flex min-w-0 flex-1 items-center gap-3">
           <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400"><Icon name="lightbulb" size="sm" /></div>
-          <div class="min-w-0"><p class="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{{ target.name }}</p><p class="mt-0.5 truncate font-mono text-[10px] text-gray-400" :title="target.endpoint">{{ target.endpoint }}</p></div>
+          <div class="min-w-0"><p class="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{{ contextName }}</p><p class="mt-0.5 truncate text-[10px] text-gray-400" :class="!account && 'font-mono'" :title="contextHint">{{ contextHint }}</p></div>
         </div>
         <div class="flex shrink-0 items-center gap-3">
           <span class="hidden text-[11px] text-gray-400 sm:inline">{{ PELICAN_MODEL }} · {{ PELICAN_REASONING }}</span>
@@ -19,15 +19,15 @@
         </div>
         <div v-else-if="loaded && !error" class="flex min-h-full flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 px-6 py-6 text-center dark:border-dark-700" data-testid="group-intelligence-empty">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-500 dark:bg-primary-500/10"><Icon name="lightbulb" size="xl" /></div>
-          <h4 class="text-sm font-semibold text-gray-800 dark:text-gray-100">{{ t('intelligenceMonitor.groupMonitor.emptyTitle') }}</h4>
-          <p class="mt-2 max-w-md text-xs leading-6 text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.groupMonitor.emptyHint') }}</p>
+          <h4 class="text-sm font-semibold text-gray-800 dark:text-gray-100">{{ t(`${contextMessages}.emptyTitle`) }}</h4>
+          <p class="mt-2 max-w-md text-xs leading-6 text-gray-500 dark:text-dark-400">{{ t(`${contextMessages}.emptyHint`) }}</p>
           <button type="button" class="btn btn-primary btn-sm mt-4" :disabled="loading" data-testid="group-intelligence-create" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5" />{{ t('intelligenceMonitor.groupMonitor.create') }}</button>
         </div>
       </div>
-      <div class="flex shrink-0 flex-wrap justify-between gap-2 text-[10px] leading-5 text-gray-400 dark:text-dark-400"><span>{{ t('intelligenceMonitor.groupMonitor.sharedHint') }}</span><span>{{ t('intelligenceMonitor.retention') }}</span></div>
+      <div class="flex shrink-0 flex-wrap justify-between gap-2 text-[10px] leading-5 text-gray-400 dark:text-dark-400"><span>{{ t(`${contextMessages}.sharedHint`) }}</span><span>{{ t('intelligenceMonitor.retention') }}</span></div>
     </div>
   </BaseDialog>
-  <IntelligencePlanDialog v-if="editor" :show="true" :plan="editing" :overview="overview" :upstream-target-id="target.id" @close="closeEditor" @saved="saved" />
+  <IntelligencePlanDialog v-if="editor" :show="true" :plan="editing" :overview="overview" :upstream-target-id="account ? undefined : target?.id" :oauth-only="!!account" :oauth-account-id="account?.id" @close="closeEditor" @saved="saved" />
   <IntelligenceHistoryDialog v-if="history" :show="true" :plan="selectedPlan" :initial-run-id="selectedRunID" @close="history = false" />
   <IntelligenceCandyDetailDialog v-if="selectedCandyRun" :run="selectedCandyRun" @close="selectedCandy = null" />
   <UpstreamDeleteDialog v-if="archiving" :show="true" :item="{ kind: 'intelligence', id: archiving.id, name: archiving.name }" :busy="deleting" :error="deleteError" @close="!deleting && (archiving = null)" @confirm="archive" />
@@ -40,9 +40,10 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { intelligenceMonitorAPI, PELICAN_MODEL, PELICAN_REASONING, type IntelligencePlan, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { upstreamCenterAPI, type UpstreamOverview, type UpstreamTarget } from '@/api/admin/upstreamCenter'
+import type { Account } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { useMonitorRefresh } from '@/composables/useMonitorRefresh'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import IntelligencePlanCard from './IntelligencePlanCard.vue'
 import IntelligencePlanDialog from './IntelligencePlanDialog.vue'
 import IntelligenceHistoryDialog from './IntelligenceHistoryDialog.vue'
@@ -52,11 +53,15 @@ import UpstreamDeleteDialog from './UpstreamDeleteDialog.vue'
 import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
 import { reconcileMonitorData } from './monitorReconcile'
 
-const props = defineProps<{ target: UpstreamTarget; overview: UpstreamOverview | null }>()
+// Both entry points operate on the original plan, including its schedule and history.
+const props = defineProps<{ target?: UpstreamTarget; account?: Pick<Account, 'id' | 'name'>; overview: UpstreamOverview | null }>()
 const emit = defineEmits<{ close: []; changed: []; refreshOverview: [] }>()
 const { t } = useI18n()
 const app = useAppStore()
 const plans = ref<IntelligencePlan[]>([]), loaded = ref(false), error = ref('')
+const contextMessages = computed(() => props.account ? 'intelligenceMonitor.accountMonitor' : 'intelligenceMonitor.groupMonitor')
+const contextName = computed(() => props.account ? plans.value[0]?.source_name || props.account.name : props.target?.name || '')
+const contextHint = computed(() => props.account ? t('intelligenceMonitor.source.openai_oauth') : props.target?.endpoint || '')
 const busy = ref(new Set<number>()), closed = ref(false), previewRefresh = ref(0)
 const editor = ref(false), editing = ref<IntelligencePlan | null>(null)
 const history = ref(false), selectedID = ref<number | null>(null), selectedRunID = ref<number | null>(null)
@@ -72,14 +77,18 @@ const selectedCandyRun = computed(() => {
 })
 let disposed = false
 const live = () => !disposed && !closed.value
-const belongs = (plan: IntelligencePlan) => plan.source_type === 'upstream' && plan.upstream_target_id === props.target.id
+const belongs = (plan: IntelligencePlan) => props.account
+  ? plan.source_type === 'openai_oauth' && plan.account_id === props.account.id
+  : plan.source_type === 'upstream' && plan.upstream_target_id === props.target?.id
 provide(intelligencePanelActiveKey, computed(() => !closed.value))
 provide(intelligencePreviewRefreshKey, previewRefresh)
 
 const { loading, refresh } = useMonitorRefresh({
   active: () => !closed.value,
   intervalMs: () => intelligenceRefreshInterval(plans.value),
-  request: signal => intelligenceMonitorAPI.plans(signal, props.target.id),
+  request: signal => props.account
+    ? intelligenceMonitorAPI.plansForOAuthAccount(props.account.id, signal)
+    : intelligenceMonitorAPI.plans(signal, props.target?.id),
   apply: result => {
     if (!live()) return
     plans.value = reconcileMonitorData(plans.value, (result.items || []).filter(belongs))
@@ -96,7 +105,7 @@ function close() {
 function manualRefresh() {
   if (!live()) return
   previewRefresh.value++
-  emit('refreshOverview')
+  if (!props.account) emit('refreshOverview')
   void refresh()
 }
 function openEditor(plan: IntelligencePlan | null = null) {
@@ -149,13 +158,19 @@ async function action(plan: IntelligencePlan, callback: () => Promise<void>) {
     previewRefresh.value++
     await refresh()
   } catch (cause) {
-    if (live()) app.showError(extractApiErrorMessage(cause, t('intelligenceMonitor.actionFailed')))
+    if (live()) {
+      const code = extractApiErrorCode(cause)
+      const paused = code === 'INTELLIGENCE_OAUTH_COOLING_DOWN' || code === 'INTELLIGENCE_OAUTH_UNAVAILABLE'
+      app.showError(paused ? t(code === 'INTELLIGENCE_OAUTH_COOLING_DOWN' ? 'intelligenceMonitor.oauth.cooldownHint' : 'intelligenceMonitor.oauth.unavailableHint') : extractApiErrorMessage(cause, t('intelligenceMonitor.actionFailed')))
+      if (paused) await refresh()
+    }
   } finally {
     if (live()) { const next = new Set(busy.value); next.delete(plan.id); busy.value = next }
   }
 }
 function run(plan: IntelligencePlan) {
-  if (isIntelligenceRunActive((plans.value.find(item => item.id === plan.id) || plan).latest_run)) return
+  const current = plans.value.find(item => item.id === plan.id) || plan
+  if (current.oauth_account_status?.monitoring_paused || isIntelligenceRunActive(current.latest_run)) return
   void action(plan, async () => {
     const queued = await intelligenceMonitorAPI.run(plan.id)
     if (!live()) return
@@ -165,7 +180,7 @@ function run(plan: IntelligencePlan) {
 }
 function runCandy(plan: IntelligencePlan) {
   const current = plans.value.find(item => item.id === plan.id)
-  if (!current?.candy_enabled || isIntelligenceRunActive(current.candy_latest_run)) return
+  if (!current?.candy_enabled || current.oauth_account_status?.monitoring_paused || isIntelligenceRunActive(current.candy_latest_run)) return
   void action(plan, async () => {
     const queued = await intelligenceMonitorAPI.runCandy(plan.id)
     if (!live()) return
@@ -174,8 +189,10 @@ function runCandy(plan: IntelligencePlan) {
   })
 }
 function toggle(plan: IntelligencePlan) {
+  const current = plans.value.find(item => item.id === plan.id) || plan
+  if (!current.enabled && current.oauth_account_status?.monitoring_paused) return
   void action(plan, async () => {
-    const updated = await intelligenceMonitorAPI.update(plan.id, { enabled: !plan.enabled })
+    const updated = await intelligenceMonitorAPI.update(plan.id, { enabled: !current.enabled })
     if (!live()) return
     plans.value = plans.value.map(item => item.id === plan.id ? { ...item, enabled: updated.enabled, next_run_at: updated.next_run_at, candy_next_run_at: updated.candy_next_run_at } : item)
   })

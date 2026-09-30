@@ -6,17 +6,19 @@
       <div v-if="!oauthOnly && !lockedUpstream && !localOnly"><label class="input-label">{{ t('intelligenceMonitor.form.source') }}</label><div class="grid gap-2" :class="sources.length > 2 ? 'grid-cols-3' : 'grid-cols-2'"><button v-for="source in sources" :key="source.value" type="button" class="flex items-center justify-center gap-2 rounded-xl border px-2 py-3 text-xs font-medium transition-colors" :class="form.source_type === source.value ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-600 dark:bg-primary-500/10 dark:text-primary-300' : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-dark-600 dark:text-dark-300'" :aria-pressed="form.source_type === source.value" @click="form.source_type = source.value"><Icon :name="source.icon" size="sm"/>{{ t(`intelligenceMonitor.source.${source.value}`) }}</button></div></div>
       <div v-if="oauthOnly" class="space-y-3">
         <div class="flex items-center gap-2"><span class="rounded-md bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-600 dark:bg-violet-500/10 dark:text-violet-300">OpenAI OAuth</span><span class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.nameHint') }}</span></div>
-        <label class="input-label" for="intelligence-oauth-account">{{ t('intelligenceMonitor.oauth.select') }}</label>
+        <p v-if="lockedOAuth" id="intelligence-oauth-account-label" class="input-label">{{ t('intelligenceMonitor.oauth.account') }}</p>
+        <label v-else class="input-label" for="intelligence-oauth-account">{{ t('intelligenceMonitor.oauth.select') }}</label>
         <div class="flex gap-2">
-          <Select id="intelligence-oauth-account" :model-value="form.account_id" class="oauth-account-select min-w-0 flex-1" :class="selectedAccount && 'oauth-account-selected'" :options="accountOptions" :searchable="false" :loading="accountsLoading" :disabled="accountsLoading || saving" :error="Boolean(accountError || accountSelectionError)" :placeholder="t(accountsLoading ? 'common.loading' : 'intelligenceMonitor.oauth.select')" :empty-text="t(accountError ? 'intelligenceMonitor.oauth.loadFailed' : 'intelligenceMonitor.oauth.noAccounts')" :aria-label="t('intelligenceMonitor.oauth.select')" aria-describedby="intelligence-oauth-hint" @update:model-value="selectAccount">
+          <div v-if="lockedOAuth" data-testid="intelligence-locked-oauth" role="group" aria-labelledby="intelligence-oauth-account-label" class="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-violet-100 bg-violet-50/50 px-3 py-2.5 dark:border-violet-900/50 dark:bg-violet-500/5"><span class="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-gray-100">{{ lockedAccount?.name || (plan && plan.account_id === oauthAccountId ? plan.name : '') || t(accountsLoading ? 'common.loading' : 'intelligenceMonitor.sourceMissing') }}</span><span class="shrink-0 text-xs tabular-nums text-gray-500">#{{ oauthAccountId }}</span></div>
+          <Select v-else id="intelligence-oauth-account" :model-value="form.account_id" class="oauth-account-select min-w-0 flex-1" :class="selectedAccount && 'oauth-account-selected'" :options="accountOptions" :searchable="false" :loading="accountsLoading" :disabled="accountsLoading || saving" :error="Boolean(accountError || accountSelectionError)" :placeholder="t(accountsLoading ? 'common.loading' : 'intelligenceMonitor.oauth.select')" :empty-text="t(accountError ? 'intelligenceMonitor.oauth.loadFailed' : 'intelligenceMonitor.oauth.noAccounts')" :aria-label="t('intelligenceMonitor.oauth.select')" aria-describedby="intelligence-oauth-hint" @update:model-value="selectAccount">
             <template #selected="{ option }"><span class="flex min-w-0 items-center gap-2"><span class="truncate">{{ option?.label || t(accountsLoading ? 'common.loading' : 'intelligenceMonitor.oauth.select') }}</span><span v-if="option" class="shrink-0 text-[10px] font-medium text-emerald-600 dark:text-emerald-300">OAuth</span></span></template>
             <template #option="{ option, selected }"><span class="intelligence-oauth-option -mx-4 -my-2.5 flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-2.5" :class="selected && 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'"><span class="truncate">{{ option.label }}</span><Icon v-if="selected" name="check" size="sm" class="shrink-0 text-emerald-600 dark:text-emerald-300"/><span v-else class="shrink-0 text-[10px] text-violet-500">OAuth</span></span></template>
           </Select>
           <button type="button" class="btn btn-secondary btn-sm" :disabled="accountsLoading || saving" :aria-label="t('intelligenceMonitor.refresh')" @click="loadAccounts"><Icon name="refresh" size="sm" :class="accountsLoading && 'animate-spin'"/></button>
         </div>
-        <p v-if="accountsLoading" role="status" class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.loading') }}</p>
-        <p v-else-if="accountsReady && !availableAccounts.length" class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.noAccounts') }}</p>
-        <p id="intelligence-oauth-hint" class="text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.oauth.hint') }}</p><p v-if="accountError || accountSelectionError" role="alert" class="text-xs text-rose-500">{{ accountError || accountSelectionError }}</p>
+        <p v-if="accountsLoading" role="status" class="text-xs text-gray-500">{{ t(lockedOAuth ? 'common.loading' : 'intelligenceMonitor.oauth.loading') }}</p>
+        <p v-else-if="!lockedOAuth && accountsReady && !availableAccounts.length" class="text-xs text-gray-500">{{ t('intelligenceMonitor.oauth.noAccounts') }}</p>
+        <p v-if="!lockedOAuth" id="intelligence-oauth-hint" class="text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.oauth.hint') }}</p><p v-if="accountError || accountSelectionError" role="alert" class="text-xs text-rose-500">{{ accountError || accountSelectionError }}</p>
       </div>
       <div v-else-if="lockedUpstream" data-testid="intelligence-locked-upstream" class="rounded-xl border border-primary-100 bg-primary-50/50 p-4 dark:border-primary-900/50 dark:bg-primary-500/5">
         <div class="mb-3 flex items-center gap-2 text-xs font-medium text-primary-600 dark:text-primary-300"><Icon name="server" size="sm"/>{{ t('intelligenceMonitor.source.upstream') }}</div>
@@ -65,7 +67,7 @@
       <details class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900/50"><summary class="cursor-pointer text-xs font-medium text-gray-500">{{ t('intelligenceMonitor.prompt') }}</summary><p class="mt-2 text-xs leading-6 text-gray-600 dark:text-dark-300">{{ PELICAN_PROMPT }}</p></details>
       <p v-if="error" role="alert" class="rounded-lg bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">{{ error }}</p>
     </form>
-    <template #footer><div class="flex justify-end gap-3"><button type="button" class="btn btn-secondary" :disabled="saving" @click="close">{{ t('common.cancel') }}</button><button type="submit" form="intelligence-plan-form" class="btn btn-primary" :disabled="saving || (oauthOnly && (accountsLoading || !accountsReady))">{{ t(saving ? 'intelligenceMonitor.form.saving' : 'intelligenceMonitor.form.save') }}</button></div></template>
+    <template #footer><div class="flex justify-end gap-3"><button type="button" class="btn btn-secondary" :disabled="saving" @click="close">{{ t('common.cancel') }}</button><button type="submit" form="intelligence-plan-form" class="btn btn-primary" :disabled="saving || (oauthOnly && (accountsLoading || !accountsReady || (lockedOAuth && Boolean(accountSelectionError))))">{{ t(saving ? 'intelligenceMonitor.form.saving' : 'intelligenceMonitor.form.save') }}</button></div></template>
   </BaseDialog>
 </template>
 <script setup lang="ts">
@@ -79,16 +81,17 @@ import { intelligenceMonitorAPI, PELICAN_MODEL, PELICAN_REASONING, PELICAN_PROMP
 import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import { getAll } from '@/api/admin/groups'
 import type { AdminGroup, AccountListItem } from '@/types'
-import { list as listAccounts } from '@/api/admin/accounts'
+import { getById as getAccount, list as listAccounts } from '@/api/admin/accounts'
 import { extractApiErrorCode, extractApiErrorMessage, extractApiErrorMetadata } from '@/utils/apiError'
 import { intelligenceRateLabel } from './intelligencePreview'
 import { domain } from './format'
 import IntelligenceLocalSource from './IntelligenceLocalSource.vue'
-const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; localOnly?: boolean; managedKeyIds?: number[]; monitoredAccountIds?: number[]; upstreamTargetId?: number }>()
+const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; oauthAccountId?: number; localOnly?: boolean; managedKeyIds?: number[]; monitoredAccountIds?: number[]; upstreamTargetId?: number }>()
 const emit = defineEmits<{ close: []; saved: [plan?: IntelligencePlan] }>()
 const { t } = useI18n()
 const lockedUpstream = computed(() => props.upstreamTargetId !== undefined)
 const oauthOnly = computed(() => Boolean(props.oauthOnly && !lockedUpstream.value))
+const lockedOAuth = computed(() => oauthOnly.value && props.oauthAccountId !== undefined)
 const localOnly = computed(() => Boolean(props.localOnly && !lockedUpstream.value && !oauthOnly.value))
 const localSource = ref<InstanceType<typeof IntelligenceLocalSource> | null>(null)
 const candyIntervals = [180, 300, 600, 900]
@@ -143,8 +146,14 @@ const monitoredAccounts = computed(() => new Set(props.monitoredAccountIds || []
 const availableAccounts = computed(() => oauthAccounts.value.filter(account => account.id === props.plan?.account_id || !monitoredAccounts.value.has(account.id)))
 const accountOptions = computed(() => availableAccounts.value.map(account => ({ value: account.id, label: account.name })))
 const selectedAccount = computed(() => availableAccounts.value.find(account => account.id === form.account_id))
+const lockedAccount = computed(() => oauthAccounts.value.find(account => account.id === props.oauthAccountId))
 watch(monitoredAccounts, occupied => {
-  if (!props.show || !oauthOnly.value || !form.account_id || form.account_id === props.plan?.account_id || !occupied.has(form.account_id)) return
+  if (!props.show || !oauthOnly.value || !form.account_id || form.account_id === props.plan?.account_id) return
+  if (lockedOAuth.value) {
+    accountSelectionError.value = occupied.has(form.account_id) ? t('intelligenceMonitor.oauth.alreadyAdded') : !lockedAccount.value || !eligibleAccount(lockedAccount.value) ? t('intelligenceMonitor.oauth.unavailable') : ''
+    return
+  }
+  if (!occupied.has(form.account_id)) return
   form.account_id = null
   form.name = ''
   accountSelectionError.value = t('intelligenceMonitor.oauth.alreadyAdded')
@@ -158,6 +167,7 @@ function eligibleAccount(account: AccountListItem): boolean {
     && !(account.auto_pause_on_expired && account.expires_at != null && account.expires_at * 1000 <= now)
 }
 function selectAccount(value: string | number | boolean | null) {
+  if (lockedOAuth.value) return
   const account = availableAccounts.value.find(item => item.id === value && eligibleAccount(item))
   form.account_id = account?.id ?? null
   form.name = account?.name ?? ''
@@ -168,6 +178,22 @@ async function loadAccounts() {
   accountController?.abort()
   const current = new AbortController(); accountController = current; accountsLoading.value = true; accountsReady.value = false; accountError.value = ''
   try {
+    if (lockedOAuth.value) {
+      const id = props.oauthAccountId!
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        oauthAccounts.value = []; accountsReady.value = true; accountSelectionError.value = t('intelligenceMonitor.oauth.unavailable')
+        return
+      }
+      const account = await getAccount(id)
+      if (current.signal.aborted) return
+      oauthAccounts.value = account.id === id ? [account] : []
+      accountsReady.value = true
+      form.name = lockedAccount.value?.name || ''
+      accountSelectionError.value = monitoredAccounts.value.has(id) && id !== props.plan?.account_id
+        ? t('intelligenceMonitor.oauth.alreadyAdded')
+        : !lockedAccount.value || !eligibleAccount(lockedAccount.value) ? t('intelligenceMonitor.oauth.unavailable') : ''
+      return
+    }
     const accounts = new Map<number, AccountListItem>()
     let page = 1
     while (!current.signal.aborted) {
@@ -193,7 +219,7 @@ async function loadAccounts() {
 let generation = 0
 function cancelLoading() { generation++; accountController?.abort(); accountsLoading.value = false; groupsLoading.value = false }
 function close() { if (!saving.value) { cancelLoading(); emit('close') } }
-watch([() => props.show, () => props.upstreamTargetId, () => props.plan?.id, () => props.localOnly, () => props.oauthOnly], async ([show]) => {
+watch([() => props.show, () => props.upstreamTargetId, () => props.plan?.id, () => props.localOnly, () => props.oauthOnly, () => props.oauthAccountId], async ([show]) => {
   cancelLoading()
   if (!show) return
   const current = generation
@@ -203,6 +229,7 @@ watch([() => props.show, () => props.upstreamTargetId, () => props.plan?.id, () 
   // Existing managed keys remain automatic; explicit administrator keys retain their binding.
   form.local_api_key_id = props.plan?.local_api_key_managed ? null : props.plan?.local_api_key_id ?? null
   if (localOnly.value) { form.source_type = 'local_group'; form.account_id = null; form.upstream_target_id = null }
+  if (lockedOAuth.value) { form.source_type = 'openai_oauth'; form.account_id = props.oauthAccountId; form.upstream_target_id = null; form.group_id = null; form.local_api_key_id = null }
   if (lockedUpstream.value) {
     form.source_type = 'upstream'
     form.upstream_target_id = props.upstreamTargetId
@@ -231,11 +258,21 @@ async function save() {
     if (!selectedTarget.value) { error.value = t('intelligenceMonitor.sourceMissing'); return }
   }
   if (oauthOnly.value && (accountsLoading.value || !accountsReady.value)) return
+  if (lockedOAuth.value) {
+    form.source_type = 'openai_oauth'
+    form.account_id = props.oauthAccountId
+    if (props.plan && (props.plan.source_type !== 'openai_oauth' || props.plan.account_id !== props.oauthAccountId)) { error.value = t('intelligenceMonitor.sourceMissing'); return }
+    if (accountSelectionError.value) return
+  }
   if (localOnly.value) form.source_type = 'local_group'
   if (form.source_type === 'local_group' && !localSource.value?.validate()) return
   if (!oauthOnly.value && !form.name.trim()) { error.value=t('intelligenceMonitor.form.requiredName'); return }
   if ((oauthOnly.value && !form.account_id) || (form.source_type==='upstream' && !form.upstream_target_id) || (form.source_type==='local_group' && !form.group_id)) { error.value=t('intelligenceMonitor.form.requiredSource'); return }
-  if (oauthOnly.value && (!selectedAccount.value || !eligibleAccount(selectedAccount.value))) { form.account_id = null; form.name = ''; accountSelectionError.value = t('intelligenceMonitor.oauth.unavailable'); return }
+  if (oauthOnly.value && (!selectedAccount.value || !eligibleAccount(selectedAccount.value))) {
+    if (!lockedOAuth.value) { form.account_id = null; form.name = '' }
+    accountSelectionError.value = t('intelligenceMonitor.oauth.unavailable')
+    return
+  }
   if (intervalChoice.value === 'custom') {
     const text = customInterval.value.trim()
     const seconds = Number(text)

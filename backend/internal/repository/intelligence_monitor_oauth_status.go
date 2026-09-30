@@ -18,17 +18,26 @@ func (r *intelligenceMonitorRepository) LoadOAuthMonitorAccounts(ctx context.Con
 	}
 	// Identity fields are sufficient to reject a usage snapshot from a previous
 	// OAuth identity. Never load access/refresh tokens for gallery polling.
-	rows, err := r.db.QueryContext(ctx, `SELECT id,name,platform,type,status,schedulable,expires_at,auto_pause_on_expired,parent_account_id,rate_limit_reset_at,temp_unschedulable_until,COALESCE(temp_unschedulable_reason,''),extra,
-jsonb_build_object('email',credentials->'email','chatgpt_account_id',credentials->'chatgpt_account_id','workspace_id',credentials->'workspace_id','chatgpt_workspace_id',credentials->'chatgpt_workspace_id','organization_id',credentials->'organization_id','org_id',credentials->'org_id')
-FROM accounts WHERE id=ANY($1) AND deleted_at IS NULL`, pq.Array(ids))
+	// Group names and membership come from this same current snapshot; do not
+	// reuse the historical run's group or omit an inactive but still-bound group.
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id,a.name,a.platform,a.type,a.status,a.schedulable,a.expires_at,a.auto_pause_on_expired,a.parent_account_id,a.rate_limit_reset_at,a.temp_unschedulable_until,COALESCE(a.temp_unschedulable_reason,''),a.extra,
+jsonb_build_object('email',a.credentials->'email','chatgpt_account_id',a.credentials->'chatgpt_account_id','workspace_id',a.credentials->'workspace_id','chatgpt_workspace_id',a.credentials->'chatgpt_workspace_id','organization_id',a.credentials->'organization_id','org_id',a.credentials->'org_id'),
+COALESCE(membership.groups,'[]'::jsonb)
+FROM accounts a
+LEFT JOIN (
+ SELECT ag.account_id,jsonb_agg(jsonb_build_object('id',g.id,'name',g.name) ORDER BY g.id) AS groups
+ FROM account_groups ag JOIN groups g ON g.id=ag.group_id AND g.deleted_at IS NULL
+ WHERE ag.account_id=ANY($1) GROUP BY ag.account_id
+) membership ON membership.account_id=a.id
+WHERE a.id=ANY($1) AND a.deleted_at IS NULL`, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		account := new(service.Account)
-		var extra, identity []byte
-		if err := rows.Scan(&account.ID, &account.Name, &account.Platform, &account.Type, &account.Status, &account.Schedulable, &account.ExpiresAt, &account.AutoPauseOnExpired, &account.ParentAccountID, &account.RateLimitResetAt, &account.TempUnschedulableUntil, &account.TempUnschedulableReason, &extra, &identity); err != nil {
+		var extra, identity, groups []byte
+		if err := rows.Scan(&account.ID, &account.Name, &account.Platform, &account.Type, &account.Status, &account.Schedulable, &account.ExpiresAt, &account.AutoPauseOnExpired, &account.ParentAccountID, &account.RateLimitResetAt, &account.TempUnschedulableUntil, &account.TempUnschedulableReason, &extra, &identity, &groups); err != nil {
 			return nil, err
 		}
 		if len(extra) > 0 {
@@ -37,6 +46,9 @@ FROM accounts WHERE id=ANY($1) AND deleted_at IS NULL`, pq.Array(ids))
 			}
 		}
 		if err := json.Unmarshal(identity, &account.Credentials); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(groups, &account.Groups); err != nil {
 			return nil, err
 		}
 		out[account.ID] = account

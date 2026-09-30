@@ -23,6 +23,10 @@
               <Icon name="clock" size="sm" class="text-orange-500" />
               {{ t('admin.scheduledTests.schedule') }}
             </button>
+            <button v-if="canOpenPelicanMonitor" @click="$emit('pelican-monitor', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700" data-testid="account-pelican-monitor">
+              <Icon name="lightbulb" size="sm" class="text-violet-500" />
+              {{ t('intelligenceMonitor.accountMonitor.entry') }}
+            </button>
             <button v-if="canDuplicate" @click="$emit('duplicate', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="copy" size="sm" class="text-sky-500" />
               {{ t('admin.accounts.duplicateAccount') }}
@@ -70,7 +74,7 @@ import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 
 const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null }>()
-const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
+const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'pelican-monitor', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
 const { t } = useI18n()
 const menuRef = ref<HTMLElement | null>(null)
 const { width: viewportWidth, height: viewportHeight } = useWindowSize()
@@ -133,6 +137,8 @@ const isOpenAIOAuth = computed(() => props.account?.platform === 'openai' && pro
 const isShadow = computed(() => props.account?.parent_account_id != null)
 // A "parent" OpenAI OAuth account is one that is NOT itself a shadow (parent_account_id == null)
 const isOpenAIOAuthParent = computed(() => isOpenAIOAuth.value && !isShadow.value)
+// History remains available when the real account is paused or rate-limited.
+const canOpenPelicanMonitor = computed(() => isOpenAIOAuthParent.value && props.account?.extra?.synthetic_ui_test !== true)
 const supportsPrivacy = computed(() => (isAntigravityOAuth.value || isOpenAIOAuth.value) && !isShadow.value)
 const hasQuotaLimit = computed(() => {
   return (props.account?.type === 'apikey' || props.account?.type === 'bedrock') && (

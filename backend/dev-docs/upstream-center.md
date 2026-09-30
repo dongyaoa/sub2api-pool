@@ -149,13 +149,15 @@ New API 不提供可靠的 Key 级完整今日费用接口，最近日志的条�
 
 ### OAuth 执行
 
+账号管理的「鹈鹕监测」入口与上游分组弹窗复用卡片、作品详情和刷新逻辑；OAuth 入口调用 `GET /api/v1/admin/intelligence-monitors/plans?account_id=<正整数>`，数据库先按 `source_type='openai_oauth'`、`account_id` 与未删除状态筛选，再批量补充历史及当前账号状态。空、重复或非法参数以及同时传入 `upstream_target_id` 返回 400。该接口仍受管理员权限保护，不复制计划与作品；包含暂停和旧版重复计划。固定账号创建继续使用原保存接口及事务去重锁。利用已有账号索引，无新增表或迁移。
+
 OAuth 来源为 `openai_oauth`，迁移 `246_intelligence_monitor_oauth.sql` 加入 `account_id`。管理员选择站内已有 OpenAI OAuth 账号，名称跟随账号当前名称，运行快照保存当次名称与账号。服务端校验账号类型、固定模型能力、未重映射以及执行时可调度状态，拒绝影子/合成测试账号。
 
 执行直接指定该账号传入正常 OpenAI OAuth gateway `Forward`，复用 Token 获取/刷新和代理配置，先获取账号与所选代理的并发槽；不可用代理排除后再选择，槽不可用则失败。没有按分组随机路由或自动改用其他账号的行为。超时/取消会结束后台请求；不把一次中断任务自动重发以避免重复费用。
 
 OAuth 计划通过现有 membership 事务锁约束同一 `account_id` 只能新绑定一份未归档计划（包含暂停计划），冲突返回 `INTELLIGENCE_OAUTH_PLAN_EXISTS`。旧版本已存在的重复计划可原位编辑或暂停，不自动删除；归档释放对应绑定。
 
-管理员计划列表通过单次批量账号投影附加 `oauth_account_status`，仅返回 `status`、`monitoring_paused`、可用的 `reset_at` 与 `weekly_used_percent`，不加载访问／刷新 Token。状态判断复用网关的规范化 7 天额度窗口及身份匹配规则，兼容 primary/secondary 窗口互换和显式 7 天阈值冷却，忽略普通 429 和 5 小时额度作为周限额证据。入队及实际转发前重新校验，周限额冷却返回 `INTELLIGENCE_OAUTH_COOLING_DOWN`，两种测试均停止新入队；缺失、停用、过期或来源无效的账号返回 `INTELLIGENCE_OAUTH_UNAVAILABLE` 并同样推迟复查，避免重复失败记录。
+管理员计划列表通过单次批量账号投影附加 `oauth_account_status`，仅返回 `status`、`monitoring_paused`、可用的 `reset_at`、`weekly_used_percent` 与当前 `groups`（仅 ID、名称），不加载访问／刷新 Token。分组根据当前账号绑定批量读取，排除软删除分组；停用但仍绑定的分组继续显示，空绑定返回空数组。改组、改名后在下一次整页刷新生效，无每卡片查询。状态判断复用网关的规范化 7 天额度窗口及身份匹配规则，兼容 primary/secondary 窗口互换和显式 7 天阈值冷却，忽略普通 429 和 5 小时额度作为周限额证据。入队及实际转发前重新校验，周限额冷却返回 `INTELLIGENCE_OAUTH_COOLING_DOWN`，两种测试均停止新入队；缺失、停用、过期或来源无效的账号返回 `INTELLIGENCE_OAUTH_UNAVAILABLE` 并同样推迟复查，避免重复失败记录。
 
 冷却时仅推迟现有下次执行时间至最多 30 秒后复查（更早重置则按重置时间），保留启停、配置间隔及 `updated_at`。到期扫描不写失败作品、不触发模型调用；读取到恢复额度或重置时间已到后按原定时设置恢复。手动暂停仍可执行，已发出的生成请求不主动取消。前端冷却时停止倒计时并采用空闲轮询，历史作品 DOM 保持不变。
 

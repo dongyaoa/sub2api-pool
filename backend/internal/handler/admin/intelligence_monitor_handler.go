@@ -46,17 +46,32 @@ func (h *IntelligenceMonitorHandler) ListPlans(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	var items []*service.IntelligenceMonitorPlan
 	var err error
-	if values, present := c.Request.URL.Query()["upstream_target_id"]; present {
+	query := c.Request.URL.Query()
+	upstreamValues, upstreamFilter := query["upstream_target_id"]
+	accountValues, accountFilter := query["account_id"]
+	if upstreamFilter && accountFilter {
+		response.BadRequest(c, "upstream_target_id and account_id filters cannot be combined")
+		return
+	}
+	if upstreamFilter || accountFilter {
+		values, label := upstreamValues, "upstream target ID"
+		if accountFilter {
+			values, label = accountValues, "account ID"
+		}
 		if len(values) != 1 {
-			response.BadRequest(c, "invalid upstream target ID")
+			response.BadRequest(c, "invalid "+label)
 			return
 		}
 		id, parseErr := strconv.ParseInt(values[0], 10, 64)
 		if parseErr != nil || id <= 0 {
-			response.BadRequest(c, "invalid upstream target ID")
+			response.BadRequest(c, "invalid "+label)
 			return
 		}
-		items, err = h.svc.ListPlansForUpstream(c.Request.Context(), id)
+		if accountFilter {
+			items, err = h.svc.ListPlansForAccount(c.Request.Context(), id)
+		} else {
+			items, err = h.svc.ListPlansForUpstream(c.Request.Context(), id)
+		}
 	} else {
 		items, err = h.svc.ListPlans(c.Request.Context())
 	}

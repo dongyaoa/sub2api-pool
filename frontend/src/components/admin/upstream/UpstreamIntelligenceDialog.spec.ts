@@ -7,7 +7,7 @@ import UpstreamIntelligenceDialog from './UpstreamIntelligenceDialog.vue'
 import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
 
 const mocks = vi.hoisted(() => ({
-  plans: vi.fn(), update: vi.fn(), run: vi.fn(), runCandy: vi.fn(), archive: vi.fn(), purge: vi.fn(),
+  plans: vi.fn(), plansForOAuthAccount: vi.fn(), update: vi.fn(), run: vi.fn(), runCandy: vi.fn(), archive: vi.fn(), purge: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -25,7 +25,7 @@ vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
   template: '<div data-testid="plan-card" :data-id="plan.id" :data-active="active" :data-revision="revision">{{ plan.name }}</div>',
 } }))
 vi.mock('./IntelligencePlanDialog.vue', () => ({ default: {
-  name: 'IntelligencePlanDialog', props: ['show', 'plan', 'overview', 'upstreamTargetId'], emits: ['close', 'saved'],
+  name: 'IntelligencePlanDialog', props: ['show', 'plan', 'overview', 'upstreamTargetId', 'oauthOnly', 'oauthAccountId'], emits: ['close', 'saved'],
   template: '<div data-testid="plan-editor" />',
 } }))
 vi.mock('./IntelligenceHistoryDialog.vue', () => ({ default: {
@@ -65,6 +65,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
   mocks.plans.mockResolvedValue({ items: [] })
+  mocks.plansForOAuthAccount.mockResolvedValue({ items: [] })
 })
 afterEach(() => {
   wrapper?.unmount()
@@ -196,7 +197,7 @@ describe('upstream group intelligence dialog', () => {
     await flushPromises()
     await view.get('[data-testid="group-intelligence-create"]').trigger('click')
     const editor = view.getComponent({ name: 'IntelligencePlanDialog' })
-    expect(editor.props()).toEqual({ show: true, plan: null, overview, upstreamTargetId: 11 })
+    expect(editor.props()).toEqual({ show: true, plan: null, overview, upstreamTargetId: 11, oauthOnly: false, oauthAccountId: undefined })
     mocks.plans.mockRejectedValue(new Error('refresh unavailable'))
     editor.vm.$emit('saved', plan())
     editor.vm.$emit('close')
@@ -406,5 +407,113 @@ describe('upstream group intelligence dialog', () => {
     expect(mocks.showSuccess).not.toHaveBeenCalled()
     expect(mocks.showError).not.toHaveBeenCalled()
     expect(view.emitted('changed')).toBeUndefined()
+  })
+})
+
+describe('account pelican monitoring dialog', () => {
+  const account = { id: 42, name: 'OAuth account' }
+  const oauthPlan = (overrides: Partial<IntelligencePlan> = {}) => plan(7, {
+    name: account.name, source_name: account.name, source_type: 'openai_oauth', account_id: account.id,
+    upstream_target_id: null, oauth_account_status: { status: 'normal', monitoring_paused: false, groups: [] },
+    ...overrides,
+  })
+  function renderAccount() {
+    wrapper = mount(UpstreamIntelligenceDialog, { props: { account, overview: null }, global: { stubs: { BaseDialog: baseDialog, Icon: true } } })
+    return wrapper
+  }
+
+  it('reads only this account’s original OAuth plans, with no generation or full-list fetch', async () => {
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [oauthPlan(), oauthPlan({ id: 8 }), oauthPlan({ id: 9, account_id: 99 }), plan()] })
+    const view = renderAccount(); await flushPromises()
+    expect(mocks.plansForOAuthAccount).toHaveBeenCalledWith(42, expect.any(AbortSignal))
+    expect(mocks.plans).not.toHaveBeenCalled()
+    expect(cards(view).map(card => card.props('plan').id)).toEqual([7, 8])
+    expect(view.text()).toContain('intelligenceMonitor.accountMonitor.sharedHint')
+    expect(view.find('[data-testid="group-intelligence-create"]').exists()).toBe(false)
+    expect(mocks.run).not.toHaveBeenCalled()
+    cards(view)[0]!.vm.$emit('history', 71); await flushPromises()
+    expect(view.getComponent({ name: 'IntelligenceHistoryDialog' }).props()).toMatchObject({ plan: { id: 7, account_id: 42 }, initialRunId: 71 })
+  })
+
+  it('creates and edits through an account-locked editor and immediately shows the same saved plan', async () => {
+    const view = renderAccount(); await flushPromises()
+    await view.get('[data-testid="group-intelligence-create"]').trigger('click')
+    const editor = view.getComponent({ name: 'IntelligencePlanDialog' })
+    expect(editor.props()).toMatchObject({ oauthOnly: true, oauthAccountId: 42, upstreamTargetId: undefined, plan: null })
+    mocks.plansForOAuthAccount.mockRejectedValue(new Error('offline'))
+    editor.vm.$emit('saved', oauthPlan()); editor.vm.$emit('close'); await flushPromises()
+    expect(cards(view)[0]!.props('plan').id).toBe(7)
+    expect(mocks.run).not.toHaveBeenCalled()
+    cards(view)[0]!.vm.$emit('edit'); await flushPromises()
+    expect(view.getComponent({ name: 'IntelligencePlanDialog' }).props()).toMatchObject({ oauthAccountId: 42, plan: { id: 7, account_id: 42 } })
+  })
+
+  it('refreshes newly created plans from another entry point instead of keeping an empty result', async () => {
+    const view = renderAccount(); await flushPromises()
+    await view.get('[data-testid="group-intelligence-create"]').trigger('click')
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [oauthPlan()] })
+    view.getComponent({ name: 'IntelligencePlanDialog' }).vm.$emit('close'); await flushPromises()
+    expect(cards(view)).toHaveLength(1)
+    expect(mocks.plans).not.toHaveBeenCalled()
+    expect(mocks.plansForOAuthAccount).toHaveBeenCalledTimes(2)
+  })
+
+  it('live refresh preserves card DOM while updating status, groups and an open artwork history', async () => {
+    const running = { id: 71, plan_id: 7, status: 'running' } as IntelligenceRun
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [oauthPlan({ latest_run: running })] })
+    const view = renderAccount(); await flushPromises()
+    const element = cards(view)[0]!.element
+    cards(view)[0]!.vm.$emit('history', 71); await flushPromises()
+    const finished = { ...running, status: 'succeeded' } as IntelligenceRun
+    const current = oauthPlan({ source_name: 'Renamed account', latest_run: finished, recent_runs: [finished], oauth_account_status: { status: 'weekly_limited', monitoring_paused: true, groups: [{ id: 3, name: 'New group' }] } })
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [current] })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(cards(view)[0]!.element).toBe(element)
+    expect(cards(view)[0]!.props('plan')).toEqual(current)
+    expect(view.getComponent({ name: 'IntelligenceHistoryDialog' }).props('plan')).toEqual(current)
+    expect(view.text()).toContain('Renamed account')
+    expect(mocks.plansForOAuthAccount).toHaveBeenCalledTimes(2)
+    expect(mocks.plans).not.toHaveBeenCalled()
+  })
+
+  it('blocks manual tests and schedule activation during cooldown but still allows pausing', async () => {
+    const cooling = oauthPlan({ candy_enabled: true, oauth_account_status: { status: 'weekly_limited', monitoring_paused: true } })
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [cooling] })
+    const view = renderAccount(); await flushPromises()
+    cards(view)[0]!.vm.$emit('run'); cards(view)[0]!.vm.$emit('candyRun'); cards(view)[0]!.vm.$emit('toggle'); await flushPromises()
+    expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.runCandy).not.toHaveBeenCalled(); expect(mocks.update).not.toHaveBeenCalled()
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [{ ...cooling, enabled: true }] })
+    await refresh(view); await flushPromises()
+    mocks.update.mockResolvedValue(cooling)
+    cards(view)[0]!.vm.$emit('toggle'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(7, { enabled: false })
+  })
+
+  it.each([
+    ['INTELLIGENCE_OAUTH_COOLING_DOWN', 'cooldownHint'],
+    ['INTELLIGENCE_OAUTH_UNAVAILABLE', 'unavailableHint'],
+  ])('reloads account status when the backend rejects a stale action with %s', async (code, message) => {
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [oauthPlan()] })
+    const view = renderAccount(); await flushPromises()
+    mocks.run.mockRejectedValue({ reason: code })
+    cards(view)[0]!.vm.$emit('run'); await flushPromises()
+    expect(mocks.showError).toHaveBeenCalledWith(`intelligenceMonitor.oauth.${message}`)
+    expect(mocks.plansForOAuthAccount).toHaveBeenCalledTimes(2)
+  })
+
+  it('manual refresh aborts old account reads and close stops polling', async () => {
+    const old = deferred<{ items: IntelligencePlan[] }>()
+    mocks.plansForOAuthAccount.mockReturnValueOnce(old.promise)
+    const view = renderAccount(); await flushPromises()
+    const signal = mocks.plansForOAuthAccount.mock.calls[0]![1] as AbortSignal
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [oauthPlan()] })
+    await refresh(view); await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(view.emitted('refreshOverview')).toBeUndefined()
+    old.resolve({ items: [] }); await flushPromises()
+    expect(cards(view)).toHaveLength(1)
+    view.getComponent({ name: 'BaseDialog' }).vm.$emit('close'); await flushPromises()
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(mocks.plansForOAuthAccount).toHaveBeenCalledTimes(2)
   })
 })

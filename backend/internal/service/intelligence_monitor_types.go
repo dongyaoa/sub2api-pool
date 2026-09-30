@@ -176,6 +176,10 @@ type IntelligenceMonitorUpstreamListRepository interface {
 	ListPlansForUpstream(context.Context, int64) ([]*IntelligenceMonitorPlan, error)
 }
 
+type IntelligenceMonitorOAuthListRepository interface {
+	ListPlansForAccount(context.Context, int64) ([]*IntelligenceMonitorPlan, error)
+}
+
 // Optional so existing repository decorators retain their original contract.
 type IntelligenceMonitorCandyScheduleRepository interface {
 	DueCandyPlanIDs(context.Context, int) ([]int64, error)

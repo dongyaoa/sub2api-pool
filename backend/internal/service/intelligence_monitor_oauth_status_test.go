@@ -231,6 +231,7 @@ func TestIntelligenceOAuthCooldownCanBeManuallyPausedAndCannotBeEnabled(t *testi
 
 func TestIntelligenceOAuthStatusUsesOneBatchAndExposesOnlySafeFields(t *testing.T) {
 	svc, accounts, _ := intelligenceOAuthFixture()
+	accounts.account.Groups = []*Group{{ID: 7, Name: "Primary", Description: "private group configuration"}, nil, {ID: 9, Name: "Secondary", Status: "inactive"}}
 	id, missing := accounts.account.ID, int64(999)
 	repo := &intelligenceOAuthStatusRepository{accounts: map[int64]*Account{id: accounts.account}}
 	svc.repo = repo
@@ -245,13 +246,29 @@ func TestIntelligenceOAuthStatusUsesOneBatchAndExposesOnlySafeFields(t *testing.
 	require.Equal(t, 1, repo.loads)
 	require.Equal(t, []int64{id, missing}, repo.loadIDs)
 	require.Equal(t, "normal", plans[0].OAuthAccountStatus.Status)
+	require.Equal(t, []IntelligenceOAuthAccountGroup{{ID: 7, Name: "Primary"}, {ID: 9, Name: "Secondary"}}, plans[0].OAuthAccountStatus.Groups)
 	require.Equal(t, "unavailable", plans[2].OAuthAccountStatus.Status)
+	require.NotNil(t, plans[2].OAuthAccountStatus.Groups)
+	require.Empty(t, plans[2].OAuthAccountStatus.Groups)
 	require.Nil(t, plans[3].OAuthAccountStatus)
 	require.Equal(t, "unavailable", plans[4].OAuthAccountStatus.Status)
 	encoded, err := json.Marshal(plans)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "private-oauth-token")
 	require.NotContains(t, string(encoded), "credentials")
+	require.NotContains(t, string(encoded), "private group configuration")
+	require.Contains(t, string(encoded), `"groups":[]`)
+	reset := time.Now().Add(time.Hour)
+	accounts.account.Extra = map[string]any{"codex_7d_used_percent": 100, "codex_7d_reset_at": reset.Format(time.RFC3339Nano)}
+	accounts.account.Groups = []*Group{{ID: 10, Name: "Rebound"}}
+	require.NoError(t, svc.populateOAuthMonitorStatus(context.Background(), plans))
+	require.Equal(t, "weekly_limited", plans[0].OAuthAccountStatus.Status)
+	require.True(t, plans[0].OAuthAccountStatus.MonitoringPaused)
+	require.Equal(t, []IntelligenceOAuthAccountGroup{{ID: 10, Name: "Rebound"}}, plans[0].OAuthAccountStatus.Groups, "quota suspension must not freeze the account's group display")
+	accounts.account.Groups = nil
+	require.NoError(t, svc.populateOAuthMonitorStatus(context.Background(), plans))
+	require.NotNil(t, plans[0].OAuthAccountStatus.Groups)
+	require.Empty(t, plans[0].OAuthAccountStatus.Groups)
 	repo.loadErr = errors.New("status snapshot unavailable")
 	require.ErrorIs(t, svc.populateOAuthMonitorStatus(context.Background(), plans), repo.loadErr, "a failed status query must not present accounts as normal")
 }

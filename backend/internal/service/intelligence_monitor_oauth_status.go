@@ -8,10 +8,16 @@ import (
 
 // This DTO contains no account credentials or provider diagnostics.
 type IntelligenceOAuthAccountStatus struct {
-	Status            string     `json:"status"`
-	MonitoringPaused  bool       `json:"monitoring_paused"`
-	ResetAt           *time.Time `json:"reset_at,omitempty"`
-	WeeklyUsedPercent *float64   `json:"weekly_used_percent,omitempty"`
+	Status            string                          `json:"status"`
+	MonitoringPaused  bool                            `json:"monitoring_paused"`
+	ResetAt           *time.Time                      `json:"reset_at,omitempty"`
+	WeeklyUsedPercent *float64                        `json:"weekly_used_percent,omitempty"`
+	Groups            []IntelligenceOAuthAccountGroup `json:"groups"`
+}
+
+type IntelligenceOAuthAccountGroup struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type IntelligenceOAuthMonitorRepository interface {
@@ -20,7 +26,14 @@ type IntelligenceOAuthMonitorRepository interface {
 }
 
 func intelligenceOAuthAccountStatus(account *Account, now time.Time) *IntelligenceOAuthAccountStatus {
-	status := &IntelligenceOAuthAccountStatus{Status: "normal"}
+	status := &IntelligenceOAuthAccountStatus{Status: "normal", Groups: []IntelligenceOAuthAccountGroup{}}
+	if account != nil {
+		for _, group := range account.Groups {
+			if group != nil {
+				status.Groups = append(status.Groups, IntelligenceOAuthAccountGroup{ID: group.ID, Name: group.Name})
+			}
+		}
+	}
 	if account == nil || !account.IsOpenAIOAuth() || account.IsShadow() || account.IsSyntheticUITest() {
 		status.Status, status.MonitoringPaused = "unavailable", true
 		return status

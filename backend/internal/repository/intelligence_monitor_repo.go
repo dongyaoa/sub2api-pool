@@ -45,6 +45,13 @@ func (r *intelligenceMonitorRepository) ListPlansForUpstream(ctx context.Context
 	return r.listPlans(ctx, "deleted_at IS NULL AND source_type='upstream' AND upstream_target_id=$1", targetID)
 }
 
+func (r *intelligenceMonitorRepository) ListPlansForAccount(ctx context.Context, accountID int64) ([]*service.IntelligenceMonitorPlan, error) {
+	if accountID <= 0 {
+		return nil, service.ErrIntelligenceInvalid
+	}
+	return r.listPlans(ctx, "deleted_at IS NULL AND source_type='openai_oauth' AND account_id=$1", accountID)
+}
+
 // where is an internal constant; source filtering precedes all summary reads.
 func (r *intelligenceMonitorRepository) listPlans(ctx context.Context, where string, args ...any) ([]*service.IntelligenceMonitorPlan, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT `+intelligencePlanColumns+` FROM intelligence_monitor_plans WHERE `+where+` ORDER BY sort_order ASC NULLS LAST,created_at DESC,id DESC`, args...)

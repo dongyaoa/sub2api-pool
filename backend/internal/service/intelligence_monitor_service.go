@@ -89,6 +89,21 @@ func (s *IntelligenceMonitorService) ListPlansForUpstream(ctx context.Context, t
 	return s.populatePlanList(ctx, plans)
 }
 
+func (s *IntelligenceMonitorService) ListPlansForAccount(ctx context.Context, accountID int64) ([]*IntelligenceMonitorPlan, error) {
+	if accountID <= 0 {
+		return nil, ErrIntelligenceInvalid
+	}
+	repo, ok := s.repo.(IntelligenceMonitorOAuthListRepository)
+	if !ok {
+		return nil, ErrIntelligenceFilterUnavailable
+	}
+	plans, err := repo.ListPlansForAccount(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	return s.populatePlanList(ctx, plans)
+}
+
 func (s *IntelligenceMonitorService) populatePlanList(ctx context.Context, plans []*IntelligenceMonitorPlan) ([]*IntelligenceMonitorPlan, error) {
 	if plans == nil {
 		plans = []*IntelligenceMonitorPlan{}

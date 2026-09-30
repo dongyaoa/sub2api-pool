@@ -78,6 +78,7 @@ export interface IntelligencePlan extends Omit<IntelligencePlanInput, 'api_key'>
   oauth_account_status?: {
     status: 'normal' | 'weekly_limited' | 'unavailable'
     monitoring_paused: boolean
+    groups?: { id: number; name: string }[]
     reset_at?: string | null
     weekly_used_percent?: number | null
   }
@@ -130,6 +131,9 @@ export const intelligenceMonitorAPI = {
   },
   async plans(signal?: AbortSignal, upstreamTargetID?: number): Promise<{ items: IntelligencePlan[] }> {
     return (await apiClient.get(`${base}/plans`, { signal, ...(upstreamTargetID === undefined ? {} : { params: { upstream_target_id: upstreamTargetID } }) })).data
+  },
+  async plansForOAuthAccount(accountID: number, signal?: AbortSignal): Promise<{ items: IntelligencePlan[] }> {
+    return (await apiClient.get(`${base}/plans`, { signal, params: { account_id: accountID } })).data
   },
   async create(input: IntelligencePlanInput): Promise<IntelligencePlan> {
     return (await apiClient.post(`${base}/plans`, input)).data

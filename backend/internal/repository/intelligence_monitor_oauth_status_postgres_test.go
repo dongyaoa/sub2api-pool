@@ -21,11 +21,16 @@ ADD COLUMN rate_limit_reset_at TIMESTAMPTZ,
 ADD COLUMN temp_unschedulable_until TIMESTAMPTZ,
 ADD COLUMN temp_unschedulable_reason TEXT,
 ADD COLUMN extra JSONB;
+CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',deleted_at TIMESTAMPTZ);
+CREATE TABLE account_groups(account_id BIGINT NOT NULL,group_id BIGINT NOT NULL,PRIMARY KEY(account_id,group_id));
 INSERT INTO accounts(id,type,credentials,extra) VALUES
 (501,'oauth','{"email":"current@example.com","chatgpt_account_id":"identity-501","workspace_id":"workspace-501","access_token":"never-load-access","refresh_token":"never-load-refresh","id_token":"never-load-id"}','{"codex_7d_used_percent":100,"codex_7d_reset_at":"2030-10-01T12:00:00Z","email":"current@example.com"}'),
 (502,'oauth','{}',NULL),
 (503,'oauth','{}','{}');
-UPDATE accounts SET deleted_at=NOW() WHERE id=503;`)
+UPDATE accounts SET deleted_at=NOW() WHERE id=503;
+INSERT INTO groups(id,name,status,deleted_at) VALUES
+(10,'Primary group','active',NULL),(11,'Paused group','inactive',NULL),(12,'Deleted group','active',NOW()),(13,'Rebound group','active',NULL);
+INSERT INTO account_groups(account_id,group_id) VALUES(501,11),(501,10),(501,12),(503,13);`)
 	require.NoError(t, err)
 	repo := &intelligenceMonitorRepository{db: db}
 	accounts, err := repo.LoadOAuthMonitorAccounts(ctx, []int64{501, 501, 502, 503, 999})
@@ -41,8 +46,33 @@ UPDATE accounts SET deleted_at=NOW() WHERE id=503;`)
 	require.NotContains(t, account.Credentials, "access_token")
 	require.NotContains(t, account.Credentials, "refresh_token")
 	require.NotContains(t, account.Credentials, "id_token")
+	require.Len(t, account.Groups, 2, "all current bindings are returned, including inactive but excluding soft-deleted groups")
+	require.Equal(t, int64(10), account.Groups[0].ID)
+	require.Equal(t, "Primary group", account.Groups[0].Name)
+	require.Equal(t, int64(11), account.Groups[1].ID)
+	require.Equal(t, "Paused group", account.Groups[1].Name)
 	require.Nil(t, accounts[502].Extra)
 	require.Empty(t, accounts[502].TempUnschedulableReason)
+	require.NotNil(t, accounts[502].Groups, "unassigned accounts use an empty array")
+	require.Empty(t, accounts[502].Groups)
+	_, err = db.ExecContext(ctx, `UPDATE groups SET name='Renamed group' WHERE id=10;
+DELETE FROM account_groups WHERE account_id=501 AND group_id=11;
+INSERT INTO account_groups(account_id,group_id) VALUES(502,13);`)
+	require.NoError(t, err)
+	accounts, err = repo.LoadOAuthMonitorAccounts(ctx, []int64{501, 502})
+	require.NoError(t, err)
+	require.Len(t, accounts[501].Groups, 1)
+	require.Equal(t, "Renamed group", accounts[501].Groups[0].Name, "a list refresh follows group renames without changing the monitoring plan")
+	require.Len(t, accounts[502].Groups, 1)
+	require.Equal(t, int64(13), accounts[502].Groups[0].ID, "a list refresh follows the account's current bindings")
+	require.Equal(t, float64(100), accounts[501].Extra["codex_7d_used_percent"], "group changes preserve quota status")
+	_, err = db.ExecContext(ctx, `UPDATE groups SET deleted_at=NOW() WHERE id=10;
+DELETE FROM account_groups WHERE account_id=502`)
+	require.NoError(t, err)
+	accounts, err = repo.LoadOAuthMonitorAccounts(ctx, []int64{501, 502})
+	require.NoError(t, err)
+	require.Empty(t, accounts[501].Groups, "soft deletion removes a group even while the relation remains")
+	require.Empty(t, accounts[502].Groups, "removing all bindings clears the previous group list")
 	accounts, err = repo.LoadOAuthMonitorAccounts(ctx, nil)
 	require.NoError(t, err)
 	require.Empty(t, accounts)

@@ -6,6 +6,16 @@ import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import AccountRecentRequestsCell from '@/components/account/AccountRecentRequestsCell.vue'
 
+vi.mock('@/components/admin/upstream/UpstreamIntelligenceDialog.vue', () => ({
+  __esModule: true,
+  default: {
+    name: 'UpstreamIntelligenceDialog',
+    props: ['account', 'overview'],
+    emits: ['close'],
+    template: '<div data-test="account-pelican-dialog">{{ account.name }}<button data-test="close-pelican" @click="$emit(\'close\')" /></div>'
+  }
+}))
+
 const {
   listAccounts,
   listWithEtag,
@@ -183,6 +193,54 @@ describe('admin AccountsView lite account list', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('opens the shared pelican dialog from the OAuth row without fetching account credentials and unmounts it on close', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-test="account-pelican-dialog"]').exists()).toBe(false)
+    const menu = wrapper.findComponent(AccountActionMenu)
+    menu.vm.$emit('pelican-monitor', { ...listRow, status: 'error', schedulable: false, credentials: { access_token: 'private-token' } })
+    await flushPromises()
+    await flushPromises()
+    const dialog = wrapper.getComponent({ name: 'UpstreamIntelligenceDialog' })
+    expect(dialog.props()).toEqual({ account: { id: 42, name: 'compact row' }, overview: null })
+    expect(getById).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('private-token')
+    const previousElement = dialog.element
+    menu.vm.$emit('pelican-monitor', { ...listRow, id: 43, name: 'another OAuth' })
+    await flushPromises()
+    expect(wrapper.getComponent({ name: 'UpstreamIntelligenceDialog' }).element).not.toBe(previousElement)
+    expect(wrapper.getComponent({ name: 'UpstreamIntelligenceDialog' }).props('account')).toEqual({ id: 43, name: 'another OAuth' })
+    await wrapper.get('[data-test="close-pelican"]').trigger('click')
+    expect(wrapper.find('[data-test="account-pelican-dialog"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { platform: 'anthropic' }, { type: 'apikey' }, { parent_account_id: 1 }, { extra: { synthetic_ui_test: true } }
+  ])('guards unsupported account monitoring events %o', async fields => {
+    const wrapper = mountView(); await flushPromises()
+    wrapper.findComponent(AccountActionMenu).vm.$emit('pelican-monitor', { ...listRow, ...fields })
+    await flushPromises()
+    expect(wrapper.find('[data-test="account-pelican-dialog"]').exists()).toBe(false)
+    expect(getById).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('pauses account-list automatic refresh while the pelican dialog is open and resumes after closing', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    const wrapper = mountView(); await flushPromises()
+    wrapper.findComponent(AccountActionMenu).vm.$emit('pelican-monitor', listRow)
+    await flushPromises(); await flushPromises()
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(listWithEtag).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="close-pelican"]').trigger('click')
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(listWithEtag).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('keeps lite=1 on the initial list request', async () => {
