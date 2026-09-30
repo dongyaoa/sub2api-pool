@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -18,6 +19,41 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCodexTicketEgressPreservesUpstreamBodyLifecycle(t *testing.T) {
+	for _, traceSupported := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trace=%v", traceSupported), func(t *testing.T) {
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/cdn-cgi/trace" {
+					_, _ = io.WriteString(w, "ip=8.8.8.8\n")
+					return
+				}
+				w.Header().Set("Content-Encoding", "gzip")
+				writer := gzip.NewWriter(w)
+				_, _ = io.WriteString(writer, "ticket response")
+				_ = writer.Close()
+			}))
+			t.Cleanup(srv.Close)
+			client := srv.Client()
+			if !traceSupported {
+				base := client.Transport
+				client.Transport = codexTicketEgressRoundTripper(base.RoundTrip)
+			}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/backend-api/codex/responses", nil)
+			require.NoError(t, err)
+			// Explicit encoding prevents net/http from hiding a missing application decoder.
+			req.Header.Set("Accept-Encoding", "gzip")
+			resp, err := doCodexTicketWithEgress(client, req, func(service.OpenAICodexTicketEgressResult) {}, time.Second)
+			require.NoError(t, err)
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, "ticket response", string(body))
+			require.NoError(t, resp.Body.Close())
+			require.ErrorIs(t, resp.Request.Context().Err(), context.Canceled, "closing the response cancels this attempt")
+			require.NoError(t, req.Context().Err(), "the caller context remains reusable")
+		})
+	}
+}
 
 func TestCanTraceCodexTicketEgressRestrictsOrigin(t *testing.T) {
 	for _, tc := range []struct {

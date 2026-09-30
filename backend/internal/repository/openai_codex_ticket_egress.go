@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -52,7 +51,7 @@ func doCodexTicketWithEgress(client *http.Client, req *http.Request, observe fun
 	base, ok := client.Transport.(*http.Transport)
 	if !ok {
 		observe(codexTicketEgressFailure("unsupported_transport"))
-		return servertiming.Do(client, req)
+		return doUpstreamRequest(client, req)
 	}
 	transport := base.Clone()
 	transport.DisableKeepAlives = false
@@ -80,7 +79,7 @@ func doCodexTicketWithEgress(client *http.Client, req *http.Request, observe fun
 	ctx := httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{GotConn: ticketConn.gotConn})
 	ticketReq := req.Clone(ctx)
 	ticketReq.Close = true
-	resp, err := servertiming.Do(&attemptClient, ticketReq)
+	resp, err := doUpstreamRequest(&attemptClient, ticketReq)
 	if result.Error == nil {
 		switch current := ticketConn.last(); {
 		case current == nil || traceConn == nil:

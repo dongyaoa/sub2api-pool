@@ -144,6 +144,8 @@ func TestPoolVersionComparisonAndRebuild(t *testing.T) {
 		{"unknown revision", "0.2.7-pool.5", "unknown", "0.2.7-pool.5", false, ""},
 		{"older image", "0.2.7-pool.6", strings.Repeat("a", 40), "0.2.7-pool.5", false, ""},
 		{"numeric pool versions", "0.2.7-pool.9", strings.Repeat("a", 40), "0.2.7-pool.10", true, ""},
+		{"new upstream base", "0.2.7-pool.20", strings.Repeat("a", 40), "0.2.11-pool.21", true, ""},
+		{"older upstream base", "0.2.11-pool.21", strings.Repeat("a", 40), "0.2.7-pool.20", false, ""},
 		{"invalid current", "dev", strings.Repeat("a", 40), "0.2.7-pool.5", false, "unrecognized_current_version"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

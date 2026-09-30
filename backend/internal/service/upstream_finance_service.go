@@ -286,7 +286,7 @@ func (s *UpstreamFinanceService) EstimateMonitorCost(ctx context.Context, target
 	}
 	var base *float64
 	if s.billing.HasIdentifiedTokenPricing(model) {
-		base = tryModelFilePricing(s.billing, model, tokens, "", s.now())
+		base = tryModelFilePricing(s.billing, model, tokens, "", s.now(), true)
 	}
 	ids, err := s.repo.ActiveAccountIDs(ctx, targetID)
 	if err != nil {

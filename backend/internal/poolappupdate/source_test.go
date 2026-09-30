@@ -40,32 +40,41 @@ func releaseManifest(release *Release) manifest {
 }
 
 func TestLatestSelectsPoolPrereleaseNumerically(t *testing.T) {
-	release := testRelease([]byte("verified application"))
-	older := *release
-	older.Version = "0.2.7-pool.9"
-	older.Tag = "pool-v0.2.7.9"
-	calls := 0
-	source := NewSource(&http.Client{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
-		calls++
-		switch req.URL.String() {
-		case "https://api.github.com/repos/" + Repository + "/releases?per_page=20":
-			return response(jsonBody([]any{releaseMetadata(&older), map[string]any{"tag_name": "v99.0.0"}, releaseMetadata(release)})), nil
-		case assetURL(release.Tag, ManifestAsset):
-			return response(jsonBody(releaseManifest(release))), nil
-		default:
-			t.Fatalf("unexpected URL %s", req.URL)
-			return nil, nil
-		}
-	})})
-	actual, err := source.Latest(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if actual.Version != release.Version || actual.Digest != release.Digest || actual.Revision != release.Revision || calls != 2 {
-		t.Fatalf("unexpected release: %+v, calls=%d", actual, calls)
-	}
-	if actual.URL != "https://github.com/"+Repository+"/releases/tag/"+release.Tag {
-		t.Fatal(actual.URL)
+	for _, tt := range []struct {
+		name, olderVersion, olderTag, latestVersion, latestTag string
+	}{
+		{"same base", "0.2.7-pool.9", "pool-v0.2.7.9", "0.2.7-pool.12", "pool-v0.2.7.12"},
+		{"upstream base upgrade", "0.2.7-pool.20", "pool-v0.2.7.20", "0.2.11-pool.21", "pool-v0.2.11.21"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			release := testRelease([]byte("verified application"))
+			release.Version, release.Tag = tt.latestVersion, tt.latestTag
+			older := *release
+			older.Version, older.Tag = tt.olderVersion, tt.olderTag
+			calls := 0
+			source := NewSource(&http.Client{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				switch req.URL.String() {
+				case "https://api.github.com/repos/" + Repository + "/releases?per_page=20":
+					return response(jsonBody([]any{releaseMetadata(&older), map[string]any{"tag_name": "v99.0.0"}, releaseMetadata(release)})), nil
+				case assetURL(release.Tag, ManifestAsset):
+					return response(jsonBody(releaseManifest(release))), nil
+				default:
+					t.Fatalf("unexpected URL %s", req.URL)
+					return nil, nil
+				}
+			})})
+			actual, err := source.Latest(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if actual.Version != release.Version || actual.Digest != release.Digest || actual.Revision != release.Revision || calls != 2 {
+				t.Fatalf("unexpected release: %+v, calls=%d", actual, calls)
+			}
+			if actual.URL != "https://github.com/"+Repository+"/releases/tag/"+release.Tag {
+				t.Fatal(actual.URL)
+			}
+		})
 	}
 }
 

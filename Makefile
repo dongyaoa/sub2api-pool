@@ -8,8 +8,10 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/admin.upstreamCenter.storage.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.candy.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.account.spec.ts \
+	src/api/__tests__/admin.accounts.opencodeGoUsage.spec.ts \
 	src/api/__tests__/pelicanMonitor.spec.ts \
 	src/components/common/__tests__/VersionBadge.spec.ts \
+	src/components/common/__tests__/BaseDialog.scrollLock.spec.ts \
 	src/components/layout/__tests__/AppSidebar.spec.ts \
 	src/components/admin/account/__tests__/AccountActionMenu.pelican.spec.ts \
 	src/components/admin/upstream/IntelligenceArtifactPreview.spec.ts \
@@ -50,7 +52,15 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/pelican/PelicanArtworkPreview.spec.ts \
 	src/views/user/__tests__/PelicanMonitorView.spec.ts \
 	src/api/__tests__/keys.bulkUpdate.spec.ts \
+	src/components/account/__tests__/OpenAIReferralCell.spec.ts \
+	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
+	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
+	src/components/account/__tests__/ClaudeResetCreditsCell.spec.ts \
+	src/components/account/__tests__/OpenCodeGoUsageCell.spec.ts \
+	src/components/account/__tests__/TempUnschedStatusModal.spec.ts \
+	src/components/account/__tests__/ModelWhitelistSelector.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
+	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
 	src/views/user/__tests__/KeysView.spec.ts \
 	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \

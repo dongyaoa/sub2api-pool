@@ -29,7 +29,7 @@ func TestRecentRequestAnthropicAdaptersObserveStreamErrors(t *testing.T) {
 			return s.handleCCBufferedFromAnthropic(r, c, "model", "model", nil, time.Now())
 		}},
 		{"chat streaming", func(s *GatewayService, r *http.Response, c *gin.Context) (*ForwardResult, error) {
-			return s.handleCCStreamingFromAnthropic(r, c, "model", "model", nil, time.Now(), false)
+			return s.handleCCStreamingFromAnthropic(r, c, "model", "model", nil, time.Now())
 		}},
 	}
 	const started = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"model\",\"content\":[],\"usage\":{\"input_tokens\":1}}}\n\n"

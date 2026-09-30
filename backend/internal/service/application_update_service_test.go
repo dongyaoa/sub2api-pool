@@ -107,14 +107,21 @@ func TestApplicationUpdateFailedRefreshInvalidatesOldRelease(t *testing.T) {
 func TestApplicationUpdateVersionAndDeploymentBoundaries(t *testing.T) {
 	for _, tt := range []struct {
 		current string
+		latest  string
 		update  bool
 		warning string
 	}{
-		{"0.2.7-pool.9", true, ""}, {"0.2.7-pool.12", false, ""}, {"0.2.7-pool.13", false, ""}, {"dev", false, "unrecognized_current_version"},
+		{"0.2.7-pool.9", "0.2.7-pool.12", true, ""},
+		{"0.2.7-pool.12", "0.2.7-pool.12", false, ""},
+		{"0.2.7-pool.13", "0.2.7-pool.12", false, ""},
+		{"0.2.7-pool.20", "0.2.11-pool.21", true, ""},
+		{"0.2.11-pool.21", "0.2.7-pool.20", false, ""},
+		{"dev", "0.2.7-pool.12", false, "unrecognized_current_version"},
 	} {
 		t.Run(tt.current, func(t *testing.T) {
-			svc, _, _ := applicationTestService()
+			svc, source, _ := applicationTestService()
 			svc.currentVersion = tt.current
+			source.release.Version = tt.latest
 			info, err := svc.CheckUpdate(context.Background(), false)
 			require.NoError(t, err)
 			require.Equal(t, tt.update, info.HasUpdate)

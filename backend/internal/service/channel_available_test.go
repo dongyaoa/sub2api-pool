@@ -11,17 +11,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestWithDefaultMaxReasoningEffortMultiplier_Fable51(t *testing.T) {
-	base := &ChannelModelPricing{BillingMode: BillingModeToken}
-	got := withDefaultMaxReasoningEffortMultiplier(base, "claude-fable-5-1")
-	require.NotSame(t, base, got)
-	require.NotNil(t, got.MaxReasoningEffortMultiplier)
-	require.Equal(t, 3.0, *got.MaxReasoningEffortMultiplier)
-	require.Nil(t, base.MaxReasoningEffortMultiplier)
-
-	configured := 1.25
-	custom := &ChannelModelPricing{MaxReasoningEffortMultiplier: &configured}
-	require.Same(t, custom, withDefaultMaxReasoningEffortMultiplier(custom, "claude-fable-5-1"))
+func TestFillGlobalPricingFallback_ReasoningEffortMatchesConfiguredBilling(t *testing.T) {
+	for _, multipliers := range []map[string]float64{nil, {}, {"high": 1.5, "max": 1.25}} {
+		base := &ChannelModelPricing{BillingMode: BillingModeToken, ReasoningEffortMultipliers: multipliers}
+		models := []SupportedModel{{Name: "claude-fable-5-1", Pricing: base}}
+		pricing := newStubPricingServiceFromMap(map[string]*LiteLLMModelPricing{
+			"claude-fable-5-1": {InputCostPerToken: 5e-6},
+		})
+		fillGlobalPricingFallback(pricing, models)
+		require.NotSame(t, base, models[0].Pricing)
+		require.Equal(t, multipliers, models[0].Pricing.ReasoningEffortMultipliers)
+		require.Equal(t, reasoningEffortBillingMultiplier("max", multipliers),
+			reasoningEffortBillingMultiplier("max", models[0].Pricing.ReasoningEffortMultipliers))
+		if len(multipliers) > 0 {
+			models[0].Pricing.ReasoningEffortMultipliers["max"] = 9
+			require.Equal(t, 1.25, base.ReasoningEffortMultipliers["max"])
+		}
+	}
 }
 
 // stubGroupRepoForAvailable 是 ListAvailable 测试用的 GroupRepository stub，

@@ -128,7 +128,7 @@ func TestUpstreamFinanceMonitorCostUsesProcurementRate(t *testing.T) {
 	accounts := &financeAccounts{accounts: map[int64]*Account{1: {ID: 1, RateMultiplier: financeFloat(.25)}}}
 	svc := NewUpstreamFinanceService(repo, financeTestCipher{}, billing, nil, accounts)
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 10, CacheReadTokens: 50}
-	base := tryModelFilePricing(billing, "claude-3-5-sonnet", tokens, "", time.Now())
+	base := tryModelFilePricing(billing, "claude-3-5-sonnet", tokens, "", time.Now(), true)
 	require.NotNil(t, base)
 	cost, err := svc.EstimateMonitorCost(context.Background(), 1, "claude-3-5-sonnet", tokens)
 	require.NoError(t, err)
