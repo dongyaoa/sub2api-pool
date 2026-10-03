@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-4">
-    <div v-if="!localOnly" class="flex flex-wrap items-center justify-between gap-3"><div class="flex flex-wrap items-center gap-2 text-[11px]"><span class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 font-mono font-semibold text-gray-700 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-200"><Icon name="lightbulb" size="xs" class="text-primary-500"/>{{ PELICAN_MODEL }}</span><span class="rounded-lg bg-primary-50 px-2.5 py-1.5 font-medium text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">high</span><details class="relative"><summary class="cursor-pointer list-none rounded-lg px-2 py-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700">{{ t('intelligenceMonitor.prompt') }}</summary><div class="absolute left-0 top-9 z-20 w-72 rounded-xl border border-gray-200 bg-white p-4 text-xs leading-6 text-gray-600 shadow-lg dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300">{{ PELICAN_PROMPT }}</div></details></div><button type="button" class="btn btn-primary btn-sm" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5"/>{{ t(addLabel) }}</button></div>
+    <div v-if="!localOnly" class="flex flex-wrap items-center justify-between gap-3"><div class="flex flex-wrap items-center gap-2 text-[11px]"><span class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 font-mono font-semibold text-gray-700 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-200"><Icon name="lightbulb" size="xs" class="text-primary-500"/>{{ PELICAN_MODELS.map(model => model.label).join(' · ') }}</span><span class="rounded-lg bg-primary-50 px-2.5 py-1.5 font-medium text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">high</span><details class="relative"><summary class="cursor-pointer list-none rounded-lg px-2 py-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700">{{ t('intelligenceMonitor.prompt') }}</summary><div class="absolute left-0 top-9 z-20 w-72 rounded-xl border border-gray-200 bg-white p-4 text-xs leading-6 text-gray-600 shadow-lg dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300">{{ PELICAN_PROMPT }}</div></details></div><button type="button" class="btn btn-primary btn-sm" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5"/>{{ t(addLabel) }}</button></div>
     <div v-if="!oauthOnly && !localOnly && scopePlans.length" class="rounded-xl border border-gray-200/80 bg-white p-1.5 dark:border-dark-700 dark:bg-dark-800">
       <div role="tablist" :aria-label="t('intelligenceMonitor.quickSwitch')" class="flex min-w-0 flex-wrap items-center gap-1" data-testid="intelligence-site-tabs" @keydown="navigateSiteTabs">
         <button v-for="site in siteTabs" :id="siteTabID(site.key)" :key="site.key" type="button" role="tab" :aria-selected="selectedSite === site.key" :tabindex="selectedSite === site.key ? 0 : -1" aria-controls="intelligence-site-results" :title="site.name" :data-site="site.key" class="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500" :class="selectedSite === site.key ? 'bg-primary-50 font-semibold text-primary-700 dark:bg-primary-500/15 dark:text-primary-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-700 dark:hover:text-white'" @click="selectedSite = site.key">
@@ -10,7 +10,7 @@
         </button>
       </div>
     </div>
-    <div class="flex flex-wrap items-center gap-3"><div class="relative min-w-[180px] flex-1 sm:max-w-sm"><Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-2.5 text-gray-400"/><input v-model="search" class="input !py-2 !pl-9 text-xs" :placeholder="t(localOnly ? 'intelligenceMonitor.local.search' : 'intelligenceMonitor.search')" :aria-label="t(localOnly ? 'intelligenceMonitor.local.search' : 'intelligenceMonitor.search')"/></div><Select v-if="!oauthOnly && !localOnly" v-model="sourceFilter" class="source-filter w-36 max-w-full" :options="sourceOptions" :searchable="false" :aria-label="t('intelligenceMonitor.form.source')" /><div class="ml-auto flex items-center gap-2"><button v-if="localOnly && !oauthOnly" type="button" class="btn btn-secondary btn-sm" data-testid="open-public-display" @click="publicDisplayDialog = true"><Icon name="eye" size="sm" class="mr-1.5"/>{{ t('intelligenceMonitor.publicDisplay.open') }}</button><button type="button" class="btn btn-secondary btn-sm" :disabled="scopePlans.length < 2" @click="orderDialog=true"><Icon name="menu" size="sm" class="mr-1.5"/>{{ t('upstreamCenter.order.open') }}</button><button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700" :aria-busy="loading" data-testid="intelligence-refresh" @click="manualRefresh"><Icon name="refresh" size="sm" :class="loading&&'animate-spin'"/>{{ t('intelligenceMonitor.refresh') }}</button><button v-if="localOnly" type="button" class="btn btn-primary btn-sm" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5"/>{{ t(addLabel) }}</button></div></div>
+    <div class="flex flex-wrap items-center gap-3"><div class="relative min-w-[180px] flex-1 sm:max-w-sm"><Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-2.5 text-gray-400"/><input v-model="search" class="input !py-2 !pl-9 text-xs" :placeholder="t(localOnly ? 'intelligenceMonitor.local.search' : 'intelligenceMonitor.search')" :aria-label="t(localOnly ? 'intelligenceMonitor.local.search' : 'intelligenceMonitor.search')"/></div><Select v-if="!oauthOnly && !localOnly" v-model="sourceFilter" class="source-filter w-36 max-w-full" :options="sourceOptions" :searchable="false" :aria-label="t('intelligenceMonitor.form.source')" /><div class="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2"><button v-if="localOnly && !oauthOnly" type="button" class="btn btn-secondary btn-sm" data-testid="open-public-display" @click="publicDisplayDialog = true"><Icon name="eye" size="sm" class="mr-1.5"/>{{ t('intelligenceMonitor.publicDisplay.open') }}</button><IntelligenceBulkControls :plans="plans" :ready="loaded && !error" :active="active" @changed="bulkChanged" /><button type="button" class="btn btn-secondary btn-sm" :disabled="scopePlans.length < 2" @click="orderDialog=true"><Icon name="menu" size="sm" class="mr-1.5"/>{{ t('upstreamCenter.order.open') }}</button><button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700" :aria-busy="loading" data-testid="intelligence-refresh" @click="manualRefresh"><Icon name="refresh" size="sm" :class="loading&&'animate-spin'"/>{{ t('intelligenceMonitor.refresh') }}</button><button v-if="localOnly" type="button" class="btn btn-primary btn-sm" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5"/>{{ t(addLabel) }}</button></div></div>
     <p v-if="error" role="alert" class="rounded-xl bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-500/10">{{ error }}</p>
     <div v-if="loading&&!loaded" class="space-y-3"><div v-for="n in 3" :key="n" class="card h-56 animate-pulse bg-gray-50 dark:bg-dark-800"/></div>
     <div :id="!oauthOnly && !localOnly ? 'intelligence-site-results' : undefined" :role="!oauthOnly && !localOnly && scopePlans.length ? 'tabpanel' : undefined" :aria-labelledby="!oauthOnly && !localOnly && scopePlans.length ? siteTabID(selectedSite) : undefined">
@@ -20,12 +20,13 @@
       <div v-if="(!loading || loaded) && !visiblePlans.length" class="flex min-h-[330px] flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 text-center dark:border-dark-700 dark:bg-dark-800/30"><div class="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-50 text-primary-500 dark:bg-primary-500/10"><Icon name="lightbulb" size="xl"/></div><h3 class="text-base font-semibold text-gray-800 dark:text-gray-200">{{ t(search||sourceFilter||selectedSite!=='all'?'intelligenceMonitor.noMatches':oauthOnly?'intelligenceMonitor.oauth.emptyTitle':localOnly?'intelligenceMonitor.local.emptyTitle':'intelligenceMonitor.emptyTitle') }}</h3><p v-if="!search&&!sourceFilter&&selectedSite==='all'" class="mt-2 max-w-lg text-xs leading-6 text-gray-500">{{ t(oauthOnly ? 'intelligenceMonitor.oauth.emptyHint' : localOnly ? 'intelligenceMonitor.local.emptyHint' : 'intelligenceMonitor.emptyHint') }}</p><button v-if="!search&&!sourceFilter&&selectedSite==='all'" class="btn btn-primary btn-sm mt-5" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1.5"/>{{ t(addLabel) }}</button></div>
     </div>
     <p class="text-[10px] text-gray-400 dark:text-dark-500">{{ t('intelligenceMonitor.retention') }}</p>
-    <IntelligencePlanDialog :show="editor" :plan="editing" :overview="overview" :oauth-only="oauthOnly" :local-only="localOnly" :managed-key-ids="managedKeyIDs" :monitored-account-ids="monitoredAccountIDs" @close="editor=false" @saved="saved"/>
-    <IntelligenceHistoryDialog :show="history" :plan="selectedPlan" :initial-run-id="selectedRunID" @close="history=false"/>
+    <IntelligencePlanDialog :show="editor" :plan="editing" :overview="overview" :oauth-only="oauthOnly" :local-only="localOnly" :managed-key-ids="managedKeyIDs" :monitored-plans="plans" @close="editor=false" @saved="saved"/>
+    <IntelligenceHistoryDialog :show="history" :plan="selectedPlan" :initial-run-id="selectedRunID" @close="history=false" @deleted="load"/>
     <IntelligenceCandyDetailDialog v-if="selectedCandyRun" :run="selectedCandyRun" @close="selectedCandy = null" />
     <UpstreamOrderDialog :show="orderDialog" :scope="oauthOnly ? 'oauth' : 'intelligence'" :intelligence-filter="localOnly ? 'local' : 'external'" @close="orderDialog=false" @saved="savedOrder"/>
     <IntelligencePublicDisplayDialog v-if="localOnly && !oauthOnly" :show="publicDisplayDialog" @close="publicDisplayDialog = false" @saved="refreshPublicDisplay" />
-    <UpstreamDeleteDialog :show="!!archiving" :item="archiving ? { kind: 'intelligence', id: archiving.id, name: archiving.name } : null" :busy="deleting" :error="deleteError" @close="archiving = null" @confirm="archive" />
+    <IntelligencePermanentDeleteDialog v-if="archiving?.source_type === 'openai_oauth'" :name="archiving.name" :busy="deleting" :error="deleteError" @close="!deleting && (archiving = null)" @confirm="archive('purge')" />
+    <UpstreamDeleteDialog v-else :show="!!archiving" :item="archiving ? { kind: 'intelligence', id: archiving.id, name: archiving.name } : null" :busy="deleting" :error="deleteError" @close="archiving = null" @confirm="archive" />
   </div>
 </template>
 <script setup lang="ts">
@@ -33,8 +34,10 @@ import { computed, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import UpstreamDeleteDialog from './UpstreamDeleteDialog.vue'
+import IntelligencePermanentDeleteDialog from './IntelligencePermanentDeleteDialog.vue'
+import IntelligenceBulkControls from './IntelligenceBulkControls.vue'
 import Select from '@/components/common/Select.vue'
-import { intelligenceMonitorAPI, PELICAN_MODEL, PELICAN_PROMPT, type IntelligencePlan, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
+import { intelligenceMonitorAPI, PELICAN_PROMPT, type IntelligencePlan, type IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import { upstreamCenterAPI, type UpstreamOverview } from '@/api/admin/upstreamCenter'
 import { useAppStore } from '@/stores/app'
 import { usePelicanMonitorStore } from '@/stores/pelicanMonitor'
@@ -51,6 +54,7 @@ import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './int
 import { useMonitorRefresh } from '@/composables/useMonitorRefresh'
 import { reconcileMonitorData } from './monitorReconcile'
 import { safeWebsite } from './safeWebsite'
+import { PELICAN_MODELS } from '@/utils/pelicanModels'
 const props=withDefaults(defineProps<{overview:UpstreamOverview|null;oauthOnly?:boolean;localOnly?:boolean;active?:boolean;refreshKey?:number}>(),{oauthOnly:false,localOnly:false,active:true,refreshKey:0})
 const emit=defineEmits<{ refreshOverview: [] }>()
 provide(intelligencePanelActiveKey, computed(() => props.active))
@@ -76,7 +80,6 @@ const selectedCandyRun = computed(() => {
   return [plan?.candy_latest_run, ...(plan?.candy_recent_runs || [])].find(run => run?.id === selected.id) || selected
 })
 const scopePlans=computed(()=>plans.value.filter(plan=>props.oauthOnly ? plan.source_type==='openai_oauth' : props.localOnly ? plan.source_type==='local_group' : !['openai_oauth','local_group'].includes(plan.source_type)))
-const monitoredAccountIDs = computed(() => plans.value.filter(plan => plan.source_type === 'openai_oauth' && plan.account_id).map(plan => plan.account_id!))
 const managedKeyIDs = computed(() => plans.value.filter(plan => plan.local_api_key_managed && plan.local_api_key_id).map(plan => plan.local_api_key_id!))
 const selectedSite = ref('all')
 const planSites = computed(() => {
@@ -131,6 +134,10 @@ const {loading,refresh:refreshPlans}=useMonitorRefresh({
 })
 async function load(){previewRefresh.value++;await refreshPlans()}
 function manualRefresh(){emit('refreshOverview');void load()}
+function bulkChanged(enabled: boolean) {
+  plans.value = plans.value.map(plan => ({ ...plan, enabled, ...(!enabled ? { next_run_at: null, candy_next_run_at: null } : {}) }))
+  void load()
+}
 function openEditor(plan:IntelligencePlan|null=null){editing.value=plan;editor.value=true}
 function openHistory(plan:IntelligencePlan,runID?:number){selectedID.value=plan.id;selectedRunID.value=runID||null;history.value=true}
 function saved(){app.showSuccess(t('intelligenceMonitor.saved'));void load()}
@@ -164,7 +171,7 @@ function runCandy(plan: IntelligencePlan) {
   })
 }
 function toggle(plan:IntelligencePlan){const current=plans.value.find(item=>item.id===plan.id)||plan;if(!current.enabled&&current.oauth_account_status?.monitoring_paused)return;void action(plan.id,()=>intelligenceMonitorAPI.update(plan.id,{enabled:!current.enabled}))}
-async function archive(mode:'archive'|'purge'){if(!archiving.value||deleting.value)return;const item=archiving.value;deleting.value=true;deleteError.value='';try{if(mode==='purge')await upstreamCenterAPI.purge({kind:'intelligence',id:item.id,confirm_name:item.name});else await intelligenceMonitorAPI.archive(item.id);if(disposed)return;archiving.value=null;app.showSuccess(t(mode==='purge'?'upstreamCenter.storage.purged':'intelligenceMonitor.archived'));if(props.active)await load()}catch(err){if(!disposed)deleteError.value=extractApiErrorMessage(err,t('upstreamCenter.storage.actionFailed'))}finally{deleting.value=false}}
+async function archive(mode:'archive'|'purge'){if(!archiving.value||deleting.value)return;const item=archiving.value;deleting.value=true;deleteError.value='';try{if(item.source_type==='openai_oauth')await intelligenceMonitorAPI.permanentDelete(item.id);else if(mode==='purge')await upstreamCenterAPI.purge({kind:'intelligence',id:item.id,confirm_name:item.name});else await intelligenceMonitorAPI.archive(item.id);if(disposed)return;archiving.value=null;app.showSuccess(t(mode==='purge'?'upstreamCenter.storage.purged':'intelligenceMonitor.archived'));if(props.active)await load()}catch(err){if(!disposed)deleteError.value=extractApiErrorMessage(err,t('upstreamCenter.storage.actionFailed'))}finally{deleting.value=false}}
 watch(() => props.refreshKey, () => { if(props.active)void load() })
 watch(() => props.active, active => {
   if (active) return

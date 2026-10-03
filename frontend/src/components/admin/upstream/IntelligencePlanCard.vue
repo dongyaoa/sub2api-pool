@@ -35,6 +35,7 @@
         </template>
       </div>
       <div class="mt-3 flex items-center justify-between gap-2 text-[10px]"><span class="inline-flex items-center gap-1" :class="plan.enabled ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'"><Icon name="clock" size="xs" />{{ plan.enabled ? intervalLabel : t('intelligenceMonitor.manual') }}</span><span class="rounded-md px-1.5 py-0.5 font-medium" :class="statusClass(plan.latest_run?.status)">{{ t(`intelligenceMonitor.status.${plan.latest_run?.status || 'idle'}`) }}</span></div>
+      <div class="mt-2 flex items-center gap-1.5" data-testid="intelligence-plan-model"><span class="rounded-md border px-1.5 py-0.5 text-[10px] font-medium" :class="pelicanModelClass(plan.model)" :title="plan.model">{{ pelicanModelLabel(plan.model) }}</span><span class="text-[10px] text-gray-400">{{ plan.reasoning_effort }}</span></div>
       <div v-if="plan.enabled && !monitoringPaused" class="mt-2 flex min-h-5 items-center justify-between gap-2 text-[10px]" data-testid="intelligence-schedule">
         <span class="shrink-0 text-gray-400 dark:text-dark-400">{{ t('intelligenceMonitor.nextCheck') }}</span>
         <span v-if="active" class="text-right text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.afterCurrentRun') }}</span>
@@ -43,7 +44,7 @@
       </div>
       <div class="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-dark-700">
         <button type="button" class="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 disabled:opacity-40 dark:text-primary-400" :disabled="busy || active || monitoringPaused" @click="emit('run')"><Icon :name="active ? 'clock' : 'play'" size="xs" />{{ t(active ? `intelligenceMonitor.status.${plan.latest_run?.status}` : 'intelligenceMonitor.run') }}</button>
-        <div class="flex items-center gap-0.5"><button class="action" :disabled="busy || (!plan.enabled && monitoringPaused)" :title="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" :aria-label="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" @click="emit('toggle')"><Icon :name="plan.enabled ? 'clock' : 'play'" size="sm" /></button><button class="action" :disabled="busy || planActive" :title="t('intelligenceMonitor.edit')" :aria-label="t('intelligenceMonitor.edit')" @click="emit('edit')"><Icon name="edit" size="sm" /></button><button class="action hover:!text-rose-500" :disabled="busy || planActive" :title="t('intelligenceMonitor.archive')" :aria-label="t('intelligenceMonitor.archive')" @click="emit('archive')"><Icon name="trash" size="sm" /></button></div>
+        <div class="flex items-center gap-0.5"><button class="action" :disabled="busy || (!plan.enabled && monitoringPaused)" :title="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" :aria-label="t(plan.enabled ? 'intelligenceMonitor.pause' : 'intelligenceMonitor.resume')" @click="emit('toggle')"><Icon :name="plan.enabled ? 'clock' : 'play'" size="sm" /></button><button class="action" :disabled="busy || planActive" :title="t('intelligenceMonitor.edit')" :aria-label="t('intelligenceMonitor.edit')" @click="emit('edit')"><Icon name="edit" size="sm" /></button><button class="action hover:!text-rose-500" :disabled="busy || (!oauth && planActive)" :title="t(oauth ? 'intelligenceMonitor.permanentDelete' : 'intelligenceMonitor.archive')" :aria-label="t(oauth ? 'intelligenceMonitor.permanentDelete' : 'intelligenceMonitor.archive')" @click="emit('archive')"><Icon name="trash" size="sm" /></button></div>
       </div>
     </aside>
     <section class="flex min-w-0 flex-col px-4 py-3">
@@ -69,6 +70,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { pelicanModelLabel, pelicanModelClass } from '@/utils/pelicanModels'
 import Icon from '@/components/icons/Icon.vue'
 import type { IntelligencePlan, IntelligenceRate, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import type { UpstreamOverview } from '@/api/admin/upstreamCenter'

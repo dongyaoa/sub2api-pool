@@ -27,11 +27,11 @@ func intelligenceDBError(err error) error {
 	return err
 }
 
-const intelligencePlanColumns = `id,name,source_type,endpoint,api_key_encrypted,upstream_target_id,group_id,local_api_key_id,local_key_owner_id,supplier_note,group_note,rate_note,notes,api_mode,enabled,interval_seconds,timeout_seconds,created_by,last_run_at,next_run_at,created_at,updated_at,account_id,candy_enabled,candy_interval_seconds,candy_last_run_at,candy_next_run_at,local_api_key_borrowed`
+const intelligencePlanColumns = `id,name,source_type,endpoint,api_key_encrypted,upstream_target_id,group_id,local_api_key_id,local_key_owner_id,supplier_note,group_note,rate_note,notes,api_mode,enabled,interval_seconds,timeout_seconds,created_by,last_run_at,next_run_at,created_at,updated_at,account_id,candy_enabled,candy_interval_seconds,candy_last_run_at,candy_next_run_at,local_api_key_borrowed,model`
 
 func scanIntelligencePlan(row upstreamScanner) (*service.IntelligenceMonitorPlan, error) {
 	p := new(service.IntelligenceMonitorPlan)
-	err := row.Scan(&p.ID, &p.Name, &p.SourceType, &p.Endpoint, &p.APIKeyEncrypted, &p.UpstreamTargetID, &p.GroupID, &p.LocalAPIKeyID, &p.LocalKeyOwnerID, &p.SupplierNote, &p.GroupNote, &p.RateNote, &p.Notes, &p.APIMode, &p.Enabled, &p.IntervalSeconds, &p.TimeoutSeconds, &p.CreatedBy, &p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt, &p.AccountID, &p.CandyEnabled, &p.CandyIntervalSeconds, &p.CandyLastRunAt, &p.CandyNextRunAt, &p.LocalAPIKeyBorrowed)
+	err := row.Scan(&p.ID, &p.Name, &p.SourceType, &p.Endpoint, &p.APIKeyEncrypted, &p.UpstreamTargetID, &p.GroupID, &p.LocalAPIKeyID, &p.LocalKeyOwnerID, &p.SupplierNote, &p.GroupNote, &p.RateNote, &p.Notes, &p.APIMode, &p.Enabled, &p.IntervalSeconds, &p.TimeoutSeconds, &p.CreatedBy, &p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt, &p.AccountID, &p.CandyEnabled, &p.CandyIntervalSeconds, &p.CandyLastRunAt, &p.CandyNextRunAt, &p.LocalAPIKeyBorrowed, &p.Model)
 	return p, intelligenceDBError(err)
 }
 func (r *intelligenceMonitorRepository) ListPlans(ctx context.Context) ([]*service.IntelligenceMonitorPlan, error) {
@@ -74,6 +74,12 @@ func (r *intelligenceMonitorRepository) GetPlan(ctx context.Context, id int64) (
 }
 
 func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service.IntelligenceMonitorPlan) error {
+	if p.Model == "" {
+		p.Model = service.IntelligenceMonitorModel
+	}
+	if p.Model != service.IntelligenceMonitorModel && p.Model != service.IntelligenceMonitorSolModel {
+		return service.ErrIntelligenceInvalid
+	}
 	if p.CandyIntervalSeconds == 0 {
 		p.CandyIntervalSeconds = service.IntelligenceMonitorCandyDefaultIntervalSeconds
 	}
@@ -85,14 +91,20 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 	if err = lockManualOrderMembership(ctx, tx); err != nil {
 		return err
 	}
-	var oldSource string
+	if p.SourceType == "openai_oauth" {
+		if err = validateIntelligenceOAuthAccountExists(ctx, tx, p.AccountID); err != nil {
+			return err
+		}
+	}
+	var oldSource, oldModel string
 	var oldTargetID *int64
 	var oldAccountID *int64
+	var oldGroupID *int64
 	if p.ID > 0 {
 		var busy bool
 		var oldKeyID *int64
 		var oldBorrowed bool
-		err = tx.QueryRowContext(ctx, `SELECT local_api_key_id,source_type,upstream_target_id,local_api_key_borrowed,account_id FROM intelligence_monitor_plans WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, p.ID).Scan(&oldKeyID, &oldSource, &oldTargetID, &oldBorrowed, &oldAccountID)
+		err = tx.QueryRowContext(ctx, `SELECT local_api_key_id,source_type,upstream_target_id,local_api_key_borrowed,account_id,model,group_id FROM intelligence_monitor_plans WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, p.ID).Scan(&oldKeyID, &oldSource, &oldTargetID, &oldBorrowed, &oldAccountID, &oldModel, &oldGroupID)
 		if err != nil {
 			return intelligenceDBError(err)
 		}
@@ -108,12 +120,12 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 			}
 		}
 	}
-	if p.SourceType == "upstream" && p.UpstreamTargetID != nil && (p.ID == 0 || oldSource != "upstream" || oldTargetID == nil || *oldTargetID != *p.UpstreamTargetID) {
+	if p.SourceType == "upstream" && p.UpstreamTargetID != nil && (p.ID == 0 || oldSource != "upstream" || oldTargetID == nil || *oldTargetID != *p.UpstreamTargetID || oldModel != p.Model) {
 		// The membership lock serializes create/move/archive across all writers.
 		// Legacy duplicates remain editable in place; only entering a new target
-		// is rejected when it already has a live (including paused) plan.
+		// is rejected when it already has a live plan for the selected model.
 		var exists bool
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intelligence_monitor_plans WHERE source_type='upstream' AND upstream_target_id=$1 AND deleted_at IS NULL AND id<>$2)`, *p.UpstreamTargetID, p.ID).Scan(&exists)
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intelligence_monitor_plans WHERE source_type='upstream' AND upstream_target_id=$1 AND deleted_at IS NULL AND id<>$2 AND model=$3)`, *p.UpstreamTargetID, p.ID, p.Model).Scan(&exists)
 		if err != nil {
 			return err
 		}
@@ -121,12 +133,12 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 			return service.ErrIntelligenceUpstreamPlanExists
 		}
 	}
-	if p.SourceType == "openai_oauth" && p.AccountID != nil && (p.ID == 0 || oldSource != "openai_oauth" || oldAccountID == nil || *oldAccountID != *p.AccountID) {
+	if p.SourceType == "openai_oauth" && p.AccountID != nil && (p.ID == 0 || oldSource != "openai_oauth" || oldAccountID == nil || *oldAccountID != *p.AccountID || oldModel != p.Model) {
 		// Account membership follows the same transaction lock as create, move,
 		// and archive. Paused plans still reserve their account; existing legacy
 		// duplicates may be edited without preventing their later cleanup.
 		var exists bool
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intelligence_monitor_plans WHERE source_type='openai_oauth' AND account_id=$1 AND deleted_at IS NULL AND id<>$2)`, *p.AccountID, p.ID).Scan(&exists)
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intelligence_monitor_plans WHERE source_type='openai_oauth' AND account_id=$1 AND deleted_at IS NULL AND id<>$2 AND model=$3)`, *p.AccountID, p.ID, p.Model).Scan(&exists)
 		if err != nil {
 			return err
 		}
@@ -134,15 +146,25 @@ func (r *intelligenceMonitorRepository) SavePlan(ctx context.Context, p *service
 			return service.ErrIntelligenceOAuthPlanExists
 		}
 	}
+	if p.SourceType == "local_group" && p.GroupID != nil && (p.ID == 0 || oldSource != "local_group" || oldGroupID == nil || *oldGroupID != *p.GroupID || oldModel != p.Model) {
+		var exists bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intelligence_monitor_plans WHERE source_type='local_group' AND group_id=$1 AND deleted_at IS NULL AND id<>$2 AND model=$3)`, *p.GroupID, p.ID, p.Model).Scan(&exists)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return service.ErrIntelligenceLocalPlanExists
+		}
+	}
 	args := []any{p.Name, p.SourceType, p.Endpoint, p.APIKeyEncrypted, p.UpstreamTargetID, p.GroupID, p.LocalAPIKeyID, p.LocalKeyOwnerID, p.SupplierNote, p.GroupNote, p.RateNote, p.Notes, p.APIMode, p.Enabled, p.IntervalSeconds, p.TimeoutSeconds, p.CreatedBy}
 	if p.ID == 0 {
-		args = append(args, p.AccountID, p.CandyEnabled, p.CandyIntervalSeconds, p.LocalAPIKeyBorrowed)
-		err = tx.QueryRowContext(ctx, `INSERT INTO intelligence_monitor_plans(name,source_type,endpoint,api_key_encrypted,upstream_target_id,group_id,local_api_key_id,local_key_owner_id,supplier_note,group_note,rate_note,notes,api_mode,enabled,interval_seconds,timeout_seconds,created_by,account_id,candy_enabled,candy_interval_seconds,local_api_key_borrowed,next_run_at,candy_next_run_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,CASE WHEN $14 THEN NOW() ELSE NULL END,CASE WHEN $14 AND $19 THEN NOW() ELSE NULL END) RETURNING id,created_at,updated_at,next_run_at,candy_next_run_at`, args...).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt, &p.NextRunAt, &p.CandyNextRunAt)
+		args = append(args, p.AccountID, p.CandyEnabled, p.CandyIntervalSeconds, p.LocalAPIKeyBorrowed, p.Model)
+		err = tx.QueryRowContext(ctx, `INSERT INTO intelligence_monitor_plans(name,source_type,endpoint,api_key_encrypted,upstream_target_id,group_id,local_api_key_id,local_key_owner_id,supplier_note,group_note,rate_note,notes,api_mode,enabled,interval_seconds,timeout_seconds,created_by,account_id,candy_enabled,candy_interval_seconds,local_api_key_borrowed,model,next_run_at,candy_next_run_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,CASE WHEN $14 THEN NOW() ELSE NULL END,CASE WHEN $14 AND $19 THEN NOW() ELSE NULL END) RETURNING id,created_at,updated_at,next_run_at,candy_next_run_at`, args...).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt, &p.NextRunAt, &p.CandyNextRunAt)
 	} else {
 		// created_by is immutable and therefore is not an UPDATE argument. Keep
 		// placeholders contiguous: PostgreSQL cannot infer an unused $17 type.
-		args = append(args[:16], p.AccountID, p.CandyEnabled, p.CandyIntervalSeconds, p.LocalAPIKeyBorrowed, p.ID, p.UpdatedAt)
-		err = tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_plans p SET name=$1,source_type=$2,endpoint=$3,api_key_encrypted=$4,upstream_target_id=$5,group_id=$6,local_api_key_id=$7,local_key_owner_id=$8,supplier_note=$9,group_note=$10,rate_note=$11,notes=$12,api_mode=$13,enabled=$14,interval_seconds=$15,timeout_seconds=$16,account_id=$17,candy_enabled=$18,candy_interval_seconds=$19,local_api_key_borrowed=$20,
+		args = append(args[:16], p.AccountID, p.CandyEnabled, p.CandyIntervalSeconds, p.LocalAPIKeyBorrowed, p.ID, p.UpdatedAt, p.Model)
+		err = tx.QueryRowContext(ctx, `UPDATE intelligence_monitor_plans p SET name=$1,source_type=$2,endpoint=$3,api_key_encrypted=$4,upstream_target_id=$5,group_id=$6,local_api_key_id=$7,local_key_owner_id=$8,supplier_note=$9,group_note=$10,rate_note=$11,notes=$12,api_mode=$13,enabled=$14,interval_seconds=$15,timeout_seconds=$16,account_id=$17,candy_enabled=$18,candy_interval_seconds=$19,local_api_key_borrowed=$20,model=$23,
 next_run_at=CASE WHEN NOT $14 OR EXISTS(SELECT 1 FROM intelligence_monitor_runs r WHERE r.plan_id=p.id AND r.test_kind='pelican' AND r.status IN ('pending','running')) THEN NULL WHEN NOT enabled THEN NOW() WHEN interval_seconds<>$15 THEN NOW()+make_interval(secs=>$15) ELSE COALESCE(next_run_at,NOW()) END,
 candy_next_run_at=CASE WHEN NOT $14 OR NOT $18 OR EXISTS(SELECT 1 FROM intelligence_monitor_runs r WHERE r.plan_id=p.id AND r.test_kind='candy' AND r.status IN ('pending','running')) THEN NULL WHEN NOT enabled OR NOT candy_enabled THEN NOW() WHEN candy_interval_seconds<>$19 THEN NOW()+make_interval(secs=>$19) ELSE COALESCE(candy_next_run_at,NOW()) END,
 sort_order=CASE WHEN (source_type='openai_oauth') IS DISTINCT FROM ($2::varchar='openai_oauth') THEN NULL ELSE sort_order END,updated_at=clock_timestamp() WHERE id=$21 AND updated_at=$22 AND deleted_at IS NULL RETURNING updated_at,next_run_at,candy_next_run_at`, args...).Scan(&p.UpdatedAt, &p.NextRunAt, &p.CandyNextRunAt)

@@ -22,6 +22,7 @@ func (h *IntelligenceMonitorHandler) GetPublicDisplay(c *gin.Context) {
 func (h *IntelligenceMonitorHandler) UpdatePublicDisplay(c *gin.Context) {
 	var input struct {
 		Enabled     *bool    `json:"enabled" binding:"required"`
+		HideFailed  bool     `json:"hide_failed"`
 		Title       string   `json:"title"`
 		Description string   `json:"description"`
 		Notice      string   `json:"notice"`
@@ -33,7 +34,7 @@ func (h *IntelligenceMonitorHandler) UpdatePublicDisplay(c *gin.Context) {
 		return
 	}
 	cfg, err := h.svc.UpdatePublicDisplay(c.Request.Context(), service.IntelligencePublicDisplay{
-		PublicPelicanConfig: service.PublicPelicanConfig{Enabled: *input.Enabled, Title: input.Title, Description: input.Description, Notice: input.Notice}, PlanIDs: *input.PlanIDs,
+		PublicPelicanConfig: service.PublicPelicanConfig{Enabled: *input.Enabled, Title: input.Title, Description: input.Description, Notice: input.Notice}, PlanIDs: *input.PlanIDs, HideFailed: input.HideFailed,
 	})
 	if response.ErrorFrom(c, err) {
 		return

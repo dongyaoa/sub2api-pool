@@ -32,6 +32,10 @@ func (s *IntelligenceMonitorService) generate(ctx context.Context, run *Intellig
 	if !validTest {
 		return nil, "", "unsupported intelligence test"
 	}
+	run.Model = intelligenceMonitorModel(run.Model)
+	if err := validateIntelligenceMonitorModel(run.Model); err != nil {
+		return nil, "", "unsupported intelligence model"
+	}
 	client, endpoint := s.clientAndEndpoint(run)
 	if run.SourceType != "local_group" {
 		if err := validateEndpoint(endpoint); err != nil {
@@ -44,10 +48,10 @@ func (s *IntelligenceMonitorService) generate(ctx context.Context, run *Intellig
 	// Loopback requests retain their trusted buffered path and its IQ deadline;
 	// switching that path to streaming would re-enable ordinary gateway guards.
 	stream := run.SourceType != "local_group"
-	payload := map[string]any{"model": IntelligenceMonitorModel, "input": prompt, "reasoning": map[string]string{"effort": IntelligenceMonitorReasoning}, "stream": stream, "max_output_tokens": maxOutputTokens}
+	payload := map[string]any{"model": run.Model, "input": prompt, "reasoning": map[string]string{"effort": IntelligenceMonitorReasoning}, "stream": stream, "max_output_tokens": maxOutputTokens}
 	if run.APIMode == MonitorAPIModeChatCompletions {
 		path = "/v1/chat/completions"
-		payload = map[string]any{"model": IntelligenceMonitorModel, "messages": []map[string]string{{"role": "user", "content": prompt}}, "reasoning_effort": IntelligenceMonitorReasoning, "stream": stream, "max_completion_tokens": maxOutputTokens}
+		payload = map[string]any{"model": run.Model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "reasoning_effort": IntelligenceMonitorReasoning, "stream": stream, "max_completion_tokens": maxOutputTokens}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

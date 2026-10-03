@@ -55,6 +55,7 @@ func TestIntelligencePublicDisplayDefaultsAndValidation(t *testing.T) {
 	cfg, err := svc.GetPublicDisplay(context.Background())
 	require.NoError(t, err)
 	require.False(t, cfg.Enabled)
+	require.False(t, cfg.HideFailed)
 	require.Equal(t, "鹈鹕监测", cfg.Title)
 	require.NotNil(t, cfg.PlanIDs)
 	input := IntelligencePublicDisplay{PublicPelicanConfig: PublicPelicanConfig{Enabled: true, Title: "  展示标题  ", Description: " 描述 ", Notice: " 公告 "}, PlanIDs: []int64{7, 7, 8}}

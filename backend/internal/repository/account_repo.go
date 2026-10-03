@@ -1033,6 +1033,11 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 		txClient = r.client
 	}
 
+	// Share the monitor membership lock with create/move/permanent deletion so
+	// an OAuth plan cannot appear between this cleanup and the account deletion.
+	if err := purgeAccountOAuthMonitors(ctx, txClient, id); err != nil {
+		return err
+	}
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(id)).Exec(ctx); err != nil {
 		return err
 	}

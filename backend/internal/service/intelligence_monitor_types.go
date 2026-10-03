@@ -8,6 +8,7 @@ import (
 )
 
 const IntelligenceMonitorModel = "gpt-6-astra"
+const IntelligenceMonitorSolModel = "gpt-6.1-sol"
 const IntelligenceMonitorReasoning = "high"
 const IntelligenceMonitorPrompt = "创建一个 HTML，内容是用 SVG 绘制一个鹈鹕骑自行车的 2D 动画。你不需要任何测试。"
 const IntelligenceMonitorRetainedRuns = 20
@@ -38,8 +39,9 @@ var (
 	ErrIntelligenceNotFound           = infraerrors.NotFound("INTELLIGENCE_MONITOR_NOT_FOUND", "intelligence monitoring plan or run not found")
 	ErrIntelligenceInvalid            = infraerrors.BadRequest("INTELLIGENCE_MONITOR_INVALID", "invalid intelligence monitoring configuration")
 	ErrIntelligenceBusy               = infraerrors.Conflict("INTELLIGENCE_MONITOR_BUSY", "this plan has a pending or running generation; wait for completion")
-	ErrIntelligenceUpstreamPlanExists = infraerrors.Conflict("INTELLIGENCE_UPSTREAM_PLAN_EXISTS", "this upstream group already has an intelligence monitoring plan")
-	ErrIntelligenceOAuthPlanExists    = infraerrors.Conflict("INTELLIGENCE_OAUTH_PLAN_EXISTS", "this OAuth account already has an intelligence monitoring plan")
+	ErrIntelligenceUpstreamPlanExists = infraerrors.Conflict("INTELLIGENCE_UPSTREAM_PLAN_EXISTS", "this upstream group already has an intelligence monitoring plan for this model")
+	ErrIntelligenceOAuthPlanExists    = infraerrors.Conflict("INTELLIGENCE_OAUTH_PLAN_EXISTS", "this OAuth account already has an intelligence monitoring plan for this model")
+	ErrIntelligenceLocalPlanExists    = infraerrors.Conflict("INTELLIGENCE_LOCAL_PLAN_EXISTS", "this local group already has an intelligence monitoring plan for this model")
 	ErrIntelligenceOAuthCoolingDown   = infraerrors.Conflict("INTELLIGENCE_OAUTH_COOLING_DOWN", "OAuth monitoring is paused until the weekly quota recovers")
 	ErrIntelligenceOAuthUnavailable   = infraerrors.Conflict("INTELLIGENCE_OAUTH_UNAVAILABLE", "OAuth monitoring is paused until the account becomes available")
 	ErrIntelligenceFilterUnavailable  = infraerrors.ServiceUnavailable("INTELLIGENCE_MONITOR_FILTER_UNAVAILABLE", "filtered intelligence monitoring is unavailable")
@@ -94,6 +96,7 @@ type IntelligenceMonitorPlan struct {
 	AllowWhileBusy           bool                            `json:"-"`
 }
 type IntelligenceMonitorInput struct {
+	Model                *string         `json:"model"`
 	Name                 *string         `json:"name"`
 	SourceType           *string         `json:"source_type"`
 	Endpoint             *string         `json:"endpoint"`

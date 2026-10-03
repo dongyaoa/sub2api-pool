@@ -1,7 +1,12 @@
 <template>
   <BaseDialog :show="show" :title="t(plan ? 'intelligenceMonitor.edit' : oauthOnly ? 'intelligenceMonitor.oauth.add' : localOnly ? 'intelligenceMonitor.local.add' : 'intelligenceMonitor.add')" width="wide" :show-close-button="!saving" :close-on-escape="!saving" @close="close">
     <form id="intelligence-plan-form" class="space-y-5" @submit.prevent="save">
-      <div class="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/50"><Icon name="lightbulb" size="md" class="text-primary-500"/><div class="min-w-0 flex-1"><p class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ PELICAN_MODEL }} <span class="ml-2 rounded border border-primary-200 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:border-primary-800">{{ PELICAN_REASONING }}</span></p><p class="mt-1 text-xs text-gray-500">{{ t('intelligenceMonitor.form.fixedPrompt') }}</p></div></div>
+      <div class="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900/50">
+        <div class="mb-3 flex items-center justify-between gap-3"><label for="intelligence-model" class="flex items-center gap-2 text-xs font-semibold text-gray-700 dark:text-gray-200"><Icon name="lightbulb" size="sm" class="text-primary-500"/>{{ t('intelligenceMonitor.model') }}</label><span class="rounded-md border border-primary-200 bg-white px-2 py-1 text-[10px] font-medium text-primary-600 dark:border-primary-800 dark:bg-dark-800">{{ t('intelligenceMonitor.reasoning') }} · {{ PELICAN_REASONING }}</span></div>
+        <Select id="intelligence-model" v-model="form.model" :options="modelOptions" :searchable="false" :disabled="saving" :aria-label="t('intelligenceMonitor.model')" />
+        <p class="mt-2 text-xs leading-5 text-gray-500">{{ t('intelligenceMonitor.form.modelHint') }}</p>
+        <p v-if="duplicateSource" role="alert" class="mt-2 text-xs text-rose-500">{{ t(duplicateSource) }}</p>
+      </div>
       <div v-if="!oauthOnly"><label for="intelligence-name" class="input-label">{{ t('intelligenceMonitor.form.name') }}</label><input id="intelligence-name" v-model="form.name" class="input" required maxlength="100" :placeholder="t('intelligenceMonitor.form.namePlaceholder')"/></div>
       <div v-if="!oauthOnly && !lockedUpstream && !localOnly"><label class="input-label">{{ t('intelligenceMonitor.form.source') }}</label><div class="grid gap-2" :class="sources.length > 2 ? 'grid-cols-3' : 'grid-cols-2'"><button v-for="source in sources" :key="source.value" type="button" class="flex items-center justify-center gap-2 rounded-xl border px-2 py-3 text-xs font-medium transition-colors" :class="form.source_type === source.value ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-600 dark:bg-primary-500/10 dark:text-primary-300' : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-dark-600 dark:text-dark-300'" :aria-pressed="form.source_type === source.value" @click="form.source_type = source.value"><Icon :name="source.icon" size="sm"/>{{ t(`intelligenceMonitor.source.${source.value}`) }}</button></div></div>
       <div v-if="oauthOnly" class="space-y-3">
@@ -67,7 +72,7 @@
       <details class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900/50"><summary class="cursor-pointer text-xs font-medium text-gray-500">{{ t('intelligenceMonitor.prompt') }}</summary><p class="mt-2 text-xs leading-6 text-gray-600 dark:text-dark-300">{{ PELICAN_PROMPT }}</p></details>
       <p v-if="error" role="alert" class="rounded-lg bg-rose-50 p-3 text-sm text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">{{ error }}</p>
     </form>
-    <template #footer><div class="flex justify-end gap-3"><button type="button" class="btn btn-secondary" :disabled="saving" @click="close">{{ t('common.cancel') }}</button><button type="submit" form="intelligence-plan-form" class="btn btn-primary" :disabled="saving || (oauthOnly && (accountsLoading || !accountsReady || (lockedOAuth && Boolean(accountSelectionError))))">{{ t(saving ? 'intelligenceMonitor.form.saving' : 'intelligenceMonitor.form.save') }}</button></div></template>
+    <template #footer><div class="flex justify-end gap-3"><button type="button" class="btn btn-secondary" :disabled="saving" @click="close">{{ t('common.cancel') }}</button><button type="submit" form="intelligence-plan-form" class="btn btn-primary" :disabled="saving || Boolean(duplicateSource) || (oauthOnly && (accountsLoading || !accountsReady || (lockedOAuth && Boolean(accountSelectionError))))">{{ t(saving ? 'intelligenceMonitor.form.saving' : 'intelligenceMonitor.form.save') }}</button></div></template>
   </BaseDialog>
 </template>
 <script setup lang="ts">
@@ -78,6 +83,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { intelligenceMonitorAPI, PELICAN_MODEL, PELICAN_REASONING, PELICAN_PROMPT, type IntelligencePlan, type IntelligencePlanInput, type IntelligenceSource } from '@/api/admin/intelligenceMonitor'
+import { PELICAN_MODELS } from '@/utils/pelicanModels'
 import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
 import { getAll } from '@/api/admin/groups'
 import type { AdminGroup, AccountListItem } from '@/types'
@@ -86,7 +92,7 @@ import { extractApiErrorCode, extractApiErrorMessage, extractApiErrorMetadata } 
 import { intelligenceRateLabel } from './intelligencePreview'
 import { domain } from './format'
 import IntelligenceLocalSource from './IntelligenceLocalSource.vue'
-const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; oauthAccountId?: number; localOnly?: boolean; managedKeyIds?: number[]; monitoredAccountIds?: number[]; upstreamTargetId?: number }>()
+const props = defineProps<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly?: boolean; oauthAccountId?: number; localOnly?: boolean; managedKeyIds?: number[]; monitoredAccountIds?: number[]; monitoredPlans?: IntelligencePlan[]; initialModel?: string; upstreamTargetId?: number }>()
 const emit = defineEmits<{ close: []; saved: [plan?: IntelligencePlan] }>()
 const { t } = useI18n()
 const lockedUpstream = computed(() => props.upstreamTargetId !== undefined)
@@ -104,8 +110,9 @@ const timeoutOptions = computed(() => {
     ? [...presets, saved].sort((a, b) => a - b)
     : presets
 })
+const modelOptions = PELICAN_MODELS.map(option => ({ ...option }))
 const protocolOptions = [{ value: 'responses', label: 'Responses' }, { value: 'chat_completions', label: 'Chat Completions' }]
-const defaults = (): IntelligencePlanInput & { candy_enabled: boolean; candy_interval_seconds: number } => ({ name:'',source_type:oauthOnly.value?'openai_oauth':localOnly.value?'local_group':'upstream',account_id:null,endpoint:'',api_key:'',upstream_target_id:null,group_id:null,local_api_key_id:null,supplier_note:'',group_note:'',rate_note:'',notes:'',api_mode:'responses',enabled:true,candy_enabled:false,candy_interval_seconds:180,interval_seconds:300,timeout_seconds:600 })
+const defaults = (): IntelligencePlanInput & { model: string; candy_enabled: boolean; candy_interval_seconds: number } => ({ name:'',model:PELICAN_MODELS.some(option => option.value === props.initialModel) ? props.initialModel! : PELICAN_MODEL,source_type:oauthOnly.value?'openai_oauth':localOnly.value?'local_group':'upstream',account_id:null,endpoint:'',api_key:'',upstream_target_id:null,group_id:null,local_api_key_id:null,supplier_note:'',group_note:'',rate_note:'',notes:'',api_mode:'responses',enabled:true,candy_enabled:false,candy_interval_seconds:180,interval_seconds:300,timeout_seconds:600 })
 const form = reactive(defaults()), groups = ref<AdminGroup[]>([]), saving = ref(false), error = ref(''), groupError = ref(''), groupsLoading = ref(false)
 const intervalChoice = ref<number | 'custom'>(300), customInterval = ref('300'), intervalError = ref('')
 const eligibleSuppliers = computed(() => (props.overview?.suppliers || []).map(supplier => ({ ...supplier, targets: supplier.targets.filter(target => target.provider === 'openai') })).filter(supplier => supplier.targets.length))
@@ -142,13 +149,32 @@ function chooseInterval(value: number | 'custom') {
 }
 watch(() => form.enabled, () => { intervalError.value = '' })
 const oauthAccounts = ref<AccountListItem[]>([]), accountsLoading = ref(false), accountsReady = ref(false), accountError = ref(''), accountSelectionError = ref('')
-const monitoredAccounts = computed(() => new Set(props.monitoredAccountIds || []))
-const availableAccounts = computed(() => oauthAccounts.value.filter(account => account.id === props.plan?.account_id || !monitoredAccounts.value.has(account.id)))
+const sameModelPlans = computed(() => (props.monitoredPlans || []).filter(plan => plan.id !== props.plan?.id && (plan.model || PELICAN_MODEL) === form.model))
+const monitoredAccounts = computed(() => {
+  const occupied = new Set(props.monitoredPlans !== undefined
+    ? sameModelPlans.value.filter(plan => plan.source_type === 'openai_oauth').flatMap(plan => plan.account_id ? [plan.account_id] : [])
+    : (props.monitoredAccountIds || []).filter(id => id !== props.plan?.account_id))
+  // Legacy duplicate plans can still update their settings without changing bindings.
+  if (props.plan?.source_type === 'openai_oauth' && (props.plan.model || PELICAN_MODEL) === form.model && props.plan.account_id) occupied.delete(props.plan.account_id)
+  return occupied
+})
+const duplicateSource = computed(() => {
+  const saved = props.plan
+  if (saved?.source_type === form.source_type && (saved.model || PELICAN_MODEL) === form.model) {
+    if (form.source_type === 'upstream' && saved.upstream_target_id === form.upstream_target_id) return ''
+    if (form.source_type === 'local_group' && saved.group_id === form.group_id) return ''
+  }
+  if (form.source_type === 'openai_oauth' && form.account_id && monitoredAccounts.value.has(form.account_id)) return 'intelligenceMonitor.oauth.alreadyAdded'
+  if (form.source_type === 'upstream' && form.upstream_target_id && sameModelPlans.value.some(plan => plan.source_type === 'upstream' && plan.upstream_target_id === form.upstream_target_id)) return 'intelligenceMonitor.groupMonitor.alreadyExists'
+  if (form.source_type === 'local_group' && form.group_id && sameModelPlans.value.some(plan => plan.source_type === 'local_group' && plan.group_id === form.group_id)) return 'intelligenceMonitor.local.alreadyAdded'
+  return ''
+})
+const availableAccounts = computed(() => oauthAccounts.value.filter(account => !monitoredAccounts.value.has(account.id)))
 const accountOptions = computed(() => availableAccounts.value.map(account => ({ value: account.id, label: account.name })))
 const selectedAccount = computed(() => availableAccounts.value.find(account => account.id === form.account_id))
 const lockedAccount = computed(() => oauthAccounts.value.find(account => account.id === props.oauthAccountId))
 watch(monitoredAccounts, occupied => {
-  if (!props.show || !oauthOnly.value || !form.account_id || form.account_id === props.plan?.account_id) return
+  if (!props.show || !oauthOnly.value || !form.account_id) return
   if (lockedOAuth.value) {
     accountSelectionError.value = occupied.has(form.account_id) ? t('intelligenceMonitor.oauth.alreadyAdded') : !lockedAccount.value || !eligibleAccount(lockedAccount.value) ? t('intelligenceMonitor.oauth.unavailable') : ''
     return
@@ -189,7 +215,7 @@ async function loadAccounts() {
       oauthAccounts.value = account.id === id ? [account] : []
       accountsReady.value = true
       form.name = lockedAccount.value?.name || ''
-      accountSelectionError.value = monitoredAccounts.value.has(id) && id !== props.plan?.account_id
+      accountSelectionError.value = monitoredAccounts.value.has(id)
         ? t('intelligenceMonitor.oauth.alreadyAdded')
         : !lockedAccount.value || !eligibleAccount(lockedAccount.value) ? t('intelligenceMonitor.oauth.unavailable') : ''
       return
@@ -224,6 +250,7 @@ watch([() => props.show, () => props.upstreamTargetId, () => props.plan?.id, () 
   if (!show) return
   const current = generation
   Object.assign(form, defaults(), props.plan ? { ...props.plan, api_key:'' } : {})
+  form.model = props.plan?.model || form.model || PELICAN_MODEL
   form.candy_enabled = Boolean(props.plan?.candy_enabled)
   form.candy_interval_seconds = candyIntervals.includes(props.plan?.candy_interval_seconds ?? 180) ? props.plan?.candy_interval_seconds ?? 180 : 180
   // Existing managed keys remain automatic; explicit administrator keys retain their binding.
@@ -251,6 +278,8 @@ watch([() => props.show, () => props.upstreamTargetId, () => props.plan?.id, () 
 async function save() {
   if (saving.value) return
   error.value = ''
+  if (!PELICAN_MODELS.some(option => option.value === form.model)) { error.value = t('intelligenceMonitor.form.validModel'); return }
+  if (duplicateSource.value) return
   intervalError.value = ''
   if (lockedUpstream.value) {
     form.source_type = 'upstream'
@@ -286,7 +315,7 @@ async function save() {
     if (!form.api_key?.trim() && (!props.plan || props.plan.source_type !== 'external')) { error.value=t('intelligenceMonitor.form.requiredKey'); return }
   }
   saving.value=true
-  const input: IntelligencePlanInput = { name:oauthOnly.value?'':form.name.trim(),source_type:oauthOnly.value?'openai_oauth':form.source_type,account_id:oauthOnly.value?form.account_id:null,endpoint:form.source_type==='external' ? form.endpoint?.trim() : undefined,api_key:form.source_type==='external' ? form.api_key?.trim() || undefined : undefined,upstream_target_id:form.source_type==='upstream' ? form.upstream_target_id : null,group_id:form.source_type==='local_group' ? form.group_id : null,local_api_key_id:form.source_type==='local_group' ? form.local_api_key_id ?? null : undefined,supplier_note:form.supplier_note.trim(),group_note:form.group_note.trim(),rate_note:form.rate_note.trim(),notes:form.notes.trim(),api_mode:oauthOnly.value?'responses':form.api_mode,enabled:form.enabled,candy_enabled:Boolean(form.candy_enabled),candy_interval_seconds:form.candy_interval_seconds,interval_seconds:form.interval_seconds,timeout_seconds:form.timeout_seconds }
+  const input: IntelligencePlanInput = { name:oauthOnly.value?'':form.name.trim(),model:form.model,source_type:oauthOnly.value?'openai_oauth':form.source_type,account_id:oauthOnly.value?form.account_id:null,endpoint:form.source_type==='external' ? form.endpoint?.trim() : undefined,api_key:form.source_type==='external' ? form.api_key?.trim() || undefined : undefined,upstream_target_id:form.source_type==='upstream' ? form.upstream_target_id : null,group_id:form.source_type==='local_group' ? form.group_id : null,local_api_key_id:form.source_type==='local_group' ? form.local_api_key_id ?? null : undefined,supplier_note:form.supplier_note.trim(),group_note:form.group_note.trim(),rate_note:form.rate_note.trim(),notes:form.notes.trim(),api_mode:oauthOnly.value?'responses':form.api_mode,enabled:form.enabled,candy_enabled:Boolean(form.candy_enabled),candy_interval_seconds:form.candy_interval_seconds,interval_seconds:form.interval_seconds,timeout_seconds:form.timeout_seconds }
   try { const saved = props.plan ? await intelligenceMonitorAPI.update(props.plan.id,input) : await intelligenceMonitorAPI.create(input); emit('saved', saved); emit('close') }
   catch (err) {
     const detail = extractApiErrorMetadata(err)?.detail
@@ -300,8 +329,10 @@ async function save() {
       ? t('intelligenceMonitor.oauth.unavailable')
       : code === 'INTELLIGENCE_UPSTREAM_PLAN_EXISTS'
       ? t('intelligenceMonitor.groupMonitor.alreadyExists')
-      : detailText === 'the selected account must support the fixed gpt-6-astra model without remapping'
-      ? t('intelligenceMonitor.oauth.fixedModelRequired')
+      : code === 'INTELLIGENCE_LOCAL_PLAN_EXISTS'
+      ? t('intelligenceMonitor.local.alreadyAdded')
+      : /selected account must support.*model without remapping/.test(detailText)
+      ? t('intelligenceMonitor.oauth.fixedModelRequired', { model: form.model })
       : detailText === 'the selected OAuth account is disabled, paused, expired, rate limited or cooling down'
         ? t('intelligenceMonitor.oauth.unavailable')
       : detailText || extractApiErrorMessage(err,t('intelligenceMonitor.saveFailed'))

@@ -71,4 +71,22 @@ func TestIntelligencePublicDisplayRoutesRequireAdmin(t *testing.T) {
 			require.Equal(t, status, out.Code, method)
 		}
 	}
+	for _, route := range []struct{ method, path string }{
+		{http.MethodDelete, "/runs/7"},
+		{http.MethodDelete, "/plans/7/permanent"},
+		{http.MethodPut, "/plans/enabled"},
+		{http.MethodGet, "/plans/schedule-status"},
+	} {
+		for _, authenticated := range []bool{false, true} {
+			out := httptest.NewRecorder()
+			req := httptest.NewRequest(route.method, "/api/v1/admin/intelligence-monitors"+route.path, nil)
+			status := http.StatusUnauthorized
+			if authenticated {
+				req.Header.Set("Authorization", "Bearer ordinary-user")
+				status = http.StatusForbidden
+			}
+			router.ServeHTTP(out, req)
+			require.Equal(t, status, out.Code, route.method+" "+route.path)
+		}
+	}
 }

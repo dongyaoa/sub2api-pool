@@ -9,7 +9,7 @@ vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: api 
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.showSuccess }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 const dialog = defineComponent({ props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' })
-const settings = (): IntelligencePublicDisplaySettings => ({ enabled: false, title: 'Public title', description: 'Public description', notice: 'Public notice', plan_ids: [2] })
+const settings = (): IntelligencePublicDisplaySettings => ({ enabled: false, hide_failed: false, title: 'Public title', description: 'Public description', notice: 'Public notice', plan_ids: [2] })
 const plan = (id: number, source_type: IntelligenceSource = 'local_group'): IntelligencePlan => ({
   id, source_type, name: `PRIVATE PLAN ${id}`, supplier_note: 'PRIVATE SUPPLIER', group_note: 'PRIVATE GROUP NOTE', rate_note: 'PRIVATE RATE', notes: 'PRIVATE NOTES',
   api_mode: 'responses', enabled: false, interval_seconds: 300, timeout_seconds: 600,
@@ -34,6 +34,27 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined })
 
 describe('intelligence public display settings', () => {
+  it('loads and saves hide-failed independently, while preserving both model plans of one group', async () => {
+    api.publicDisplay.mockResolvedValue({ ...settings(), hide_failed: true, plan_ids: [1, 2] })
+    api.plans.mockResolvedValue({ items: [plan(1), { ...plan(2), group_id: 1, local_group_name: 'Visible group 1', model: 'gpt-6.1-sol' }] })
+    const view = render(); await flushPromises()
+    expect(view.get(input('hide-failed')).attributes('aria-checked')).toBe('true')
+    expect(view.get('[data-public-plan="1"]').text()).toContain('GPT-6 Astra')
+    expect(view.get('[data-public-plan="2"]').text()).toContain('GPT-6.1 Sol')
+    await view.get(input('hide-failed')).trigger('click')
+    await view.get(saveButton).trigger('click'); await flushPromises()
+    expect(api.updatePublicDisplay).toHaveBeenCalledWith({ ...settings(), hide_failed: false, plan_ids: [1, 2] })
+  })
+
+  it('defaults missing legacy hide-failed settings to off', async () => {
+    const legacy = settings(); delete legacy.hide_failed
+    api.publicDisplay.mockResolvedValue(legacy)
+    const view = render(); await flushPromises()
+    expect(view.get(input('hide-failed')).attributes('aria-checked')).toBe('false')
+    await view.get(saveButton).trigger('click'); await flushPromises()
+    expect(api.updatePublicDisplay).toHaveBeenCalledWith({ ...legacy, hide_failed: false })
+  })
+
   it('only loads on opening, preserves saved copy and selections and never copies private plan information', async () => {
     const view = render(false)
     expect(api.publicDisplay).not.toHaveBeenCalled()
@@ -63,7 +84,7 @@ describe('intelligence public display settings', () => {
     await view.get(input('notice')).setValue('New public notice')
     await view.get(checkbox(1)).setValue(true)
     await view.get(saveButton).trigger('click'); await flushPromises()
-    expect(api.updatePublicDisplay).toHaveBeenCalledWith({ enabled: true, title: 'New public title', description: 'New public description', notice: 'New public notice', plan_ids: [2, 1] })
+    expect(api.updatePublicDisplay).toHaveBeenCalledWith({ enabled: true, hide_failed: false, title: 'New public title', description: 'New public description', notice: 'New public notice', plan_ids: [2, 1] })
   })
 
   it.each(['settings', 'plans'])('fails closed when %s loading fails and allows retry without submitting defaults', async failure => {
@@ -116,7 +137,7 @@ describe('intelligence public display settings', () => {
     expect((view.get(checkbox(2)).element as HTMLInputElement).checked).toBe(true)
     await view.get('[data-testid="public-display-clear"]').trigger('click')
     await view.get(saveButton).trigger('click'); await flushPromises()
-    expect(api.updatePublicDisplay).toHaveBeenCalledWith({ enabled: false, title: '', description: '', notice: '', plan_ids: [] })
+    expect(api.updatePublicDisplay).toHaveBeenCalledWith({ enabled: false, hide_failed: false, title: '', description: '', notice: '', plan_ids: [] })
     expect(view.text()).not.toContain('PRIVATE')
   })
 

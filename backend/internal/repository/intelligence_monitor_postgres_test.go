@@ -49,7 +49,7 @@ func intelligenceMonitorTestDB(t *testing.T, legacySchema ...bool) (*sql.DB, con
 	})
 	_, err = db.ExecContext(ctx, `SET search_path TO `+pqQuoteIdentifier(schema))
 	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `CREATE TABLE upstream_targets(id BIGINT PRIMARY KEY); CREATE TABLE accounts(id BIGINT PRIMARY KEY); CREATE TABLE api_keys(id BIGINT PRIMARY KEY,status TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),deleted_at TIMESTAMPTZ)`)
+	_, err = db.ExecContext(ctx, `CREATE TABLE upstream_targets(id BIGINT PRIMARY KEY); CREATE TABLE accounts(id BIGINT PRIMARY KEY,deleted_at TIMESTAMPTZ); CREATE TABLE api_keys(id BIGINT PRIMARY KEY,status TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),deleted_at TIMESTAMPTZ)`)
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `CREATE TABLE settings(key VARCHAR(100) PRIMARY KEY,value TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`)
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func intelligenceMonitorTestDB(t *testing.T, legacySchema ...bool) (*sql.DB, con
 	// required by current repository reads even when testing old timeout schemas.
 	_, err = db.ExecContext(ctx, `ALTER TABLE intelligence_monitor_plans ADD COLUMN IF NOT EXISTS sort_order BIGINT`)
 	require.NoError(t, err)
-	for _, name := range []string{"257_intelligence_candy_monitor.sql", "258_intelligence_candy_schedule.sql", "259_intelligence_local_key_ownership.sql", "260_intelligence_candy_grading_version.sql", "261_intelligence_candy_fingerprint.sql"} {
+	for _, name := range []string{"257_intelligence_candy_monitor.sql", "258_intelligence_candy_schedule.sql", "259_intelligence_local_key_ownership.sql", "260_intelligence_candy_grading_version.sql", "261_intelligence_candy_fingerprint.sql", "262_intelligence_monitor_models.sql"} {
 		migration, err = migrations.FS.ReadFile(name)
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, string(migration))

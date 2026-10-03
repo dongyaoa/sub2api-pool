@@ -10,7 +10,8 @@
         <span class="shrink-0 rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold tabular-nums text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" :title="t('intelligenceMonitor.local.groupRate')" data-testid="local-group-rate">{{ rate }}</span>
       </div>
 
-      <div class="my-3.5 min-w-0 rounded-lg bg-gray-50 px-2.5 py-2 dark:bg-dark-900/40">
+      <div class="mt-2.5 flex items-center gap-1.5" data-testid="local-plan-model"><span class="rounded-md border px-1.5 py-0.5 text-[10px] font-medium" :class="pelicanModelClass(plan.model)" :title="plan.model">{{ pelicanModelLabel(plan.model) }}</span><span class="text-[10px] text-gray-400">{{ plan.reasoning_effort }}</span></div>
+      <div class="my-3 min-w-0 rounded-lg bg-gray-50 px-2.5 py-2 dark:bg-dark-900/40">
         <div class="flex min-w-0 items-center justify-between gap-2 text-[10px]">
           <span class="inline-flex shrink-0 items-center gap-1 text-gray-500 dark:text-dark-300"><Icon name="key" size="xs" />{{ t(plan.local_api_key_managed !== false ? 'intelligenceMonitor.local.managedBadge' : 'intelligenceMonitor.local.ownBadge') }}</span>
           <span class="truncate font-mono text-gray-400">{{ plan.api_key_masked || '••••' }}</span>
@@ -72,6 +73,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { pelicanModelLabel, pelicanModelClass } from '@/utils/pelicanModels'
 import Icon from '@/components/icons/Icon.vue'
 import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import type { UpstreamOverview } from '@/api/admin/upstreamCenter'

@@ -52,12 +52,13 @@ func TestIntelligencePublicDisplayHandlerValidatesBoundedSettings(t *testing.T) 
 	}
 	require.Zero(t, repo.saves)
 	out := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/settings", strings.NewReader(`{"enabled":false,"title":"新标题","description":"介绍","notice":"公告","plan_ids":[1,1,2]}`))
+	req := httptest.NewRequest(http.MethodPut, "/settings", strings.NewReader(`{"enabled":false,"hide_failed":true,"title":"新标题","description":"介绍","notice":"公告","plan_ids":[1,1,2]}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(out, req)
 	require.Equal(t, http.StatusOK, out.Code, out.Body.String())
 	require.Equal(t, "no-store", out.Header().Get("Cache-Control"))
 	require.Equal(t, []int64{1, 2}, repo.cfg.PlanIDs)
+	require.True(t, repo.cfg.HideFailed)
 	require.Equal(t, 1, repo.saves)
 }
 

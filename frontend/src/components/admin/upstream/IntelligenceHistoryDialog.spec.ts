@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import IntelligenceHistoryDialog from './IntelligenceHistoryDialog.vue'
 
-const mocks = vi.hoisted(() => ({ runs: vi.fn(), detail: vi.fn() }))
+const mocks = vi.hoisted(() => ({ runs: vi.fn(), detail: vi.fn(), deleteRun: vi.fn() }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: mocks }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
@@ -329,5 +329,68 @@ describe('intelligence history polling state', () => {
     expect(runButton(view, 111).classes()).toContain('border-primary-300')
     expect(view.get('[data-testid="artifact-preview"]').text()).toBe('111')
     expect(view.find('pre').exists()).toBe(false)
+  })
+})
+
+
+describe('individual artwork removal', () => {
+  it('deletes only the selected completed artwork, refreshes the gallery and notifies its parent', async () => {
+    let items = [run(111), run(112)]
+    mocks.runs.mockImplementation(async () => ({ items, total: items.length, page: 1, page_size: 12 }))
+    mocks.deleteRun.mockImplementation(async (id: number) => { items = items.filter(item => item.id !== id) })
+    const view = render(); await flushPromises()
+    await view.get('[data-testid="delete-artwork"]').trigger('click')
+    const confirmation = view.getComponent({ name: 'IntelligencePermanentDeleteDialog' })
+    expect(confirmation.props('artwork')).toBe(true)
+    expect(mocks.deleteRun).not.toHaveBeenCalled()
+    confirmation.vm.$emit('confirm'); await flushPromises()
+    expect(mocks.deleteRun).toHaveBeenCalledWith(111)
+    expect(view.emitted('deleted')).toEqual([[111]])
+    expect(view.findComponent({ name: 'IntelligencePermanentDeleteDialog' }).exists()).toBe(false)
+    expect(view.get('[data-testid="artifact-preview"]').text()).toBe('112')
+    expect(view.get('aside').text()).not.toContain('#111')
+  })
+  it.each(['pending', 'running'])('does not allow deletion of a %s run', async status => {
+    mocks.detail.mockResolvedValue({ ...run(111), status })
+    const view = render(); await flushPromises()
+    expect(view.get('[data-testid="delete-artwork"]').attributes('disabled')).toBeDefined()
+    await view.get('[data-testid="delete-artwork"]').trigger('click')
+    expect(view.findComponent({ name: 'IntelligencePermanentDeleteDialog' }).exists()).toBe(false)
+    expect(mocks.deleteRun).not.toHaveBeenCalled()
+  })
+  it('moves back to the previous page after deleting the only work on the last page', async () => {
+    let items = Array.from({ length: 13 }, (_, i) => run(101 + i))
+    mocks.runs.mockImplementation(async (_id: number, page: number) => ({ items: items.slice((page - 1) * 12, page * 12), total: items.length, page, page_size: 12 }))
+    mocks.deleteRun.mockImplementation(async (id: number) => { items = items.filter(item => item.id !== id) })
+    const view = render(); await flushPromises()
+    await view.get('[data-testid="next-page"]').trigger('click'); await flushPromises()
+    expect(view.get('[data-testid="artifact-preview"]').text()).toBe('113')
+    await view.get('[data-testid="delete-artwork"]').trigger('click')
+    view.getComponent({ name: 'IntelligencePermanentDeleteDialog' }).vm.$emit('confirm'); await flushPromises()
+    expect(mocks.deleteRun).toHaveBeenCalledWith(113)
+    expect(view.get('[data-testid="artifact-preview"]').text()).toBe('101')
+    expect(view.find('[data-testid="history-pagination"]').exists()).toBe(false)
+  })
+  it('keeps a failed deletion in the confirmation without removing the artwork', async () => {
+    mocks.deleteRun.mockRejectedValue(new Error('delete failed'))
+    const view = render(); await flushPromises()
+    await view.get('[data-testid="delete-artwork"]').trigger('click')
+    const confirmation = view.getComponent({ name: 'IntelligencePermanentDeleteDialog' })
+    confirmation.vm.$emit('confirm'); confirmation.vm.$emit('confirm'); await flushPromises()
+    expect(mocks.deleteRun).toHaveBeenCalledTimes(1)
+    expect(confirmation.props('error')).toBe('delete failed')
+    expect(view.emitted('deleted')).toBeUndefined()
+    expect(view.get('[data-testid="artifact-preview"]').text()).toBe('111')
+  })
+  it('ignores a late deletion response after switching to another plan', async () => {
+    let finish!: () => void
+    mocks.deleteRun.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
+    const view = render(); await flushPromises()
+    await view.get('[data-testid="delete-artwork"]').trigger('click')
+    view.getComponent({ name: 'IntelligencePermanentDeleteDialog' }).vm.$emit('confirm'); await flushPromises()
+    await view.setProps({ plan: plan(2) }); await flushPromises()
+    finish(); await flushPromises()
+    expect(view.get('[data-testid="artifact-preview"]').text()).toBe('211')
+    expect(view.emitted('deleted')).toBeUndefined()
   })
 })

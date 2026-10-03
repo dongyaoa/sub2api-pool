@@ -7,7 +7,7 @@ import IntelligenceMonitorPanel from './IntelligenceMonitorPanel.vue'
 const mocks = vi.hoisted(() => ({
   plans: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), run: vi.fn(), runCandy: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
-  purge: vi.fn(),
+  purge: vi.fn(), permanentDelete: vi.fn(), setAllEnabled: vi.fn(),
   publicConfig: vi.fn(),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -22,7 +22,7 @@ vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
   template: '<div data-testid="plan-card" :data-id="plan.id">{{ plan.name }}</div>',
 } }))
 vi.mock('./IntelligenceLocalCard.vue', () => ({ default: { name: 'IntelligenceLocalCard', props: ['plan', 'busy', 'visible'], template: '<div data-testid="plan-card" :data-id="plan.id">{{ plan.name }}</div>' } }))
-vi.mock('./IntelligencePlanDialog.vue', () => ({ default: { name: 'IntelligencePlanDialog', props: ['monitoredAccountIds'], template: '<div />' } }))
+vi.mock('./IntelligencePlanDialog.vue', () => ({ default: { name: 'IntelligencePlanDialog', props: ['monitoredPlans'], template: '<div />' } }))
 vi.mock('./IntelligenceHistoryDialog.vue', () => ({ default: { name: 'IntelligenceHistoryDialog', template: '<div />' } }))
 vi.mock('./IntelligencePublicDisplayDialog.vue', () => ({ default: { name: 'IntelligencePublicDisplayDialog', props: ['show'], emits: ['close', 'saved'], template: '<div v-if="show" data-testid="public-display-dialog" />' } }))
 vi.mock('./IntelligenceCandyDetailDialog.vue', () => ({ default: { name: 'IntelligenceCandyDetailDialog', props: ['run'], emits: ['close'], template: '<div data-testid="candy-detail" />' } }))
@@ -80,7 +80,7 @@ describe('intelligence monitoring site tabs', () => {
     ]
     mocks.plans.mockResolvedValue({ items })
     const view = render(true); await flushPromises()
-    expect(view.getComponent({ name: 'IntelligencePlanDialog' }).props('monitoredAccountIds')).toEqual([41, 51])
+    expect(view.getComponent({ name: 'IntelligencePlanDialog' }).props('monitoredPlans')).toEqual(items)
     const card = view.getComponent({ name: 'IntelligencePlanCard' })
     card.vm.$emit('run'); card.vm.$emit('candy-run'); await flushPromises()
     expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.runCandy).not.toHaveBeenCalled()
@@ -88,7 +88,7 @@ describe('intelligence monitoring site tabs', () => {
     expect(mocks.update).toHaveBeenCalledWith(4, { enabled: false })
     mocks.plans.mockResolvedValue({ items: [items[1]] })
     await refreshButton(view).trigger('click'); await flushPromises()
-    expect(view.getComponent({ name: 'IntelligencePlanDialog' }).props('monitoredAccountIds')).toEqual([51])
+    expect(view.getComponent({ name: 'IntelligencePlanDialog' }).props('monitoredPlans')).toEqual([items[1]])
   })
   it.each([[false, false], [true, false]])('hides user-display management outside local monitoring (OAuth %s, local %s)', async (oauth, local) => {
     const view = render(oauth, local); await flushPromises()
@@ -332,16 +332,50 @@ describe('intelligence monitoring manual order', () => {
     expect(view.getComponent({ name: 'IntelligencePlanCard' }).props('plan').latest_run).toEqual(queued)
     expect(view.get('[role="alert"]').text()).toBeTruthy()
   })
-  it.each(['archive', 'purge'] as const)('supports %s for an OAuth monitor without removing its source account', async mode => {
+  it('permanently deletes OAuth monitoring through the quick dialog without a typed name', async () => {
     const view = render(true); await flushPromises()
     view.findAllComponents({ name: 'IntelligencePlanCard' })[0]!.vm.$emit('archive')
     await flushPromises()
-    const removal = view.getComponent({ name: 'UpstreamDeleteDialog' })
-    expect(removal.props('item')).toEqual({ kind: 'intelligence', id: 4, name: 'OAuth A' })
-    removal.vm.$emit('confirm', mode); await flushPromises()
-    if (mode === 'purge') { expect(mocks.purge).toHaveBeenCalledWith({ kind: 'intelligence', id: 4, confirm_name: 'OAuth A' }); expect(mocks.archive).not.toHaveBeenCalled() }
-    else { expect(mocks.archive).toHaveBeenCalledWith(4); expect(mocks.purge).not.toHaveBeenCalled() }
-    expect(removal.props('show')).toBe(false)
+    expect(view.findComponent({ name: 'UpstreamDeleteDialog' }).exists()).toBe(false)
+    const removal = view.getComponent({ name: 'IntelligencePermanentDeleteDialog' })
+    expect(removal.props('name')).toBe('OAuth A')
+    removal.vm.$emit('confirm'); await flushPromises()
+    expect(mocks.permanentDelete).toHaveBeenCalledWith(4)
+    expect(mocks.archive).not.toHaveBeenCalled()
+    expect(mocks.purge).not.toHaveBeenCalled()
+    expect(view.findComponent({ name: 'IntelligencePermanentDeleteDialog' }).exists()).toBe(false)
+  })
+  it('stops and starts all sources regardless of the current tab and search filter', async () => {
+    let items = original().map(item => ({ ...item, enabled: true }))
+    mocks.plans.mockImplementation(async () => ({ items }))
+    mocks.setAllEnabled.mockImplementation(async (enabled: boolean) => {
+      items = items.map(item => ({ ...item, enabled }))
+      return { total: 5, enabled: enabled ? 5 : 0, updated: 5 }
+    })
+    const view = render(true); await flushPromises()
+    await view.get('[aria-label="intelligenceMonitor.search"]').setValue('nothing matches')
+    expect(cardIDs(view)).toEqual([])
+    await view.get('[data-testid="stop-all-monitoring"]').trigger('click'); await flushPromises()
+    expect(mocks.setAllEnabled).toHaveBeenCalledWith(false)
+    expect(items.every(item => !item.enabled)).toBe(true)
+    expect(view.get('[data-testid="stop-all-monitoring"]').attributes('disabled')).toBeDefined()
+    await view.get('[data-testid="start-all-monitoring"]').trigger('click'); await flushPromises()
+    expect(mocks.setAllEnabled).toHaveBeenLastCalledWith(true)
+    expect(items.every(item => item.enabled)).toBe(true)
+    expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.runCandy).not.toHaveBeenCalled()
+  })
+  it('does not issue duplicate bulk requests or claim success after a failure', async () => {
+    const view = render(); await flushPromises()
+    let reject!: (cause: unknown) => void
+    mocks.setAllEnabled.mockReturnValueOnce(new Promise((_resolve, no) => { reject = no }))
+    const start = view.get('[data-testid="start-all-monitoring"]')
+    await start.trigger('click'); await start.trigger('click')
+    expect(mocks.setAllEnabled).toHaveBeenCalledTimes(1)
+    reject(new Error('offline')); await flushPromises()
+    expect(mocks.showError).toHaveBeenCalledWith('offline')
+    expect(mocks.showSuccess).not.toHaveBeenCalled()
+    expect(view.get('[data-testid="start-all-monitoring"]').attributes('disabled')).toBeUndefined()
   })
   it.each([{ oauthOnly: false, scope: 'intelligence', ids: [1, 2] }, { oauthOnly: true, scope: 'oauth', ids: [4, 5] }])('opens the full $scope list with an independent scope', async ({ oauthOnly, scope, ids }) => {
     const view = render(oauthOnly)

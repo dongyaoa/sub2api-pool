@@ -7,7 +7,7 @@ import UpstreamIntelligenceDialog from './UpstreamIntelligenceDialog.vue'
 import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
 
 const mocks = vi.hoisted(() => ({
-  plans: vi.fn(), plansForOAuthAccount: vi.fn(), update: vi.fn(), run: vi.fn(), runCandy: vi.fn(), archive: vi.fn(), purge: vi.fn(),
+  plans: vi.fn(), plansForOAuthAccount: vi.fn(), update: vi.fn(), run: vi.fn(), runCandy: vi.fn(), archive: vi.fn(), purge: vi.fn(), permanentDelete: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -25,7 +25,7 @@ vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
   template: '<div data-testid="plan-card" :data-id="plan.id" :data-active="active" :data-revision="revision">{{ plan.name }}</div>',
 } }))
 vi.mock('./IntelligencePlanDialog.vue', () => ({ default: {
-  name: 'IntelligencePlanDialog', props: ['show', 'plan', 'overview', 'upstreamTargetId', 'oauthOnly', 'oauthAccountId'], emits: ['close', 'saved'],
+  name: 'IntelligencePlanDialog', props: ['show', 'plan', 'overview', 'upstreamTargetId', 'oauthOnly', 'oauthAccountId', 'initialModel', 'monitoredPlans'], emits: ['close', 'saved'],
   template: '<div data-testid="plan-editor" />',
 } }))
 vi.mock('./IntelligenceHistoryDialog.vue', () => ({ default: {
@@ -134,6 +134,19 @@ describe('upstream group intelligence dialog', () => {
     expect(mocks.run).not.toHaveBeenCalled()
   })
 
+  it('offers a separate Sol plan for a group with Astra, and hides creation when both models exist', async () => {
+    mocks.plans.mockResolvedValue({ items: [plan(1, { model: 'gpt-6-astra' })] })
+    const view = render(); await flushPromises()
+    await view.get('[data-testid="group-intelligence-add-model"]').trigger('click')
+    const editor = view.getComponent({ name: 'IntelligencePlanDialog' })
+    expect(editor.props('initialModel')).toBe('gpt-6.1-sol')
+    expect(editor.props('monitoredPlans')).toHaveLength(1)
+    mocks.plans.mockResolvedValue({ items: [plan(1, { model: 'gpt-6-astra' }), plan(2, { model: 'gpt-6.1-sol' })] })
+    editor.vm.$emit('saved', plan(2, { model: 'gpt-6.1-sol' })); await flushPromises()
+    expect(cards(view)).toHaveLength(2)
+    expect(view.find('[data-testid="group-intelligence-add-model"]').exists()).toBe(false)
+  })
+
   it('keeps loading and failed reads distinct from an empty list, and retries without caching the error', async () => {
     const response = deferred<{ items: IntelligencePlan[] }>()
     mocks.plans.mockReturnValueOnce(response.promise)
@@ -197,7 +210,7 @@ describe('upstream group intelligence dialog', () => {
     await flushPromises()
     await view.get('[data-testid="group-intelligence-create"]').trigger('click')
     const editor = view.getComponent({ name: 'IntelligencePlanDialog' })
-    expect(editor.props()).toEqual({ show: true, plan: null, overview, upstreamTargetId: 11, oauthOnly: false, oauthAccountId: undefined })
+    expect(editor.props()).toMatchObject({ show: true, plan: null, overview, upstreamTargetId: 11, oauthOnly: false, initialModel: 'gpt-6-astra', monitoredPlans: [] })
     mocks.plans.mockRejectedValue(new Error('refresh unavailable'))
     editor.vm.$emit('saved', plan())
     editor.vm.$emit('close')
@@ -433,6 +446,24 @@ describe('account pelican monitoring dialog', () => {
     expect(mocks.run).not.toHaveBeenCalled()
     cards(view)[0]!.vm.$emit('history', 71); await flushPromises()
     expect(view.getComponent({ name: 'IntelligenceHistoryDialog' }).props()).toMatchObject({ plan: { id: 7, account_id: 42 }, initialRunId: 71 })
+  })
+
+  it('allows a second OAuth model and uses permanent deletion from the account modal', async () => {
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [oauthPlan({ model: 'gpt-6-astra' })] })
+    const view = renderAccount(); await flushPromises()
+    await view.get('[data-testid="group-intelligence-add-model"]').trigger('click')
+    const editor = view.getComponent({ name: 'IntelligencePlanDialog' })
+    expect(editor.props()).toMatchObject({ oauthAccountId: 42, initialModel: 'gpt-6.1-sol' })
+    editor.vm.$emit('close'); await flushPromises()
+    cards(view)[0]!.vm.$emit('archive'); await flushPromises()
+    expect(view.findComponent({ name: 'UpstreamDeleteDialog' }).exists()).toBe(false)
+    const removal = view.getComponent({ name: 'IntelligencePermanentDeleteDialog' })
+    expect(removal.props('name')).toBe(account.name)
+    mocks.plansForOAuthAccount.mockResolvedValue({ items: [] })
+    removal.vm.$emit('confirm'); await flushPromises()
+    expect(mocks.permanentDelete).toHaveBeenCalledWith(7)
+    expect(mocks.archive).not.toHaveBeenCalled()
+    expect(cards(view)).toHaveLength(0)
   })
 
   it('creates and edits through an account-locked editor and immediately shows the same saved plan', async () => {

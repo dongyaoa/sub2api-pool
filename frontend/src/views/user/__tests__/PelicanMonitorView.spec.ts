@@ -34,6 +34,30 @@ function renderWithRealArtwork() {
   return wrapper
 }
 describe('read-only user pelican page', () => {
+  it('shows separate live rows for both models of a group and filters by the display model name', async () => {
+    const solRun = { ...run, id: 9, plan_id: 3, model: 'gpt-6.1-sol' }
+    state.list.mockResolvedValue(snapshot([{ ...group, model: 'gpt-6-astra' }, { ...group, id: 3, model: 'gpt-6.1-sol', latest_run: solRun, recent_runs: [solRun] }]))
+    const view = render(); await flushPromises()
+    const cards = view.findAll('[data-testid="pelican-group"]')
+    expect(cards).toHaveLength(2)
+    expect(cards[0]!.get('[data-testid="pelican-plan-model"]').text()).toContain('GPT-6 Astra')
+    expect(cards[1]!.get('[data-testid="pelican-plan-model"]').text()).toContain('GPT-6.1 Sol')
+    await view.get('input').setValue('GPT-6.1 Sol')
+    expect(view.findAll('[data-testid="pelican-group"]')).toHaveLength(1)
+    expect(view.get('[data-testid="pelican-plan-model"]').text()).toContain('GPT-6.1 Sol')
+  })
+
+  it('removes a deleted or hidden artwork on the next live update and closes its enlarged view', async () => {
+    const view = render(); await flushPromises()
+    await view.get('[data-testid="artwork"]').trigger('click'); await flushPromises()
+    expect(view.text()).toContain('2m 5s')
+    state.list.mockResolvedValue(snapshot([{ ...group, latest_run: null, recent_runs: [] }]))
+    vi.advanceTimersByTime(1500); await flushPromises()
+    expect(view.find('[data-testid="artwork"]').exists()).toBe(false)
+    expect(view.text()).not.toContain('2m 5s')
+    expect(state.retain).toHaveBeenLastCalledWith(new Set())
+  })
+
   it('automatically inserts new runs and updates their status without restarting old artwork', async () => {
     state.artwork.mockImplementation(async (item: PelicanRun) => `<svg>Artwork ${item.id}</svg>`)
     const view = renderWithRealArtwork(); await flushPromises()

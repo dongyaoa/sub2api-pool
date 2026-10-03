@@ -38,7 +38,7 @@ func manualOrderTestDB(t *testing.T) (*sql.DB, context.Context, func() *sql.DB) 
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `CREATE TABLE accounts(id BIGINT PRIMARY KEY,type TEXT NOT NULL DEFAULT 'apikey',credentials JSONB NOT NULL DEFAULT '{}',deleted_at TIMESTAMPTZ); CREATE TABLE api_keys(id BIGINT PRIMARY KEY,status TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),deleted_at TIMESTAMPTZ)`)
 	require.NoError(t, err)
-	for _, name := range []string{"242_upstream_center.sql", "245_intelligence_monitor.sql", "246_intelligence_monitor_oauth.sql", "249_intelligence_monitor_interval_seconds.sql", "250_intelligence_monitor_generation_timeout.sql", "253_upstream_newapi_credentials.sql", "257_intelligence_candy_monitor.sql", "258_intelligence_candy_schedule.sql", "259_intelligence_local_key_ownership.sql", "260_intelligence_candy_grading_version.sql", "261_intelligence_candy_fingerprint.sql"} {
+	for _, name := range []string{"242_upstream_center.sql", "245_intelligence_monitor.sql", "246_intelligence_monitor_oauth.sql", "249_intelligence_monitor_interval_seconds.sql", "250_intelligence_monitor_generation_timeout.sql", "253_upstream_newapi_credentials.sql", "257_intelligence_candy_monitor.sql", "258_intelligence_candy_schedule.sql", "259_intelligence_local_key_ownership.sql", "260_intelligence_candy_grading_version.sql", "261_intelligence_candy_fingerprint.sql", "262_intelligence_monitor_models.sql"} {
 		migration, e := migrations.FS.ReadFile(name)
 		require.NoError(t, e)
 		_, e = db.ExecContext(ctx, string(migration))
@@ -229,6 +229,10 @@ func TestManualOrderPostgresScopeChangesResetPosition(t *testing.T) {
 	require.NoError(t, i.SavePlan(ctx, plan))
 	require.Equal(t, []int64{100, 101}, intelligenceOrderIDs(t, db, ctx, false), "non-OAuth source edits keep position in the same list")
 	plan.SourceType = "openai_oauth"
+	_, err = db.ExecContext(ctx, `INSERT INTO accounts(id,type) VALUES(901,'oauth')`)
+	require.NoError(t, err)
+	accountID := int64(901)
+	plan.AccountID = &accountID
 	require.NoError(t, i.SavePlan(ctx, plan))
 	require.Equal(t, []int64{201, 200, 100}, intelligenceOrderIDs(t, db, ctx, true))
 }

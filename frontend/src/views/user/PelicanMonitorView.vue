@@ -31,6 +31,7 @@ import { useMonitorRefresh } from '@/composables/useMonitorRefresh'
 import PelicanGroupCard from '@/components/pelican/PelicanGroupCard.vue'
 import PelicanArtworkDialog from '@/components/pelican/PelicanArtworkDialog.vue'
 import { pelicanPageActiveKey, pelicanPreviewRefreshKey } from '@/components/pelican/pelicanContext'
+import { pelicanModelLabel } from '@/utils/pelicanModels'
 import { pelicanWorks } from '@/components/pelican/pelicanFormat'
 import { resetPelicanArtworkAccess, retainPelicanArtworks } from '@/components/pelican/pelicanArtworkLoader'
 import { reconcileMonitorData } from '@/components/admin/upstream/monitorReconcile'
@@ -42,7 +43,7 @@ const now = ref(Date.now()), clockOffset = ref(0), updatedAt = ref(Date.now()), 
 const pageVisible = ref(!document.hidden)
 const selectedGroup = computed(() => groups.value.find(group => group.id === selected.value?.groupID))
 const selectedRun = computed(() => selectedGroup.value ? pelicanWorks(selectedGroup.value).find(run => run.id === selected.value?.runID) : undefined)
-const visibleGroups = computed(() => groups.value.filter(group => group.group_name.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
+const visibleGroups = computed(() => groups.value.filter(group => `${group.group_name} ${group.model} ${pelicanModelLabel(group.model)}`.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
 const updatedSeconds = computed(() => Math.max(0, Math.floor((now.value - updatedAt.value) / 1000)))
 provide(pelicanPageActiveKey, computed(() => auth.isAuthenticated && settings.enabled && pageVisible.value))
 provide(pelicanPreviewRefreshKey, previewRevision)

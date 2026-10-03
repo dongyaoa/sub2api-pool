@@ -208,6 +208,17 @@ describe('intelligence plan card result selection', () => {
     view.unmount()
   })
 
+  it('allows quick permanent removal of an active OAuth monitor and labels its model', async () => {
+    const view = render(plan({ source_type: 'openai_oauth', model: 'gpt-6.1-sol', latest_run: run(12, 'running') }))
+    expect(view.get('[data-testid="intelligence-plan-model"]').text()).toContain('GPT-6.1 Sol')
+    const remove = view.get('[aria-label="intelligenceMonitor.permanentDelete"]')
+    expect(remove.attributes('disabled')).toBeUndefined()
+    await remove.trigger('click')
+    expect(view.emitted('archive')).toHaveLength(1)
+    expect(view.find('[aria-label="intelligenceMonitor.archive"]').exists()).toBe(false)
+    view.unmount()
+  })
+
   it('labels OAuth accounts and never displays an upstream multiplier for them', () => {
     const view = render(plan({ name: 'OAuth Account A', source_type: 'openai_oauth', source_name: 'OAuth Account A', endpoint: '', rate_snapshot: { effective_rate_multiplier: 9.99 } }))
     expect(view.get('h3').text()).toBe('OAuth Account A')

@@ -23,7 +23,8 @@ type PublicPelicanConfig struct {
 
 type IntelligencePublicDisplay struct {
 	PublicPelicanConfig
-	PlanIDs []int64 `json:"plan_ids"`
+	PlanIDs    []int64 `json:"plan_ids"`
+	HideFailed bool    `json:"hide_failed"`
 }
 
 func DefaultIntelligencePublicDisplay() IntelligencePublicDisplay {

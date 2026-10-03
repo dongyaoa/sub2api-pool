@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog :show="show" :title="plan?.name || t('intelligenceMonitor.history')" width="full" motion="fade" @close="emit('close')">
+  <BaseDialog :show="show" :title="plan?.name || t('intelligenceMonitor.history')" width="full" motion="fade" :close-on-escape="!pendingDelete" @close="!pendingDelete && emit('close')">
     <div class="history-layout grid min-h-0 gap-5 lg:grid-cols-[225px_minmax(0,1fr)]" data-testid="history-layout">
       <aside class="flex min-h-0 min-w-0 flex-col">
         <div class="mb-3 flex shrink-0 items-center justify-between">
@@ -26,7 +26,10 @@
           <div class="flex rounded-lg bg-gray-100 p-1 dark:bg-dark-900">
             <button v-for="mode in modes" :key="mode" type="button" class="rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50" :class="view===mode ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-gray-100' : 'text-gray-500'" :disabled="!detail || artworkLoading" @click="view=mode">{{ t(`intelligenceMonitor.${mode}`) }}</button>
           </div>
-          <button type="button" class="btn btn-secondary btn-sm disabled:opacity-40" :disabled="!detail?.html || artworkLoading" @click="download"><Icon name="download" size="sm" class="mr-1.5"/>{{ t('intelligenceMonitor.download') }}</button>
+          <div class="flex items-center gap-2">
+            <button type="button" class="btn btn-secondary btn-sm disabled:opacity-40" :disabled="!detail?.html || artworkLoading" @click="download"><Icon name="download" size="sm" class="mr-1.5"/>{{ t('intelligenceMonitor.download') }}</button>
+            <button type="button" class="rounded-lg p-2 text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-rose-500/10" :disabled="!canDelete || deleting" :aria-label="t('intelligenceMonitor.deleteArtwork')" :title="t('intelligenceMonitor.deleteArtwork')" data-testid="delete-artwork" @click="requestDelete"><Icon name="trash" size="sm" /></button>
+          </div>
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]" data-testid="history-detail-scroll">
           <div class="history-artwork-frame overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700" :aria-busy="artworkLoading" data-testid="history-artwork-frame">
@@ -49,6 +52,7 @@
       </section>
     </div>
   </BaseDialog>
+  <IntelligencePermanentDeleteDialog v-if="pendingDelete" artwork :busy="deleting" :error="deleteError" @close="!deleting && (pendingDelete = null)" @confirm="deleteArtwork" />
 </template>
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -59,16 +63,21 @@ import { intelligenceMonitorAPI, type IntelligencePlan, type IntelligenceRun } f
 import { extractApiErrorMessage } from '@/utils/apiError'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
 import IntelligenceExecutionSource from './IntelligenceExecutionSource.vue'
+import IntelligencePermanentDeleteDialog from './IntelligencePermanentDeleteDialog.vue'
+import { clearIntelligenceArtworkCache } from './intelligenceArtworkLoader'
 import { intelligenceNotes, intelligenceRateLabel } from './intelligencePreview'
 import { intelligenceDurationLabel } from './intelligenceDuration'
 import { dateTime } from './format'
 const props=defineProps<{show:boolean;plan:IntelligencePlan|null;initialRunId?:number|null}>()
-const emit=defineEmits<{close:[]}>()
+const emit=defineEmits<{close:[];deleted:[id:number]}>()
 const {t}=useI18n()
 const runs=ref<IntelligenceRun[]>([]),total=ref(0),page=ref(1),selectedID=ref<number|null>(null),detail=ref<IntelligenceRun|null>(null),loading=ref(false),detailLoading=ref(false),error=ref('')
 const modes=['preview','sourceCode','response'] as const
 const view=ref<typeof modes[number]>('preview')
 const artworkLoading=computed(()=>detailLoading.value||(loading.value&&!detail.value))
+const pendingDelete = ref<IntelligenceRun | null>(null), deleting = ref(false), deleteError = ref('')
+const canDelete = computed(() => !!detail.value && !artworkLoading.value && detail.value.test_kind !== 'candy' && ['succeeded', 'failed'].includes(detail.value.status))
+let disposed = false, lifecycle = 0
 const runNotes=computed(()=>intelligenceNotes(detail.value?.notes_snapshot))
 const pageCount=computed(()=>Math.max(1,Math.ceil(total.value/12)))
 const metadata=computed(()=>{
@@ -83,13 +92,15 @@ async function changePage(nextPage:number){
   await loadRuns()
 }
 async function loadRuns(){
-  if (!props.show||!props.plan) return
+  if (!props.show||!props.plan||deleting.value) return
   listController?.abort();const current=new AbortController();listController=current;loading.value=true;error.value=''
   try {
     const wanted=initialSelection
     let loadedPage=page.value
     let result=await intelligenceMonitorAPI.runs(props.plan.id,loadedPage,current.signal)
     if(current.signal.aborted)return
+    const lastPage=Math.max(1,Math.ceil(result.total/12))
+    if(loadedPage>lastPage){loadedPage=lastPage;result=await intelligenceMonitorAPI.runs(props.plan.id,loadedPage,current.signal);if(current.signal.aborted)return}
     // recent_runs omits active jobs, while this endpoint includes them. Locate
     // the clicked work against the actual pages so an inserted job cannot shift
     // a boundary item to the next page and silently select a different run.
@@ -104,6 +115,7 @@ async function loadRuns(){
   finally{if(!current.signal.aborted)loading.value=false}
 }
 async function select(id:number|null){
+  if(deleting.value)return
   detailController?.abort();selectedID.value=id;detail.value=null;detailLoading.value=false;error.value='';if(!id)return
   const current=new AbortController();detailController=current;detailLoading.value=true
   try{const result=await intelligenceMonitorAPI.detail(id,current.signal);if(!current.signal.aborted)detail.value=result}
@@ -111,13 +123,41 @@ async function select(id:number|null){
   finally{if(!current.signal.aborted)detailLoading.value=false}
 }
 function download(){if(!detail.value?.html)return;const url=URL.createObjectURL(new Blob([detail.value.html],{type:'text/html;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`pelican-${detail.value.id}.html`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-watch([()=>props.show,()=>props.plan?.id,()=>props.initialRunId],()=>{listController?.abort();detailController?.abort();clearInterval(timer);runs.value=[];total.value=0;detail.value=null;loading.value=false;detailLoading.value=false;error.value='';initialSelection=props.initialRunId||null;selectedID.value=initialSelection;page.value=1;view.value='preview';if(props.show){void loadRuns();timer=setInterval(()=>{if(!document.hidden&&!loading.value)void loadRuns()},5000)}},{immediate:true})
+function requestDelete() {
+  if (!canDelete.value || deleting.value) return
+  pendingDelete.value = detail.value
+  deleteError.value = ''
+}
+async function deleteArtwork() {
+  const run = pendingDelete.value
+  if (!run || deleting.value || !props.show || run.plan_id !== props.plan?.id) return
+  const current = lifecycle
+  deleting.value = true
+  deleteError.value = ''
+  listController?.abort(); detailController?.abort(); loading.value = false; detailLoading.value = false
+  try {
+    await intelligenceMonitorAPI.deleteRun(run.id)
+    clearIntelligenceArtworkCache(run.id)
+    if (disposed || current !== lifecycle) return
+    pendingDelete.value = null
+    runs.value = runs.value.filter(item => item.id !== run.id)
+    total.value = Math.max(0, total.value - 1)
+    if (selectedID.value === run.id) { selectedID.value = null; detail.value = null }
+    page.value = Math.min(page.value, pageCount.value)
+    emit('deleted', run.id)
+    deleting.value = false
+    await loadRuns()
+  } catch (cause) {
+    if (!disposed && current === lifecycle) deleteError.value = extractApiErrorMessage(cause, t('intelligenceMonitor.actionFailed'))
+  } finally { if (!disposed && current === lifecycle) deleting.value = false }
+}
+watch([()=>props.show,()=>props.plan?.id,()=>props.initialRunId],()=>{lifecycle++;pendingDelete.value=null;deleting.value=false;deleteError.value='';listController?.abort();detailController?.abort();clearInterval(timer);runs.value=[];total.value=0;detail.value=null;loading.value=false;detailLoading.value=false;error.value='';initialSelection=props.initialRunId||null;selectedID.value=initialSelection;page.value=1;view.value='preview';if(props.show){void loadRuns();timer=setInterval(()=>{if(!document.hidden&&!loading.value&&!deleting.value)void loadRuns()},5000)}},{immediate:true})
 // The parent already polls active jobs every second. Follow its completion
 // signal so an open artwork does not wait for the slower history fallback poll.
 watch(() => [props.plan?.latest_run?.id, props.plan?.latest_run?.status, props.plan?.latest_run?.finished_at], (current, previous) => {
   if (props.show && !document.hidden && !loading.value && (page.value === 1 || current[0] === selectedID.value) && current.some((value, index) => value !== previous[index])) void loadRuns()
 })
-onBeforeUnmount(()=>{listController?.abort();detailController?.abort();clearInterval(timer)})
+onBeforeUnmount(()=>{disposed=true;listController?.abort();detailController?.abort();clearInterval(timer)})
 </script>
 <style scoped>
 .history-layout {

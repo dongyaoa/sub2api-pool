@@ -35,7 +35,7 @@ func (s *IntelligenceMonitorService) ConfigureOpenAIOAuth(accounts AccountReposi
 	}
 }
 
-func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Context, id *int64) (*Account, error) {
+func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Context, id *int64, model string) (*Account, error) {
 	invalid := func(message string) (*Account, error) {
 		return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "account_id", "detail": message})
 	}
@@ -46,8 +46,9 @@ func (s *IntelligenceMonitorService) intelligenceOAuthAccount(ctx context.Contex
 	if err != nil || account == nil || !account.IsOpenAIOAuth() || account.IsShadow() || account.IsSyntheticUITest() {
 		return invalid("choose an existing OpenAI OAuth account; shadow and synthetic accounts are not supported")
 	}
-	if !account.IsModelSupported(IntelligenceMonitorModel) || account.GetMappedModel(IntelligenceMonitorModel) != IntelligenceMonitorModel {
-		_, err := invalid("the selected account must support the fixed gpt-6-astra model without remapping")
+	model = intelligenceMonitorModel(model)
+	if !account.IsModelSupported(model) || account.GetMappedModel(model) != model {
+		_, err := invalid("the selected account must support the selected monitoring model without remapping")
 		return account, err
 	}
 	if intelligenceOAuthAccountStatus(account, time.Now()).Status == "weekly_limited" {
@@ -70,6 +71,10 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	if !validTest {
 		return nil, "", "unsupported intelligence test"
 	}
+	run.Model = intelligenceMonitorModel(run.Model)
+	if err := validateIntelligenceMonitorModel(run.Model); err != nil {
+		return nil, "", "unsupported intelligence model"
+	}
 	if msg, _ := run.SourceSnapshot["resolution_error"].(string); msg != "" {
 		return nil, "", msg
 	}
@@ -77,12 +82,12 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 		return nil, "", "OpenAI OAuth monitoring is unavailable"
 	}
 	id := intelligenceSnapshotID(run.SourceSnapshot["account_id"])
-	account, err := s.intelligenceOAuthAccount(ctx, &id)
+	account, err := s.intelligenceOAuthAccount(ctx, &id, run.Model)
 	if err != nil {
 		if errors.Is(err, ErrIntelligenceOAuthCoolingDown) {
 			return nil, "", "OAuth monitoring paused: weekly quota is cooling down"
 		}
-		return nil, "", "selected OAuth account is unavailable, not schedulable, or does not support the fixed model"
+		return nil, "", "selected OAuth account is unavailable, not schedulable, or does not support the selected model"
 	}
 	// Proxy selection mutates only this request's account snapshot. Remove
 	// unavailable pool entries before concurrency can try an alternate proxy.
@@ -123,7 +128,7 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	requestBody := map[string]any{
-		"model":     IntelligenceMonitorModel,
+		"model":     run.Model,
 		"input":     []map[string]any{{"role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}}},
 		"reasoning": map[string]string{"effort": IntelligenceMonitorReasoning},
 		"stream":    false, "store": false,
@@ -171,8 +176,8 @@ func (s *IntelligenceMonitorService) generateOpenAIOAuth(ctx context.Context, ru
 	}
 	text, message := extractIntelligenceModelText(writer.body.Bytes(), MonitorAPIModeResponses, strings.Contains(writer.header.Get("Content-Type"), "text/event-stream"))
 	text = logredact.RedactText(text)
-	if result.UpstreamModel != "" && result.UpstreamModel != IntelligenceMonitorModel {
-		message = "OAuth gateway used a different model than the fixed comparison model"
+	if result.UpstreamModel != "" && result.UpstreamModel != run.Model {
+		message = "OAuth gateway used a different model than the selected comparison model"
 	}
 	if result.ReasoningEffort != nil && *result.ReasoningEffort != IntelligenceMonitorReasoning {
 		message = "OAuth gateway used a different reasoning effort than the fixed comparison setting"

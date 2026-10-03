@@ -17,7 +17,7 @@ const oauthAccount = (id: number, name: string, fields: Record<string, unknown> 
 const page = (items: unknown[], number = 1, pages = 1) => ({ items, total: pages === 1 ? items.length : pages * 100, page: number, page_size: 100, pages })
 const savedPlan = (fields: Partial<IntelligencePlan> = {}) => ({ id: 3, name: 'OAuth Seven', source_type: 'openai_oauth', account_id: 7, api_mode: 'responses', enabled: true, interval_seconds: 3600, timeout_seconds: 900, supplier_note: '', group_note: '', rate_note: '', notes: '', ...fields }) as IntelligencePlan
 let wrapper: VueWrapper | undefined
-function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; oauthAccountId: number; localOnly: boolean; upstreamTargetId: number; monitoredAccountIds: number[] }> = {}) {
+function render(props: Partial<{ show: boolean; plan: IntelligencePlan | null; overview: UpstreamOverview | null; oauthOnly: boolean; oauthAccountId: number; localOnly: boolean; upstreamTargetId: number; monitoredAccountIds: number[]; monitoredPlans: IntelligencePlan[]; initialModel: string }> = {}) {
   wrapper = mount(IntelligencePlanDialog, { attachTo: document.body, props: { show: true, plan: null, overview: null, oauthOnly: true, ...props }, global: { stubs: { BaseDialog: dialog, Icon: true, transition: true } } })
   return wrapper
 }
@@ -42,6 +42,55 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; vi.useRealTimers() })
 
 describe('OAuth intelligence plan dialog', () => {
+  it('defaults to Astra and offers Sol using the native non-searchable model selector', async () => {
+    const view = render(); await flushPromises()
+    expect(view.get('#intelligence-model').text()).toContain('GPT-6 Astra')
+    await selectOption(view, '#intelligence-model', 'GPT-6.1 Sol')
+    await selectOAuth(view)
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-6.1-sol', source_type: 'openai_oauth', account_id: 7 }))
+  })
+
+  it('offers an existing account for another model and excludes it again for the occupied model', async () => {
+    const view = render({ monitoredPlans: [savedPlan({ model: 'gpt-6-astra' })] }); await flushPromises()
+    expect(view.text()).toContain('intelligenceMonitor.oauth.noAccounts')
+    await selectOption(view, '#intelligence-model', 'GPT-6.1 Sol')
+    await selectOAuth(view)
+    expect(view.get('#intelligence-oauth-account').text()).toContain('OAuth Seven')
+    await selectOption(view, '#intelligence-model', 'GPT-6 Astra')
+    expect(view.get('#intelligence-oauth-account').text()).not.toContain('OAuth Seven')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it('creates a fixed-account second model and blocks a concurrent same-model duplicate', async () => {
+    const astra = savedPlan({ model: 'gpt-6-astra' })
+    const view = render({ oauthAccountId: 7, monitoredPlans: [astra], initialModel: 'gpt-6.1-sol' }); await flushPromises()
+    expect(view.get('#intelligence-model').text()).toContain('GPT-6.1 Sol')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-6.1-sol', account_id: 7 }))
+    mocks.create.mockClear()
+    await view.setProps({ monitoredPlans: [astra, savedPlan({ id: 4, model: 'gpt-6.1-sol', enabled: false })] })
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+    await view.setProps({ monitoredPlans: [astra] })
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('preserves a saved Sol model and prevents changing it to an occupied Astra plan', async () => {
+    const astra = savedPlan({ id: 8, model: 'gpt-6-astra' })
+    const sol = savedPlan({ model: 'gpt-6.1-sol' })
+    const view = render({ plan: sol, oauthAccountId: 7, monitoredPlans: [astra, sol] }); await flushPromises()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(sol.id, expect.objectContaining({ model: 'gpt-6.1-sol' }))
+    mocks.update.mockClear()
+    await selectOption(view, '#intelligence-model', 'GPT-6 Astra')
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
   it('loads only the fixed account and creates its default scheduled OAuth plan without a selector', async () => {
     let resolveAccount!: (value: unknown) => void
     mocks.account.mockReturnValueOnce(new Promise(resolve => { resolveAccount = resolve }))
@@ -612,7 +661,7 @@ describe('intelligence plan choices and interval validation', () => {
     const view = render({ oauthOnly: false, overview })
     await flushPromises()
     expect(view.find('select').exists()).toBe(false)
-    expect(view.findAllComponents(Select)).toHaveLength(2)
+    expect(view.findAllComponents(Select)).toHaveLength(3)
     for (const select of view.findAllComponents(Select)) expect(select.props('searchable')).toBe(false)
     await view.get('#intelligence-upstream').trigger('click')
     await flushPromises()
@@ -636,6 +685,50 @@ describe('intelligence plan choices and interval validation', () => {
     await view.get('form').trigger('submit')
     await flushPromises()
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'local_group', group_id: 5, api_mode: 'chat_completions' }))
+  })
+
+  it('allows a second upstream model and blocks duplicate source/model bindings before saving', async () => {
+    const astra = savedPlan({ source_type: 'upstream', account_id: null, upstream_target_id: 11, model: 'gpt-6-astra' })
+    const view = render({ oauthOnly: false, overview: upstreamOverview, upstreamTargetId: 11, monitoredPlans: [astra] }); await flushPromises()
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+    await selectOption(view, '#intelligence-model', 'GPT-6.1 Sol')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ upstream_target_id: 11, model: 'gpt-6.1-sol' }))
+  })
+
+  it('explains server-side local source/model conflicts without leaking database details', async () => {
+    mocks.groups.mockResolvedValue([{ id: 5, name: 'Local GPT', platform: 'openai', rate_multiplier: 1.2 }])
+    mocks.create.mockRejectedValueOnce({ status: 409, reason: 'INTELLIGENCE_LOCAL_PLAN_EXISTS', metadata: { detail: 'private constraint name' } })
+    const view = render({ oauthOnly: false, localOnly: true }); await flushPromises()
+    await selectOption(view, '#intelligence-group', 'Local GPT')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.local.alreadyAdded')
+    expect(view.text()).not.toContain('private constraint name')
+  })
+
+  it('allows two local model plans with the same group and prevents a third same-model plan', async () => {
+    mocks.groups.mockResolvedValue([{ id: 5, name: 'Local GPT', platform: 'openai', rate_multiplier: 1.2 }])
+    const astra = savedPlan({ source_type: 'local_group', account_id: null, group_id: 5, model: 'gpt-6-astra' })
+    const view = render({ oauthOnly: false, localOnly: true, monitoredPlans: [astra] }); await flushPromises()
+    await selectOption(view, '#intelligence-group', 'Local GPT')
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await selectOption(view, '#intelligence-model', 'GPT-6.1 Sol')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'local_group', group_id: 5, model: 'gpt-6.1-sol' }))
+    await view.setProps({ monitoredPlans: [astra, { ...astra, id: 4, model: 'gpt-6.1-sol' }] })
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect(view.get('[role="alert"]').text()).toBe('intelligenceMonitor.local.alreadyAdded')
+  })
+
+  it.each(['openai_oauth', 'local_group', 'upstream'] as const)('keeps legacy duplicate %s plans editable when their source and model are unchanged', async source_type => {
+    const plan = savedPlan({ source_type, account_id: source_type === 'openai_oauth' ? 7 : null, group_id: source_type === 'local_group' ? 5 : null, upstream_target_id: source_type === 'upstream' ? 11 : null, model: 'gpt-6-astra' })
+    const view = render({ oauthOnly: source_type === 'openai_oauth', localOnly: source_type === 'local_group', overview: upstreamOverview, plan, monitoredPlans: [plan, { ...plan, id: 4 }] }); await flushPromises()
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await view.get('#intelligence-notes').setValue('Updated notes')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ notes: 'Updated notes', model: 'gpt-6-astra' }))
   })
 
   it('defaults to enabled scheduling with a 10-minute wait and 5-minute interval while preserving all minute presets', async () => {

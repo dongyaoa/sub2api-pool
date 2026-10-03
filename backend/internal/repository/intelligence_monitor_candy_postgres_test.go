@@ -304,7 +304,7 @@ func TestIntelligenceCandyPostgresExpiryReschedulesOnlyItsKind(t *testing.T) {
 func TestIntelligenceCandyPostgresIndependentRetentionAndLightweightLists(t *testing.T) {
 	db, ctx := intelligenceMonitorTestDB(t)
 	repo := &intelligenceMonitorRepository{db: db}
-	_, err := db.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT '',ADD COLUMN deleted_at TIMESTAMPTZ;
+	_, err := db.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT '',ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE upstream_targets ADD COLUMN name TEXT NOT NULL DEFAULT '',ADD COLUMN deleted_at TIMESTAMPTZ;
 CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,deleted_at TIMESTAMPTZ)`)
 	require.NoError(t, err)

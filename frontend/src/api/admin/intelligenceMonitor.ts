@@ -22,6 +22,7 @@ export interface IntelligenceConcurrency extends IntelligenceConcurrencyInput {
 
 export interface IntelligencePublicDisplaySettings {
   enabled: boolean
+  hide_failed?: boolean
   title: string
   description: string
   notice: string
@@ -30,6 +31,7 @@ export interface IntelligencePublicDisplaySettings {
 
 export interface IntelligencePlanInput {
   name: string
+  model?: string
   source_type: IntelligenceSource
   endpoint?: string
   api_key?: string
@@ -142,6 +144,14 @@ export const intelligenceMonitorAPI = {
     return (await apiClient.put(`${base}/plans/${id}`, input)).data
   },
   async archive(id: number): Promise<void> { await apiClient.delete(`${base}/plans/${id}`) },
+  async permanentDelete(id: number): Promise<void> { await apiClient.delete(`${base}/plans/${id}/permanent`) },
+  async deleteRun(id: number): Promise<void> { await apiClient.delete(`${base}/runs/${id}`) },
+  async scheduleStatus(signal?: AbortSignal): Promise<{ total: number; enabled: number }> {
+    return (await apiClient.get(`${base}/plans/schedule-status`, { signal })).data
+  },
+  async setAllEnabled(enabled: boolean): Promise<{ updated: number; total: number; enabled: number }> {
+    return (await apiClient.put(`${base}/plans/enabled`, { enabled })).data
+  },
   async run(id: number): Promise<IntelligenceRun> {
     return (await apiClient.post(`${base}/plans/${id}/run`)).data
   },

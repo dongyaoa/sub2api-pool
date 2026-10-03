@@ -10,7 +10,7 @@ func TestIntelligenceMonitorLoadPlanListDataPostgresKeepsLiveRunAndBoundsGallery
 	db, ctx := intelligenceMonitorTestDB(t)
 	// The shared CRUD fixture intentionally keeps these source tables minimal;
 	// add only the columns needed by the batched display-name query.
-	_, err := db.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN name VARCHAR(100) NOT NULL DEFAULT '', ADD COLUMN deleted_at TIMESTAMPTZ;
+	_, err := db.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN name VARCHAR(100) NOT NULL DEFAULT '', ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE upstream_targets ADD COLUMN name VARCHAR(100) NOT NULL DEFAULT '', ADD COLUMN deleted_at TIMESTAMPTZ;
 CREATE TABLE groups(id BIGINT PRIMARY KEY,name VARCHAR(100) NOT NULL,deleted_at TIMESTAMPTZ)`)
 	require.NoError(t, err)

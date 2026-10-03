@@ -19,31 +19,32 @@ import (
 )
 
 type IntelligenceMonitorService struct {
-	repo           IntelligenceMonitorRepository
-	encryptor      SecretEncryptor
-	upstreams      UpstreamCenterRepository
-	groups         GroupRepository
-	keys           *APIKeyService
-	publicGroups   publicPelicanGroupAuthorizer
-	finance        *UpstreamFinanceService
-	accounts       AccountRepository
-	oauthForward   intelligenceOAuthForwarder
-	oauthSlots     intelligenceOAuthSlots
-	cfg            *config.Config
-	externalClient *http.Client
-	localClient    *http.Client
-	localEndpoint  string
-	ctx            context.Context
-	cancel         context.CancelFunc
-	mu             sync.Mutex
-	started        bool
-	stopped        bool
-	wg             sync.WaitGroup
-	slots          chan struct{}
-	candySlots     chan struct{}
-	wake           chan struct{}
-	candyWake      chan struct{}
-	scheduleWake   chan struct{}
+	repo            IntelligenceMonitorRepository
+	encryptor       SecretEncryptor
+	upstreams       UpstreamCenterRepository
+	groups          GroupRepository
+	keys            *APIKeyService
+	publicGroups    publicPelicanGroupAuthorizer
+	finance         *UpstreamFinanceService
+	accounts        AccountRepository
+	oauthForward    intelligenceOAuthForwarder
+	oauthSlots      intelligenceOAuthSlots
+	oauthExecutions map[int64]context.CancelFunc
+	cfg             *config.Config
+	externalClient  *http.Client
+	localClient     *http.Client
+	localEndpoint   string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	started         bool
+	stopped         bool
+	wg              sync.WaitGroup
+	slots           chan struct{}
+	candySlots      chan struct{}
+	wake            chan struct{}
+	candyWake       chan struct{}
+	scheduleWake    chan struct{}
 }
 
 func NewIntelligenceMonitorService(repo IntelligenceMonitorRepository, encryptor SecretEncryptor, upstreamRepo UpstreamCenterRepository, groupRepo GroupRepository, apiKeys *APIKeyService, finance *UpstreamFinanceService, cfg *config.Config) *IntelligenceMonitorService {
@@ -179,7 +180,7 @@ func (s *IntelligenceMonitorService) populatePlanList(ctx context.Context, plans
 func (s *IntelligenceMonitorService) decoratePlan(p *IntelligenceMonitorPlan) {
 	p.LocalAPIKeyManaged = p.SourceType == "local_group" && !p.LocalAPIKeyBorrowed
 	p.OAuth = p.SourceType == "openai_oauth"
-	p.Model = IntelligenceMonitorModel
+	p.Model = intelligenceMonitorModel(p.Model)
 	p.ReasoningEffort = IntelligenceMonitorReasoning
 	p.Prompt = IntelligenceMonitorPrompt
 	if p.SourceType == "external" {
@@ -211,10 +212,15 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		// Legacy test stores and repository decorators can omit the new field.
 		p.CandyIntervalSeconds = IntelligenceMonitorCandyDefaultIntervalSeconds
 	}
+	applyUpstreamString(&p.Model, in.Model)
+	p.Model = intelligenceMonitorModel(p.Model)
+	if err := validateIntelligenceMonitorModel(p.Model); err != nil {
+		return nil, err
+	}
 	if id > 0 && intelligenceEnabledOnly(in) {
 		if p.SourceType == "openai_oauth" {
 			if *in.Enabled {
-				account, err := s.intelligenceOAuthAccount(ctx, p.AccountID)
+				account, err := s.intelligenceOAuthAccount(ctx, p.AccountID, p.Model)
 				if err != nil {
 					return nil, err
 				}
@@ -278,7 +284,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 		}
 	}
 	if p.SourceType == "openai_oauth" {
-		account, err := s.intelligenceOAuthAccount(ctx, p.AccountID)
+		account, err := s.intelligenceOAuthAccount(ctx, p.AccountID, p.Model)
 		if err != nil {
 			return nil, err
 		}
@@ -349,7 +355,7 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 			return nil, err
 		}
 		if target.Provider != MonitorProviderOpenAI {
-			return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"detail": "the fixed model requires an OpenAI-compatible upstream target"})
+			return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"detail": "the selected model requires an OpenAI-compatible upstream target"})
 		}
 		p.Endpoint = ""
 		p.APIKeyEncrypted = ""
@@ -367,10 +373,13 @@ func (s *IntelligenceMonitorService) SavePlan(ctx context.Context, id, actorID i
 			return nil, err
 		}
 		if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
-			return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"detail": "choose an OpenAI or composite group supporting the fixed model"})
+			return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"detail": "choose an OpenAI or composite group supporting the selected model"})
 		}
 		if group.Status != StatusActive {
 			return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"detail": "the selected group is disabled"})
+		}
+		if !group.ModelAllowlist.Allows(p.Model) {
+			return nil, ErrIntelligenceInvalid.WithMetadata(map[string]string{"field": "model", "detail": "the selected group does not allow this monitoring model"})
 		}
 		createdKey, err = s.configureLocalIntelligenceKey(ctx, p, old, actorID, in.LocalAPIKeyID)
 		if err != nil {
@@ -414,12 +423,15 @@ func (s *IntelligenceMonitorService) cleanupKey(id, owner int64) {
 	}
 }
 func intelligenceEnabledOnly(in IntelligenceMonitorInput) bool {
-	return in.Enabled != nil && in.CandyEnabled == nil && in.CandyIntervalSeconds == nil && len(in.LocalAPIKeyID) == 0 && in.Name == nil && in.SourceType == nil && in.Endpoint == nil && in.APIKey == nil && len(in.UpstreamTargetID) == 0 && len(in.GroupID) == 0 && len(in.AccountID) == 0 && in.SupplierNote == nil && in.GroupNote == nil && in.RateNote == nil && in.Notes == nil && in.APIMode == nil && in.IntervalSeconds == nil && in.TimeoutSeconds == nil
+	return in.Enabled != nil && in.Model == nil && in.CandyEnabled == nil && in.CandyIntervalSeconds == nil && len(in.LocalAPIKeyID) == 0 && in.Name == nil && in.SourceType == nil && in.Endpoint == nil && in.APIKey == nil && len(in.UpstreamTargetID) == 0 && len(in.GroupID) == 0 && len(in.AccountID) == 0 && in.SupplierNote == nil && in.GroupNote == nil && in.RateNote == nil && in.Notes == nil && in.APIMode == nil && in.IntervalSeconds == nil && in.TimeoutSeconds == nil
 }
 func (s *IntelligenceMonitorService) DeletePlan(ctx context.Context, id int64) error {
 	plan, err := s.repo.GetPlan(ctx, id)
 	if err != nil {
 		return err
+	}
+	if plan.SourceType == "openai_oauth" {
+		return s.DeleteOAuthPlanPermanently(ctx, id)
 	}
 	if err = s.repo.ArchivePlan(ctx, id); err != nil {
 		return err
@@ -453,7 +465,11 @@ func (s *IntelligenceMonitorService) enqueueTest(ctx context.Context, id int64, 
 	if scheduled && !p.Enabled {
 		return nil, ErrIntelligenceNotFound
 	}
-	run := &IntelligenceMonitorRun{PlanID: id, PlanName: p.Name, Trigger: "manual", Model: IntelligenceMonitorModel, ReasoningEffort: IntelligenceMonitorReasoning, Prompt: IntelligenceMonitorPrompt, SourceType: p.SourceType, SourceName: p.Name, SourceEndpoint: p.Endpoint, APIMode: p.APIMode, TimeoutSeconds: p.TimeoutSeconds, NotesSnapshot: map[string]string{"supplier_note": p.SupplierNote, "group_note": p.GroupNote, "rate_note": p.RateNote, "notes": p.Notes}, SourceSnapshot: map[string]any{"created_by": p.CreatedBy}, PlanUpdatedAt: p.UpdatedAt}
+	p.Model = intelligenceMonitorModel(p.Model)
+	if err := validateIntelligenceMonitorModel(p.Model); err != nil {
+		return nil, err
+	}
+	run := &IntelligenceMonitorRun{PlanID: id, PlanName: p.Name, Trigger: "manual", Model: p.Model, ReasoningEffort: IntelligenceMonitorReasoning, Prompt: IntelligenceMonitorPrompt, SourceType: p.SourceType, SourceName: p.Name, SourceEndpoint: p.Endpoint, APIMode: p.APIMode, TimeoutSeconds: p.TimeoutSeconds, NotesSnapshot: map[string]string{"supplier_note": p.SupplierNote, "group_note": p.GroupNote, "rate_note": p.RateNote, "notes": p.Notes}, SourceSnapshot: map[string]any{"created_by": p.CreatedBy}, PlanUpdatedAt: p.UpdatedAt}
 	run.TestKind = kind
 	if kind == IntelligenceMonitorTestCandy {
 		run.Prompt = IntelligenceMonitorCandyPrompt
@@ -472,7 +488,7 @@ func (s *IntelligenceMonitorService) enqueueTest(ctx context.Context, id int64, 
 		run.SourceSnapshot["account_id"] = p.AccountID
 		run.SourceSnapshot["auth_type"] = "oauth"
 		run.SourceSnapshot["oauth"] = true
-		account, accountErr := s.intelligenceOAuthAccount(ctx, p.AccountID)
+		account, accountErr := s.intelligenceOAuthAccount(ctx, p.AccountID, p.Model)
 		accountStatus := intelligenceOAuthAccountStatus(account, time.Now())
 		if accountStatus.Status == "weekly_limited" {
 			if err := s.deferOAuthMonitor(ctx, p, accountStatus); err != nil {
@@ -644,6 +660,7 @@ func (s *IntelligenceMonitorService) schedule() {
 	ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
 	defer cancel()
 	defer s.notify()
+	s.cancelDeletedOAuthExecutions(ctx)
 	if err := s.repo.ExpireRuns(ctx); err != nil {
 		slog.Warn("intelligence monitoring expiry failed", "error", err)
 	}
@@ -745,6 +762,11 @@ func (s *IntelligenceMonitorService) dispatchPool(ctx context.Context, slots cha
 func (s *IntelligenceMonitorService) execute(run *IntelligenceMonitorRun) {
 	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(run.TimeoutSeconds+45)*time.Second)
 	defer cancel()
+	unregister := s.registerOAuthExecution(ctx, run, cancel)
+	defer unregister()
+	if ctx.Err() != nil {
+		return
+	}
 	run.Status = "failed"
 	if run.SourceType == "openai_oauth" {
 		requestCtx, requestCancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
@@ -814,7 +836,7 @@ func (s *IntelligenceMonitorService) finishIntelligenceRun(run *IntelligenceMoni
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer saveCancel()
 	s.captureIntelligenceExecutionBinding(saveCtx, run)
-	if err := s.repo.CompleteRun(saveCtx, run); err != nil {
+	if err := s.repo.CompleteRun(saveCtx, run); err != nil && !errors.Is(err, ErrIntelligenceNotFound) {
 		slog.Error("intelligence monitoring result persistence failed", "run_id", run.ID, "error", err)
 	}
 }

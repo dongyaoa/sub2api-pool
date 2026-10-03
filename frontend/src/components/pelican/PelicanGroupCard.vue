@@ -11,7 +11,7 @@
       <div class="mt-3 grid grid-cols-2 divide-x divide-gray-200/70 rounded-xl border border-gray-100 bg-white/80 py-2 dark:divide-dark-600 dark:border-dark-700 dark:bg-dark-900/30">
         <div class="min-w-0 px-2">
           <p class="text-[10px] leading-4 text-gray-400">{{ t('pelicanMonitor.rate') }}</p>
-          <p class="mt-1 break-all text-xl font-semibold leading-6 tracking-tight text-primary-700 dark:text-primary-300" data-testid="pelican-rate">{{ rate }}</p>
+          <p class="mt-1 break-all text-[17px] font-semibold leading-6 tracking-tight text-primary-700 dark:text-primary-300" data-testid="pelican-rate">{{ rate }}</p>
         </div>
         <div class="min-w-0 px-2">
           <p class="text-[10px] leading-4 text-gray-400">{{ t('pelicanMonitor.next') }}</p>
@@ -19,7 +19,8 @@
           <p v-else class="mt-1 text-[11px] font-medium leading-6" :class="active ? 'text-violet-600 dark:text-violet-300' : 'text-gray-500 dark:text-gray-400'">{{ t(!group.enabled ? 'pelicanMonitor.paused' : active ? 'pelicanMonitor.afterCurrent' : 'pelicanMonitor.waitingSchedule') }}</p>
         </div>
       </div>
-      <p class="mt-2.5 flex items-start gap-1.5 text-[11px] leading-5 text-gray-500 dark:text-gray-400"><Icon name="clock" size="xs" class="mt-0.5 shrink-0 text-gray-400" /><span>{{ interval }}</span></p>
+      <PelicanModelInfo :model="group.model" :effort="group.reasoning_effort" class="mt-3" data-testid="pelican-plan-model" />
+      <p class="mt-2 flex items-center gap-1.5 pl-0 pr-2.5 text-[10px] leading-4 text-gray-500 dark:text-gray-400"><Icon name="clock" size="xs" class="shrink-0 text-primary-600/60 dark:text-primary-400/60" aria-hidden="true" /><span>{{ interval }}</span></p>
       <div class="mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1 pt-3 text-[10px] leading-4">
         <span class="text-gray-400">{{ t('pelicanMonitor.lastRun') }}</span>
         <time :datetime="group.latest_run?.started_at || group.last_run_at || undefined" class="tabular-nums text-gray-500 dark:text-gray-400">{{ pelicanDate(group.latest_run?.started_at || group.last_run_at, locale) }}</time>
@@ -39,7 +40,7 @@
               </span>
             </div>
             <time class="block text-[11px] leading-4 tabular-nums text-gray-600 dark:text-gray-300" :datetime="run.started_at || run.created_at">{{ pelicanDate(run.started_at || run.created_at, locale, true) }}</time>
-            <div class="flex items-center justify-between gap-2 text-[10px]"><span class="truncate text-gray-400" :title="`${run.model} · ${run.reasoning_effort}`">{{ run.model }} · {{ run.reasoning_effort }}</span><span v-if="run.duration_ms != null && !pelicanActive(run)" class="shrink-0 font-mono tabular-nums text-gray-600 dark:text-gray-300" :title="t('pelicanMonitor.duration')">{{ pelicanDuration(run) }}</span></div>
+            <div class="flex items-center justify-between gap-2 text-[10px]"><PelicanModelInfo :model="run.model" :effort="run.reasoning_effort" compact /><span v-if="run.duration_ms != null && !pelicanActive(run)" class="shrink-0 font-mono tabular-nums text-gray-600 dark:text-gray-300" :title="t('pelicanMonitor.duration')">{{ pelicanDuration(run) }}</span></div>
           </button>
         </div>
       </div>
@@ -53,6 +54,7 @@ import { useI18n } from 'vue-i18n'
 import type { PelicanMonitorGroup, PelicanRun } from '@/api/pelicanMonitor'
 import Icon from '@/components/icons/Icon.vue'
 import PelicanArtworkPreview from './PelicanArtworkPreview.vue'
+import PelicanModelInfo from './PelicanModelInfo.vue'
 import { pelicanActive, pelicanCountdown, pelicanDate, pelicanDuration, pelicanInterval, pelicanWorks } from './pelicanFormat'
 const props = defineProps<{ group: PelicanMonitorGroup; now: number }>()
 const emit = defineEmits<{ open: [run: PelicanRun] }>()
@@ -72,7 +74,7 @@ const statusClass = computed(() => props.group.latest_run?.status === 'failed' ?
 </script>
 <style scoped>
 .pelican-group { display:flex; overflow:hidden; min-width:0; border:1px solid rgb(229 231 235); border-radius:16px; background:white; box-shadow:0 2px 8px rgb(15 23 42 / .025); }
-.pelican-identity { display:flex; flex-direction:column; flex:0 0 228px; min-width:0; padding:18px; border-right:1px solid rgb(243 244 246); background:linear-gradient(135deg,rgb(240 253 250 / .55),white 65%); }
+.pelican-identity { display:flex; flex-direction:column; flex:0 0 228px; min-width:0; padding:16px 18px; border-right:1px solid rgb(243 244 246); background:linear-gradient(135deg,rgb(240 253 250 / .55),white 65%); }
 .pelican-gallery { display:flex; gap:8px; overflow-x:auto; padding:1px 1px 4px; scroll-snap-type:x proximity; scrollbar-width:thin; scrollbar-color:rgb(203 213 225) transparent; }
 .pelican-work { flex:0 0 204px; overflow:hidden; border:1px solid rgb(229 231 235); border-radius:12px; scroll-snap-align:start; background:white; }
 .pelican-work-latest { border-color:rgb(94 234 212 / .6); }

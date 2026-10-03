@@ -7,7 +7,8 @@
           <div class="min-w-0"><p class="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{{ contextName }}</p><p class="mt-0.5 truncate text-[10px] text-gray-400" :class="!account && 'font-mono'" :title="contextHint">{{ contextHint }}</p></div>
         </div>
         <div class="flex shrink-0 items-center gap-3">
-          <span class="hidden text-[11px] text-gray-400 sm:inline">{{ PELICAN_MODEL }} · {{ PELICAN_REASONING }}</span>
+          <span class="hidden text-[11px] text-gray-400 sm:inline">{{ contextModels }} · {{ PELICAN_REASONING }}</span>
+          <button v-if="plans.length && availableModel" type="button" class="btn btn-secondary btn-sm" :disabled="loading || !!error" data-testid="group-intelligence-add-model" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1" />{{ t('intelligenceMonitor.addModel') }}</button>
           <button type="button" class="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium text-gray-500 hover:bg-white hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400" :aria-busy="loading" data-testid="group-intelligence-refresh" @click="manualRefresh"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />{{ t('intelligenceMonitor.refresh') }}</button>
         </div>
       </div>
@@ -27,10 +28,11 @@
       <div class="flex shrink-0 flex-wrap justify-between gap-2 text-[10px] leading-5 text-gray-400 dark:text-dark-400"><span>{{ t(`${contextMessages}.sharedHint`) }}</span><span>{{ t('intelligenceMonitor.retention') }}</span></div>
     </div>
   </BaseDialog>
-  <IntelligencePlanDialog v-if="editor" :show="true" :plan="editing" :overview="overview" :upstream-target-id="account ? undefined : target?.id" :oauth-only="!!account" :oauth-account-id="account?.id" @close="closeEditor" @saved="saved" />
-  <IntelligenceHistoryDialog v-if="history" :show="true" :plan="selectedPlan" :initial-run-id="selectedRunID" @close="history = false" />
+  <IntelligencePlanDialog v-if="editor" :show="true" :plan="editing" :overview="overview" :upstream-target-id="account ? undefined : target?.id" :oauth-only="!!account" :oauth-account-id="account?.id" :initial-model="creatingModel" :monitored-plans="plans" @close="closeEditor" @saved="saved" />
+  <IntelligenceHistoryDialog v-if="history" :show="true" :plan="selectedPlan" :initial-run-id="selectedRunID" @close="history = false" @deleted="manualRefresh" />
   <IntelligenceCandyDetailDialog v-if="selectedCandyRun" :run="selectedCandyRun" @close="selectedCandy = null" />
-  <UpstreamDeleteDialog v-if="archiving" :show="true" :item="{ kind: 'intelligence', id: archiving.id, name: archiving.name }" :busy="deleting" :error="deleteError" @close="!deleting && (archiving = null)" @confirm="archive" />
+  <IntelligencePermanentDeleteDialog v-if="archiving?.source_type === 'openai_oauth'" :name="archiving.name" :busy="deleting" :error="deleteError" @close="!deleting && (archiving = null)" @confirm="archive('purge')" />
+  <UpstreamDeleteDialog v-else-if="archiving" :show="true" :item="{ kind: 'intelligence', id: archiving.id, name: archiving.name }" :busy="deleting" :error="deleteError" @close="!deleting && (archiving = null)" @confirm="archive" />
 </template>
 
 <script setup lang="ts">
@@ -50,6 +52,8 @@ import IntelligenceHistoryDialog from './IntelligenceHistoryDialog.vue'
 import IntelligenceCandyDetailDialog from './IntelligenceCandyDetailDialog.vue'
 import { intelligenceRefreshInterval, isIntelligenceRunActive } from './intelligenceCandy'
 import UpstreamDeleteDialog from './UpstreamDeleteDialog.vue'
+import IntelligencePermanentDeleteDialog from './IntelligencePermanentDeleteDialog.vue'
+import { PELICAN_MODELS, pelicanModelLabel } from '@/utils/pelicanModels'
 import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './intelligenceMonitorContext'
 import { reconcileMonitorData } from './monitorReconcile'
 
@@ -62,6 +66,9 @@ const plans = ref<IntelligencePlan[]>([]), loaded = ref(false), error = ref('')
 const contextMessages = computed(() => props.account ? 'intelligenceMonitor.accountMonitor' : 'intelligenceMonitor.groupMonitor')
 const contextName = computed(() => props.account ? plans.value[0]?.source_name || props.account.name : props.target?.name || '')
 const contextHint = computed(() => props.account ? t('intelligenceMonitor.source.openai_oauth') : props.target?.endpoint || '')
+const availableModel = computed(() => PELICAN_MODELS.find(model => !plans.value.some(plan => (plan.model || PELICAN_MODEL) === model.value))?.value)
+const contextModels = computed(() => [...new Set(plans.value.map(plan => pelicanModelLabel(plan.model)))].join(' / ') || pelicanModelLabel(PELICAN_MODEL))
+const creatingModel = ref<string>(PELICAN_MODEL)
 const busy = ref(new Set<number>()), closed = ref(false), previewRefresh = ref(0)
 const editor = ref(false), editing = ref<IntelligencePlan | null>(null)
 const history = ref(false), selectedID = ref<number | null>(null), selectedRunID = ref<number | null>(null)
@@ -109,7 +116,8 @@ function manualRefresh() {
   void refresh()
 }
 function openEditor(plan: IntelligencePlan | null = null) {
-  if (!live() || childOpen.value || (!plan && (!loaded.value || loading.value || error.value || plans.value.length))) return
+  if (!live() || childOpen.value || (!plan && (!loaded.value || loading.value || error.value || !availableModel.value))) return
+  creatingModel.value = plan?.model || availableModel.value || PELICAN_MODEL
   editing.value = plan
   editor.value = true
 }
@@ -203,7 +211,8 @@ async function archive(mode: 'archive' | 'purge') {
   deleting.value = true
   deleteError.value = ''
   try {
-    if (mode === 'purge') await upstreamCenterAPI.purge({ kind: 'intelligence', id: plan.id, confirm_name: plan.name })
+    if (plan.source_type === 'openai_oauth') await intelligenceMonitorAPI.permanentDelete(plan.id)
+    else if (mode === 'purge') await upstreamCenterAPI.purge({ kind: 'intelligence', id: plan.id, confirm_name: plan.name })
     else await intelligenceMonitorAPI.archive(plan.id)
     if (!live()) return
     plans.value = plans.value.filter(item => item.id !== plan.id)
