@@ -42,6 +42,15 @@ export default {
       title: '本次实际执行来源', completed: '已完成', attempted: '已尝试', account: '执行账号', attemptedAccount: '尝试账号', type: '账号类型', origin: '账号配置站点', attempts: '请求尝试次数',
       supplier: '关联上游', target: '上游分组', notRecorded: '该历史记录未保存执行账号。', unbound: '该账号未绑定上游分组', ambiguous: '关联多个上游，无法唯一确定', unavailable: '暂时无法查询关联上游', unknown: '未记录上游关联',
     },
+    apiKeyAccount: {
+      title: '{name} · 监控', statusTitle: '分组状态监控', configureStatus: '配置状态监控',
+      sharedHint: '与上游中心共用分组状态、监测计划和作品记录。',
+      emptyTitle: '为这个 API Key 接入监控',
+      emptyHint: '直接使用账号已保存的地址与 Key，自动复用匹配分组。未找到时创建上游分组，再选择状态监控或鹈鹕测试；接入本身不会发起检测。',
+      connect: '接入上游监控',
+      pelicanUnsupported: '此账号已接入分组状态监控。鹈鹕测试使用 OpenAI 兼容接口，暂不支持此账号的协议。',
+      ambiguous: '找到多个匹配的监控分组，请先在上游中心为目标分组明确绑定当前账号，再刷新。',
+    },
     accountMonitor: {
       entry: '鹈鹕监测', title: '{name} · 鹈鹕监测', emptyTitle: '为这个账号创建鹈鹕测试',
       emptyHint: '直接使用当前 OAuth 账号检测。默认开启定时，每 5 分钟一次，保存后开始执行；也可关闭定时，改为手动测试。',

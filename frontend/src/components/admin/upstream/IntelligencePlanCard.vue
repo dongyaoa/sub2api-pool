@@ -35,7 +35,7 @@
         </template>
       </div>
       <div class="mt-3 flex items-center justify-between gap-2 text-[10px]"><span class="inline-flex items-center gap-1" :class="plan.enabled ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'"><Icon name="clock" size="xs" />{{ plan.enabled ? intervalLabel : t('intelligenceMonitor.manual') }}</span><span class="rounded-md px-1.5 py-0.5 font-medium" :class="statusClass(plan.latest_run?.status)">{{ t(`intelligenceMonitor.status.${plan.latest_run?.status || 'idle'}`) }}</span></div>
-      <div class="mt-2 flex items-center gap-1.5" data-testid="intelligence-plan-model"><span class="rounded-md border px-1.5 py-0.5 text-[10px] font-medium" :class="pelicanModelClass(plan.model)" :title="plan.model">{{ pelicanModelLabel(plan.model) }}</span><span class="text-[10px] text-gray-400">{{ plan.reasoning_effort }}</span></div>
+      <IntelligenceModelInfo :model="plan.model" :effort="plan.reasoning_effort" class="mt-2" data-testid="intelligence-plan-model" />
       <div v-if="plan.enabled && !monitoringPaused" class="mt-2 flex min-h-5 items-center justify-between gap-2 text-[10px]" data-testid="intelligence-schedule">
         <span class="shrink-0 text-gray-400 dark:text-dark-400">{{ t('intelligenceMonitor.nextCheck') }}</span>
         <span v-if="active" class="text-right text-gray-500 dark:text-dark-400">{{ t('intelligenceMonitor.afterCurrentRun') }}</span>
@@ -70,7 +70,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { pelicanModelLabel, pelicanModelClass } from '@/utils/pelicanModels'
+import IntelligenceModelInfo from './IntelligenceModelInfo.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { IntelligencePlan, IntelligenceRate, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
 import type { UpstreamOverview } from '@/api/admin/upstreamCenter'
@@ -103,7 +103,7 @@ const sourceBadgeClass = computed(() => ({
   openai_oauth: 'border-violet-200 bg-violet-50 text-violet-600 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
 })[props.plan.source_type])
 const supplier = computed(() => props.overview?.suppliers.find(item => item.targets.some(target => target.id === props.plan.upstream_target_id)))
-const target = computed(() => supplier.value?.targets.find(item => item.id === props.plan.upstream_target_id))
+const target = computed(() => supplier.value?.targets.find(item => item.id === props.plan.upstream_target_id) || props.overview?.monitors?.find(item => item.id === props.plan.upstream_target_id))
 const siteName = computed(() => oauth.value ? 'OpenAI' : supplier.value?.name || props.plan.supplier_note || props.plan.source_name || t(`intelligenceMonitor.source.${props.plan.source_type}`))
 const endpoint = computed(() => oauth.value ? 'https://chatgpt.com' : target.value?.endpoint || props.plan.endpoint || props.plan.latest_run?.source_endpoint || '')
 const groupName = computed(() => target.value?.name || props.plan.group_note || props.plan.source_name || props.plan.name)

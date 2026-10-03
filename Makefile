@@ -6,6 +6,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/tokenRefresh.spec.ts \
 	src/api/__tests__/admin.system.poolUpdate.spec.ts \
 	src/api/__tests__/admin.upstreamCenter.storage.spec.ts \
+	src/api/__tests__/admin.upstreamCenter.accountMonitor.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.candy.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.account.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.controls.spec.ts \
@@ -15,6 +16,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/common/__tests__/BaseDialog.scrollLock.spec.ts \
 	src/components/layout/__tests__/AppSidebar.spec.ts \
 	src/components/admin/account/__tests__/AccountActionMenu.pelican.spec.ts \
+	src/components/admin/account/__tests__/AccountMonitorDialog.spec.ts \
+	src/components/admin/upstream/AccountUpstreamStatus.spec.ts \
 	src/components/admin/upstream/IntelligenceArtifactPreview.spec.ts \
 	src/components/admin/upstream/IntelligenceHistoryDialog.spec.ts \
 	src/components/admin/upstream/IntelligencePlanCard.spec.ts \

@@ -54,8 +54,8 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 let wrapper: VueWrapper | undefined
-function render() {
-  wrapper = mount(UpstreamIntelligenceDialog, { props: { target, overview }, global: { stubs: { BaseDialog: baseDialog, Icon: true } } })
+function render(props: { embedded?: boolean; active?: boolean } = {}) {
+  wrapper = mount(UpstreamIntelligenceDialog, { props: { target, overview, ...props }, global: { stubs: { BaseDialog: baseDialog, Icon: true } } })
   return wrapper
 }
 const cards = (view: VueWrapper) => view.findAllComponents({ name: 'IntelligencePlanCard' })
@@ -66,6 +66,104 @@ beforeEach(() => {
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
   mocks.plans.mockResolvedValue({ items: [] })
   mocks.plansForOAuthAccount.mockResolvedValue({ items: [] })
+})
+
+describe('embedded account upstream intelligence monitor', () => {
+  it('uses the existing target plan data in a section without another modal or duplicate refresh control', async () => {
+    mocks.plans.mockResolvedValue({ items: [plan(1), plan(2, { upstream_target_id: 99 }), plan(3, { source_type: 'openai_oauth', account_id: 7 })] })
+    const view = render({ embedded: true }); await flushPromises()
+    expect(view.findComponent({ name: 'BaseDialog' }).exists()).toBe(false)
+    expect(view.find('section').exists()).toBe(true)
+    expect(view.find('[data-testid="group-intelligence-refresh"]').exists()).toBe(false)
+    expect(mocks.plans).toHaveBeenCalledTimes(1)
+    expect(mocks.plans).toHaveBeenCalledWith(expect.any(AbortSignal), target.id)
+    expect(mocks.plansForOAuthAccount).not.toHaveBeenCalled()
+    expect(cards(view)).toHaveLength(1)
+    expect(cards(view)[0]!.props('plan').id).toBe(1)
+    expect(cards(view)[0]!.props('overview')).toEqual(overview)
+    expect(view.emitted('childOpen')).toEqual([[false]])
+  })
+
+  it.each(['edit', 'history', 'archive'] as const)('notifies its wrapper when the %s child opens and closes', async event => {
+    mocks.plans.mockResolvedValue({ items: [plan()] })
+    const view = render({ embedded: true }); await flushPromises()
+    cards(view)[0]!.vm.$emit(event, event === 'history' ? 91 : undefined); await flushPromises()
+    expect(view.emitted('childOpen')).toEqual([[false], [true]])
+    expect(cards(view)[0]!.attributes('data-active')).toBe('false')
+    const name = event === 'edit' ? 'IntelligencePlanDialog' : event === 'history' ? 'IntelligenceHistoryDialog' : 'UpstreamDeleteDialog'
+    const child = view.getComponent({ name })
+    if (event === 'edit') expect(child.props('upstreamTargetId')).toBe(target.id)
+    child.vm.$emit('close'); await flushPromises()
+    expect(view.emitted('childOpen')).toEqual([[false], [true], [false]])
+    expect(cards(view)[0]!.attributes('data-active')).toBe('true')
+    expect(view.findComponent({ name: 'BaseDialog' }).exists()).toBe(false)
+  })
+
+  it('does not start a retained inactive monitor until activated', async () => {
+    mocks.plans.mockResolvedValue({ items: [plan()] })
+    const view = render({ embedded: true, active: false }); await flushPromises()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(mocks.plans).not.toHaveBeenCalled()
+    await view.setProps({ active: true }); await flushPromises()
+    expect(mocks.plans).toHaveBeenCalledTimes(1)
+    expect(cards(view)[0]!.attributes('data-active')).toBe('true')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+  })
+
+  it('aborts pending reads and pauses polling and generation actions while inactive, then resumes the same cards', async () => {
+    mocks.plans.mockResolvedValue({ items: [plan(1, { candy_enabled: true })] })
+    const view = render({ embedded: true }); await flushPromises()
+    const original = cards(view)[0]!.element
+    const pending = deferred<{ items: IntelligencePlan[] }>()
+    mocks.plans.mockReturnValueOnce(pending.promise)
+    await vi.advanceTimersByTimeAsync(5000)
+    const signal = mocks.plans.mock.calls.at(-1)![0] as AbortSignal
+    await view.setProps({ active: false }); await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(cards(view)[0]!.attributes('data-active')).toBe('false')
+    cards(view)[0]!.vm.$emit('run')
+    cards(view)[0]!.vm.$emit('candyRun')
+    cards(view)[0]!.vm.$emit('toggle')
+    cards(view)[0]!.vm.$emit('edit')
+    await view.get('[data-testid="group-intelligence-add-model"]').trigger('click')
+    await flushPromises()
+    expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.runCandy).not.toHaveBeenCalled()
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(view.find('[data-testid="plan-editor"]').exists()).toBe(false)
+    pending.resolve({ items: [plan(9)] }); await flushPromises()
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+    expect(cards(view)[0]!.props('plan').id).toBe(1)
+    mocks.plans.mockResolvedValue({ items: [plan(1, { name: 'Updated from upstream center', candy_enabled: true })] })
+    await view.setProps({ active: true }); await flushPromises()
+    expect(mocks.plans).toHaveBeenCalledTimes(3)
+    expect(cards(view)[0]!.element).toBe(original)
+    expect(cards(view)[0]!.text()).toContain('Updated from upstream center')
+    expect(cards(view)[0]!.attributes('data-active')).toBe('true')
+  })
+
+  it('exposes one scoped refresh that updates artwork revision without a second overview request or remount', async () => {
+    mocks.plans.mockResolvedValue({ items: [plan()] })
+    const view = render({ embedded: true }); await flushPromises()
+    const original = cards(view)[0]!.element
+    expect(cards(view)[0]!.attributes('data-revision')).toBe('0')
+    const pending = deferred<{ items: IntelligencePlan[] }>()
+    mocks.plans.mockReturnValueOnce(pending.promise)
+    const refreshResult = (view.vm as unknown as { refresh: () => Promise<void> }).refresh()
+    await flushPromises()
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+    expect(mocks.plans).toHaveBeenLastCalledWith(expect.any(AbortSignal), target.id)
+    expect(cards(view)[0]!.attributes('data-revision')).toBe('1')
+    expect(cards(view)[0]!.element).toBe(original)
+    expect(view.emitted('refreshOverview')).toBeUndefined()
+    pending.resolve({ items: [plan(1, { name: 'Fresh shared plan' })] })
+    await refreshResult; await flushPromises()
+    expect(cards(view)[0]!.text()).toBe('Fresh shared plan')
+    expect(cards(view)[0]!.element).toBe(original)
+    expect(mocks.plans).toHaveBeenCalledTimes(2)
+  })
 })
 afterEach(() => {
   wrapper?.unmount()

@@ -9,6 +9,8 @@
 统一前缀 /api/v1/admin/upstream-center，使用现有 response.Success 包装。
 
 - GET /overview?window=24h|7d|30d 返回 {suppliers: Supplier[], monitors: Target[], summary: FinanceSummary}
+- GET /accounts/:id/monitor 返回 `{account_id,account_name,provider,pelican_supported,target:Target|null,supplier:Supplier|null}`，只读当前原生 API Key 账号的共享监控投影（OpenAI/Anthropic/Gemini），不启动检测或同步上游余额。状态含最近60次记录和七天统计，余额/倍率/上游今日消费取现有缓存；target.finance 只聚合当前分组在本站时区今日的账目，与上游中心分组口径一致，成本不完整时 profit 为 null。supplier.targets 仅包含当前 target，不额外汇总其他分组。
+- POST /accounts/:id/monitor 无请求体；原子、幂等复用或创建同一共享分组。优先当前凭据仍有效的绑定，再选协议/地址/Key完全匹配的厂家目标，最后独立监控；同层歧义返回409 `UPSTREAM_ACCOUNT_MONITOR_AMBIGUOUS`。仅没有匹配时新建厂家和分组，状态检测默认关闭。复用独立监控时保持原归属和周期。服务端使用账号凭据，响应不返回原始Key；前端鹈鹕仍通过原计划API以upstream_target_id创建，不另建记录。
 - PUT /order 请求 `{scope:'suppliers'|'monitors'|'groups',supplier_id?:number,ids:number[]}`，按 ids 顺序保存完整范围的展示排序，成功返回 `data:null`。仅 groups 要求 supplier_id 为正整数；其他范围禁止传入。
 - POST /suppliers，PUT /suppliers/:id，DELETE /suppliers/:id。请求 {name, website, notes}；删除软归档，停止其目标调度，保留账目和历史。
 - POST /targets，PUT /targets/:id，DELETE /targets/:id。创建/更新用 TargetInput；更新为字段可选，api_key 为空保持不变。删除软归档并关闭账号绑定。

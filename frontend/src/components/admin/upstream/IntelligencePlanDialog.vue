@@ -116,9 +116,11 @@ const defaults = (): IntelligencePlanInput & { model: string; candy_enabled: boo
 const form = reactive(defaults()), groups = ref<AdminGroup[]>([]), saving = ref(false), error = ref(''), groupError = ref(''), groupsLoading = ref(false)
 const intervalChoice = ref<number | 'custom'>(300), customInterval = ref('300'), intervalError = ref('')
 const eligibleSuppliers = computed(() => (props.overview?.suppliers || []).map(supplier => ({ ...supplier, targets: supplier.targets.filter(target => target.provider === 'openai') })).filter(supplier => supplier.targets.length))
-const selectedTarget = computed(() => eligibleSuppliers.value.flatMap(supplier => supplier.targets).find(target => target.id === form.upstream_target_id))
+// Account monitoring can reuse an existing independent target without moving it.
+const eligibleTargets = computed(() => [...eligibleSuppliers.value.flatMap(supplier => supplier.targets), ...(props.overview?.monitors || []).filter(target => target.provider === 'openai')])
+const selectedTarget = computed(() => eligibleTargets.value.find(target => target.id === form.upstream_target_id))
 const selectedSupplier = computed(() => eligibleSuppliers.value.find(supplier => supplier.targets.some(target => target.id === form.upstream_target_id)))
-function upstreamRate(id:number) { const billing = props.overview?.suppliers.flatMap(supplier => supplier.targets).find(target=>target.id===id)?.balance?.billing; return intelligenceRateLabel(billing as unknown as Record<string,unknown>) || t('intelligenceMonitor.rateUnknown') }
+function upstreamRate(id:number) { const billing = eligibleTargets.value.find(target=>target.id===id)?.balance?.billing; return intelligenceRateLabel(billing as unknown as Record<string,unknown>) || t('intelligenceMonitor.rateUnknown') }
 const upstreamOptions = computed<SelectOption[]>(() => eligibleSuppliers.value.flatMap(supplier => [
   { value: `supplier-${supplier.id}`, label: supplier.name, kind: 'group', disabled: true, website: supplier.website ? domain(supplier.website) : '' },
   ...supplier.targets.map(target => ({ value: target.id, label: `${target.name} · ${upstreamRate(target.id)}`, groupName: target.name, supplierName: supplier.name, rate: upstreamRate(target.id) }))

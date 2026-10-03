@@ -1,24 +1,25 @@
 <template>
-  <BaseDialog :show="true" :title="t(`${contextMessages}.title`, { name: contextName })" width="extra-wide" motion="fade" :close-on-escape="!childOpen" show-close-button @close="close">
-    <div class="group-intelligence-content flex min-h-0 flex-col gap-4" data-testid="group-intelligence-content">
+  <component :is="embedded ? 'section' : BaseDialog" v-bind="embedded ? {} : { show: true, title: t(`${contextMessages}.title`, { name: contextName }), width: 'extra-wide', motion: 'fade', closeOnEscape: !childOpen, showCloseButton: true }" @close="close">
+    <div class="group-intelligence-content flex min-h-0 flex-col gap-4" :class="embedded && 'group-intelligence-embedded'" data-testid="group-intelligence-content">
       <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
-        <div class="flex min-w-0 flex-1 items-center gap-3">
+        <div v-if="!embedded" class="flex min-w-0 flex-1 items-center gap-3">
           <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400"><Icon name="lightbulb" size="sm" /></div>
           <div class="min-w-0"><p class="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{{ contextName }}</p><p class="mt-0.5 truncate text-[10px] text-gray-400" :class="!account && 'font-mono'" :title="contextHint">{{ contextHint }}</p></div>
         </div>
+        <h4 v-else class="inline-flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100"><Icon name="lightbulb" size="sm" class="text-primary-600 dark:text-primary-400" />{{ t('intelligenceMonitor.local.pelican') }}</h4>
         <div class="flex shrink-0 items-center gap-3">
           <span class="hidden text-[11px] text-gray-400 sm:inline">{{ contextModels }} · {{ PELICAN_REASONING }}</span>
           <button v-if="plans.length && availableModel" type="button" class="btn btn-secondary btn-sm" :disabled="loading || !!error" data-testid="group-intelligence-add-model" @click="openEditor()"><Icon name="plus" size="sm" class="mr-1" />{{ t('intelligenceMonitor.addModel') }}</button>
-          <button type="button" class="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium text-gray-500 hover:bg-white hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400" :aria-busy="loading" data-testid="group-intelligence-refresh" @click="manualRefresh"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />{{ t('intelligenceMonitor.refresh') }}</button>
+          <button v-if="!embedded" type="button" class="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium text-gray-500 hover:bg-white hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400" :aria-busy="loading" data-testid="group-intelligence-refresh" @click="manualRefresh"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />{{ t('intelligenceMonitor.refresh') }}</button>
         </div>
       </div>
-      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]" data-testid="group-intelligence-viewport" :aria-busy="loading && !loaded">
+      <div class="min-h-0 flex-1" :class="embedded ? '' : 'overflow-y-auto overscroll-contain [scrollbar-gutter:stable]'" data-testid="group-intelligence-viewport" :aria-busy="loading && !loaded">
         <p v-if="error" role="alert" class="mb-3 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">{{ error }}</p>
-        <div v-if="!loaded && !error" class="h-full animate-pulse rounded-2xl border border-gray-100 bg-gray-50 motion-reduce:animate-none dark:border-dark-700 dark:bg-dark-800" data-testid="group-intelligence-loading" />
+        <div v-if="!loaded && !error" class="h-full animate-pulse rounded-2xl border border-gray-100 bg-gray-50 motion-reduce:animate-none dark:border-dark-700 dark:bg-dark-800" :class="embedded && 'min-h-[220px]'" data-testid="group-intelligence-loading" />
         <div v-if="plans.length" class="space-y-3">
           <IntelligencePlanCard v-for="plan in plans" :key="plan.id" :plan="plan" :overview="overview" :busy="busy.has(plan.id)" :visible="!childOpen" @run="run(plan)" @candy-run="runCandy(plan)" @candy-select="openCandy" @toggle="toggle(plan)" @edit="openEditor(plan)" @history="runID => openHistory(plan, runID)" @archive="openArchive(plan)" />
         </div>
-        <div v-else-if="loaded && !error" class="flex min-h-full flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 px-6 py-6 text-center dark:border-dark-700" data-testid="group-intelligence-empty">
+        <div v-else-if="loaded && !error" class="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 px-6 py-6 text-center dark:border-dark-700" :class="embedded ? 'min-h-[220px]' : 'min-h-full'" data-testid="group-intelligence-empty">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-500 dark:bg-primary-500/10"><Icon name="lightbulb" size="xl" /></div>
           <h4 class="text-sm font-semibold text-gray-800 dark:text-gray-100">{{ t(`${contextMessages}.emptyTitle`) }}</h4>
           <p class="mt-2 max-w-md text-xs leading-6 text-gray-500 dark:text-dark-400">{{ t(`${contextMessages}.emptyHint`) }}</p>
@@ -27,7 +28,7 @@
       </div>
       <div class="flex shrink-0 flex-wrap justify-between gap-2 text-[10px] leading-5 text-gray-400 dark:text-dark-400"><span>{{ t(`${contextMessages}.sharedHint`) }}</span><span>{{ t('intelligenceMonitor.retention') }}</span></div>
     </div>
-  </BaseDialog>
+  </component>
   <IntelligencePlanDialog v-if="editor" :show="true" :plan="editing" :overview="overview" :upstream-target-id="account ? undefined : target?.id" :oauth-only="!!account" :oauth-account-id="account?.id" :initial-model="creatingModel" :monitored-plans="plans" @close="closeEditor" @saved="saved" />
   <IntelligenceHistoryDialog v-if="history" :show="true" :plan="selectedPlan" :initial-run-id="selectedRunID" @close="history = false" @deleted="manualRefresh" />
   <IntelligenceCandyDetailDialog v-if="selectedCandyRun" :run="selectedCandyRun" @close="selectedCandy = null" />
@@ -36,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, provide, ref } from 'vue'
+import { computed, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -58,8 +59,8 @@ import { intelligencePanelActiveKey, intelligencePreviewRefreshKey } from './int
 import { reconcileMonitorData } from './monitorReconcile'
 
 // Both entry points operate on the original plan, including its schedule and history.
-const props = defineProps<{ target?: UpstreamTarget; account?: Pick<Account, 'id' | 'name'>; overview: UpstreamOverview | null }>()
-const emit = defineEmits<{ close: []; changed: []; refreshOverview: [] }>()
+const props = withDefaults(defineProps<{ target?: UpstreamTarget; account?: Pick<Account, 'id' | 'name'>; overview: UpstreamOverview | null; embedded?: boolean; active?: boolean }>(), { embedded: false, active: true })
+const emit = defineEmits<{ close: []; changed: []; refreshOverview: []; childOpen: [open: boolean] }>()
 const { t } = useI18n()
 const app = useAppStore()
 const plans = ref<IntelligencePlan[]>([]), loaded = ref(false), error = ref('')
@@ -75,6 +76,7 @@ const history = ref(false), selectedID = ref<number | null>(null), selectedRunID
 const archiving = ref<IntelligencePlan | null>(null), deleting = ref(false), deleteError = ref('')
 const selectedCandy = ref<IntelligenceRun | null>(null)
 const childOpen = computed(() => editor.value || history.value || !!archiving.value || !!selectedCandy.value)
+watch(childOpen, open => emit('childOpen', open), { immediate: true })
 const selectedPlan = computed(() => plans.value.find(plan => plan.id === selectedID.value) || null)
 const selectedCandyRun = computed(() => {
   const selected = selectedCandy.value
@@ -87,11 +89,11 @@ const live = () => !disposed && !closed.value
 const belongs = (plan: IntelligencePlan) => props.account
   ? plan.source_type === 'openai_oauth' && plan.account_id === props.account.id
   : plan.source_type === 'upstream' && plan.upstream_target_id === props.target?.id
-provide(intelligencePanelActiveKey, computed(() => !closed.value))
+provide(intelligencePanelActiveKey, computed(() => !closed.value && props.active))
 provide(intelligencePreviewRefreshKey, previewRefresh)
 
 const { loading, refresh } = useMonitorRefresh({
-  active: () => !closed.value,
+  active: () => !closed.value && props.active,
   intervalMs: () => intelligenceRefreshInterval(plans.value),
   request: signal => props.account
     ? intelligenceMonitorAPI.plansForOAuthAccount(props.account.id, signal)
@@ -116,7 +118,7 @@ function manualRefresh() {
   void refresh()
 }
 function openEditor(plan: IntelligencePlan | null = null) {
-  if (!live() || childOpen.value || (!plan && (!loaded.value || loading.value || error.value || !availableModel.value))) return
+  if (!live() || !props.active || childOpen.value || (!plan && (!loaded.value || loading.value || error.value || !availableModel.value))) return
   creatingModel.value = plan?.model || availableModel.value || PELICAN_MODEL
   editing.value = plan
   editor.value = true
@@ -157,7 +159,7 @@ function saved(plan?: IntelligencePlan) {
   void refresh()
 }
 async function action(plan: IntelligencePlan, callback: () => Promise<void>) {
-  if (!live() || busy.value.has(plan.id)) return
+  if (!live() || !props.active || busy.value.has(plan.id)) return
   busy.value = new Set([...busy.value, plan.id])
   try {
     await callback()
@@ -225,6 +227,7 @@ async function archive(mode: 'archive' | 'purge') {
   } finally { if (live()) deleting.value = false }
 }
 onBeforeUnmount(() => { disposed = true })
+defineExpose({ refresh: () => { previewRefresh.value++; return refresh() } })
 </script>
 
 <style scoped>
@@ -233,4 +236,5 @@ onBeforeUnmount(() => { disposed = true })
   height: min(468px, calc(90vh - 112px));
   height: min(468px, calc(90dvh - 112px));
 }
+.group-intelligence-embedded { height:auto; min-height:280px; }
 </style>

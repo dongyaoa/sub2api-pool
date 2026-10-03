@@ -42,6 +42,15 @@ export default {
       title: 'Actual execution source', completed: 'Completed', attempted: 'Attempted', account: 'Execution account', attemptedAccount: 'Attempted account', type: 'Account type', origin: 'Configured account site', attempts: 'Request attempts',
       supplier: 'Linked upstream', target: 'Upstream group', notRecorded: 'This historical record did not save the execution account.', unbound: 'No upstream group linked to this account', ambiguous: 'Multiple upstream links; no unique match', unavailable: 'Upstream links temporarily unavailable', unknown: 'Upstream link not recorded',
     },
+    apiKeyAccount: {
+      title: '{name} · Monitoring', statusTitle: 'Group health', configureStatus: 'Configure health checks',
+      sharedHint: 'Group health, monitoring plans and artwork are shared with the Upstream Center.',
+      emptyTitle: 'Monitor this API key',
+      emptyHint: 'Use the saved account endpoint and key to reuse a matching group, or create an upstream group if none exists. Then configure health checks or a pelican plan. Connecting alone does not run a test.',
+      connect: 'Connect to upstream monitoring',
+      pelicanUnsupported: 'Group health monitoring is available. Pelican tests require an OpenAI-compatible interface and are not available for this account protocol.',
+      ambiguous: 'Multiple monitoring groups match this account. Explicitly bind the intended group in the Upstream Center, then refresh.',
+    },
     accountMonitor: {
       entry: 'Pelican monitoring', title: '{name} · Pelican monitoring', emptyTitle: 'Create a pelican test for this account',
       emptyHint: 'Tests this OAuth account directly. New plans run every 5 minutes, starting after saving. Disable scheduling for manual tests.',

@@ -445,18 +445,29 @@
             </div>
           </template>
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-0.5">
               <button
                 type="button"
                 data-testid="account-test-connection"
                 :disabled="testLoadingAccountId !== null || showTest"
                 :aria-busy="testLoadingAccountId === row.id"
-                :aria-label="`${t('admin.accounts.testConnection')}: ${row.name}`"
+                :aria-label="`${t('admin.accounts.testAction')}: ${row.name}`"
                 @click="handleTest(row)"
                 class="flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-green-900/20 dark:hover:text-green-400"
               >
                 <Icon :name="testLoadingAccountId === row.id ? 'refresh' : 'play'" size="sm" :class="{ 'animate-spin': testLoadingAccountId === row.id }" />
-                <span class="text-xs">{{ t('admin.accounts.testConnection') }}</span>
+                <span class="text-xs">{{ t('admin.accounts.testAction') }}</span>
+              </button>
+              <button
+                v-if="canOpenAccountMonitor(row)"
+                type="button"
+                data-testid="account-monitor"
+                :aria-label="`${t('admin.accounts.monitorAction')}: ${row.name}`"
+                @click="handleAccountMonitor(row)"
+                class="flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-violet-50 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:hover:bg-violet-900/20 dark:hover:text-violet-400"
+              >
+                <Icon name="chart" size="sm" />
+                <span class="text-xs">{{ t('admin.accounts.monitorAction') }}</span>
               </button>
               <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
@@ -483,8 +494,8 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <UpstreamIntelligenceDialog v-if="pelicanMonitorAccount" :key="pelicanMonitorAccount.id" :account="pelicanMonitorAccount" :overview="null" @close="pelicanMonitorAccount = null" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @pelican-monitor="handlePelicanMonitor" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountMonitorDialog v-if="monitorAccount" :key="monitorAccount.id" :account="monitorAccount" @close="selectedMonitorAccount = null" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -566,7 +577,7 @@ import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 import type { AccountRecentRequest } from '@/api/admin/accounts'
 
-const UpstreamIntelligenceDialog = defineAsyncComponent(() => import('@/components/admin/upstream/UpstreamIntelligenceDialog.vue'))
+const AccountMonitorDialog = defineAsyncComponent(() => import('@/components/admin/account/AccountMonitorDialog.vue'))
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -648,7 +659,27 @@ const statsAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
-const pelicanMonitorAccount = ref<Pick<Account, 'id' | 'name'> | null>(null)
+type MonitorAccount = Pick<Account, 'id' | 'name' | 'platform' | 'type' | 'parent_account_id' | 'extra'>
+const selectedMonitorAccount = ref<MonitorAccount | null>(null)
+const monitorAccount = computed(() => {
+  const selected = selectedMonitorAccount.value
+  if (!selected) return null
+  const current = accounts.value.find(account => account.id === selected.id)
+  return current ? monitorAccountSnapshot(current) : selected
+})
+const monitorAccountSnapshot = (account: MonitorAccount): MonitorAccount => ({
+  id: account.id,
+  name: account.name,
+  platform: account.platform,
+  type: account.type,
+  parent_account_id: account.parent_account_id,
+  extra: account.extra
+})
+const canOpenAccountMonitor = (account: MonitorAccount) => {
+  if (account.parent_account_id != null || account.extra?.synthetic_ui_test === true) return false
+  return (account.platform === 'openai' && account.type === 'oauth') ||
+    (account.type === 'apikey' && ['openai', 'anthropic', 'gemini'].includes(account.platform))
+}
 const togglingSchedulable = ref<number | null>(null)
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
@@ -1463,7 +1494,7 @@ const isAnyModalOpen = computed(() => {
     showTest.value ||
     showStats.value ||
     showSchedulePanel.value ||
-    !!pelicanMonitorAccount.value ||
+    !!selectedMonitorAccount.value ||
     showErrorPassthrough.value ||
     showTLSFingerprintProfiles.value
   )
@@ -2414,10 +2445,10 @@ const handleSchedule = async (a: Account) => {
   }
 }
 const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
-const handlePelicanMonitor = (account: Account) => {
-  if (account.platform !== 'openai' || account.type !== 'oauth' || account.parent_account_id != null || account.extra?.synthetic_ui_test === true) return
+const handleAccountMonitor = (account: MonitorAccount) => {
+  if (!canOpenAccountMonitor(account)) return
   menu.show = false
-  pelicanMonitorAccount.value = { id: account.id, name: account.name }
+  selectedMonitorAccount.value = monitorAccountSnapshot(account)
 }
 const handleReAuth = (a: Account) => { reAuthAcc.value = a; showReAuth.value = true }
 const duplicatingAccountIDs = new Set<number>()

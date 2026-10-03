@@ -2,6 +2,7 @@ import { defineComponent, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IntelligencePlan, IntelligenceRun } from '@/api/admin/intelligenceMonitor'
+import type { UpstreamOverview, UpstreamTarget } from '@/api/admin/upstreamCenter'
 import IntelligencePlanCard from './IntelligencePlanCard.vue'
 import IntelligenceArtifactPreview from './IntelligenceArtifactPreview.vue'
 import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
@@ -16,6 +17,39 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it('uses live independent target details and rates without remounting its shared artworks', async () => {
+    const artwork = run(90)
+    const value = plan({ source_type: 'upstream', upstream_target_id: 31, source_name: 'Independent source', group_note: 'Old group note', latest_run: artwork, recent_runs: [artwork] })
+    const target = { id: 31, supplier_id: null, name: 'Current API group', endpoint: 'https://current.example/v1', balance: { billing: { effective_rate_multiplier: 0.65, stale: false } } } as UpstreamTarget
+    const overview = { suppliers: [], monitors: [target] } as unknown as UpstreamOverview
+    const view = render(value)
+    await view.setProps({ overview })
+    const previewElement = view.get('.test-preview').element
+    const aside = view.get('aside')
+    expect(aside.text()).toContain('Independent source')
+    expect(aside.get('[title="Current API group"]').text()).toBe('Current API group')
+    expect(aside.get('[title="https://current.example/v1"]').text()).toBe('https://current.example/v1')
+    expect(aside.text()).toContain('0.65×')
+    expect(aside.text()).not.toContain('Old group note')
+    expect(aside.text()).not.toContain('https://relay.example')
+    expect(aside.text()).not.toContain('0.3×')
+    const updated = { ...target, name: 'Renamed API group', endpoint: 'https://updated.example/v1', balance: { ...target.balance!, billing: { ...target.balance!.billing!, effective_rate_multiplier: 0.8, stale: true } } }
+    await view.setProps({ plan: { ...value, source_name: 'Renamed independent source' }, overview: { ...overview, monitors: [updated] } })
+    expect(aside.text()).toContain('Renamed independent source')
+    expect(aside.get('[title="Renamed API group"]').text()).toBe('Renamed API group')
+    expect(aside.get('[title="https://updated.example/v1"]').text()).toBe('https://updated.example/v1')
+    expect(aside.findAll('p').find(item => item.text() === '0.8×')!.classes()).toContain('text-amber-500')
+    expect(aside.text()).not.toContain('Current API group')
+    expect(aside.text()).not.toContain('https://current.example/v1')
+    expect(view.get('.test-preview').element).toBe(previewElement)
+    await view.setProps({ overview: { ...overview, monitors: [] } })
+    expect(aside.text()).toContain('Old group note')
+    expect(aside.text()).toContain('https://relay.example')
+    expect(aside.text()).toContain('0.3×')
+    expect(view.get('.test-preview').element).toBe(previewElement)
+    view.unmount()
+  })
+
   it('updates all current OAuth group badges on refresh without remounting artworks', async () => {
     const artwork = run(90)
     const value = plan({ source_type: 'openai_oauth', latest_run: artwork, recent_runs: [artwork], oauth_account_status: { status: 'normal', monitoring_paused: false, groups: [{ id: 5, name: 'PLUS' }, { id: 8, name: 'Premium group with a long name' }] } })

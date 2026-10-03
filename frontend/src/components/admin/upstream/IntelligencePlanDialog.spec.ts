@@ -536,6 +536,58 @@ describe('intelligence plan choices and interval validation', () => {
     expect(view.emitted('close')).toHaveLength(1)
   })
 
+  it('reuses a fixed independent OpenAI monitor without requiring or creating an upstream supplier', async () => {
+    const overview = { ...upstreamOverview, monitors: [{ id: 31, supplier_id: null, name: 'Independent API account', provider: 'openai', endpoint: 'https://independent.example/v1', balance: { billing: { effective_rate_multiplier: 0.65, stale: false } } }] } as UpstreamOverview
+    const created = savedPlan({ id: 92, name: 'Independent API account', source_type: 'upstream', upstream_target_id: 31, account_id: null, model: 'gpt-6-astra' })
+    mocks.create.mockResolvedValueOnce(created)
+    const view = render({ oauthOnly: false, overview, upstreamTargetId: 31 }); await flushPromises()
+    const summary = view.get('[data-testid="intelligence-locked-upstream"]')
+    expect(summary.text()).toContain('Independent API account')
+    expect(summary.text()).toContain('independent.example')
+    expect(summary.text()).toContain('0.65×')
+    expect(summary.text()).not.toContain('intelligenceMonitor.sourceMissing')
+    expect(summary.text()).not.toContain('North Relay')
+    expect(view.find('#intelligence-upstream').exists()).toBe(false)
+    expect(view.find('#intelligence-key').exists()).toBe(false)
+    expect((view.get('#intelligence-name').element as HTMLInputElement).value).toBe('Independent API account')
+    expect(mocks.accounts).not.toHaveBeenCalled()
+    expect(mocks.groups).not.toHaveBeenCalled()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'upstream', upstream_target_id: 31, account_id: null, group_id: null, name: 'Independent API account', model: 'gpt-6-astra', enabled: true, interval_seconds: 300, timeout_seconds: 600, endpoint: undefined, api_key: undefined }))
+    expect(mocks.create.mock.calls[0]![0]).not.toHaveProperty('supplier_id')
+    expect(view.emitted('saved')).toEqual([[created]])
+  })
+
+  it('applies the same per-model duplicate rules to a fixed independent monitor', async () => {
+    const overview = { suppliers: [], monitors: [{ id: 31, supplier_id: null, name: 'Independent API account', provider: 'openai', endpoint: 'https://independent.example' }] } as unknown as UpstreamOverview
+    const astra = savedPlan({ source_type: 'upstream', account_id: null, upstream_target_id: 31, model: 'gpt-6-astra' })
+    const view = render({ oauthOnly: false, overview, upstreamTargetId: 31, monitoredPlans: [astra] }); await flushPromises()
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+    await selectOption(view, '#intelligence-model', 'GPT-6.1 Sol')
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'upstream', upstream_target_id: 31, model: 'gpt-6.1-sol' }))
+    mocks.create.mockClear()
+    await view.setProps({ monitoredPlans: [astra, { ...astra, id: 4, model: 'gpt-6.1-sol' }] })
+    expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it.each(['anthropic', 'gemini'])('does not enable a fixed independent %s monitor for pelican testing', async provider => {
+    const overview = { suppliers: [], monitors: [{ id: 31, supplier_id: null, name: 'Unsupported API account', provider, endpoint: 'https://independent.example' }] } as unknown as UpstreamOverview
+    const view = render({ oauthOnly: false, overview, upstreamTargetId: 31 }); await flushPromises()
+    expect(view.get('[data-testid="intelligence-locked-upstream"]').text()).toContain('intelligenceMonitor.sourceMissing')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+    await selectOption(view, '#intelligence-model', 'GPT-6.1 Sol')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
   it('refreshes the locked source summary while preserving a custom draft across overview and plan polling', async () => {
     const plan = savedPlan({ name: 'Existing comparison', source_type: 'upstream', upstream_target_id: 11, account_id: null })
     const view = render({ oauthOnly: false, overview: upstreamOverview, upstreamTargetId: 11, plan })

@@ -136,6 +136,14 @@ export interface UpstreamOverview {
   monitors: UpstreamTarget[]
   summary: UpstreamFinanceSummary
 }
+export interface AccountUpstreamMonitor {
+  account_id: number
+  account_name: string
+  provider: UpstreamProvider
+  pelican_supported: boolean
+  target: UpstreamTarget | null
+  supplier: UpstreamSupplier | null
+}
 export interface UpstreamFinanceRow {
   id: number
   created_at: string
@@ -183,6 +191,12 @@ export interface UpstreamPurgeInput { kind: UpstreamArchiveKind; id: number; con
 const base = '/admin/upstream-center'
 
 export const upstreamCenterAPI = {
+  async accountMonitor(id: number, signal?: AbortSignal): Promise<AccountUpstreamMonitor> {
+    return (await apiClient.get<AccountUpstreamMonitor>(`${base}/accounts/${id}/monitor`, { signal })).data
+  },
+  async ensureAccountMonitor(id: number, signal?: AbortSignal): Promise<AccountUpstreamMonitor> {
+    return (await apiClient.post<AccountUpstreamMonitor>(`${base}/accounts/${id}/monitor`, undefined, { signal })).data
+  },
   async storage(signal?: AbortSignal): Promise<UpstreamStoragePolicy> {
     return (await apiClient.get<UpstreamStoragePolicy>(`${base}/storage`, { signal })).data
   },
