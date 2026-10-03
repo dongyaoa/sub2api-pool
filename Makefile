@@ -8,6 +8,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/admin.upstreamCenter.storage.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.candy.spec.ts \
 	src/api/__tests__/admin.intelligenceMonitor.account.spec.ts \
+	src/api/__tests__/admin.intelligenceMonitor.controls.spec.ts \
 	src/api/__tests__/admin.accounts.opencodeGoUsage.spec.ts \
 	src/api/__tests__/pelicanMonitor.spec.ts \
 	src/components/common/__tests__/VersionBadge.spec.ts \
@@ -57,9 +58,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/components/account/__tests__/ClaudeResetCreditsCell.spec.ts \
 	src/components/account/__tests__/OpenCodeGoUsageCell.spec.ts \
+	src/components/account/__tests__/AccountPriorityCell.spec.ts \
 	src/components/account/__tests__/TempUnschedStatusModal.spec.ts \
 	src/components/account/__tests__/ModelWhitelistSelector.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
+	src/components/keys/__tests__/UseKeyModal.spec.ts \
 	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
 	src/views/user/__tests__/KeysView.spec.ts \
 	src/api/__tests__/channelMonitorV2.spec.ts \
@@ -67,6 +70,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
+	src/components/payment/__tests__/AmountInput.spec.ts \
+	src/utils/__tests__/rechargeBonus.spec.ts \
 	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \

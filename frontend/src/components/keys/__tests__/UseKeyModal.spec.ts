@@ -123,6 +123,32 @@ describe('UseKeyModal', () => {
     }
   })
 
+  it('generates valid TypeSafe JSON for each shell, including escaped Windows CMD arguments', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'ts-test', baseUrl: 'https://example.com/v1', platform: 'typesafe' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: true } },
+    })
+    const expectedPayload = {
+      model: 'jev-latest', state: 'Text to evaluate',
+      questions: { safety: { type: 'noul', instructions: 'Evaluate whether the text is unsafe' } },
+    }
+    for (const shell of ['macOS / Linux', 'Windows CMD', 'PowerShell']) {
+      const tab = wrapper.findAll('button').find(button => button.text().trim() === shell)
+      await tab!.trigger('click')
+      const command = wrapper.get('pre code').text()
+      expect(command).toContain('https://example.com/v1/systemone')
+      expect(command).toContain('Bearer ts-test')
+      // Read the shell's quoted data argument as the receiving program would.
+      const body = shell === 'Windows CMD'
+        ? command.match(/--data "((?:\\"|[^"])*)"/)?.[1]?.replace(/\\"/g, '"')
+        : shell === 'PowerShell'
+          ? command.match(/\$body = @'\n([\s\S]*?)\n'@/)?.[1]
+          : command.match(/--data '([\s\S]*?)'/)?.[1]
+      expect(JSON.parse(body || '')).toEqual(expectedPayload)
+    }
+    wrapper.unmount()
+  })
+
   it('renders Grok Build and OpenCode setup for Grok groups', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {

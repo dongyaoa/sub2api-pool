@@ -359,6 +359,74 @@ describe('PaymentView help text', () => {
   })
 })
 
+describe('PaymentView recharge promotion integration', () => {
+  async function mountPromotion(overrides: Partial<CheckoutInfoResponse> = {}, limit: Partial<MethodLimit> = {}) {
+    vi.useRealTimers()
+    routeState.path = '/purchase'
+    routeState.query = {}
+    window.localStorage.clear()
+    createOrder.mockReset().mockRejectedValue(new Error('Checkout unavailable'))
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({
+      balance_recharge_multiplier: 0.5,
+      recharge_fee_rate: 2,
+      recharge_bonus_tiers: [{ min_amount: 100, bonus_percent: 20 }],
+      recharge_bonus_mode: 'bonus',
+      methods: { wxpay: { ...checkoutInfoFixture().data.methods.wxpay, currency: 'USD', ...limit } },
+      ...overrides,
+    }))
+    const wrapper = shallowMount(PaymentView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false } },
+    })
+    await flushPromises()
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 100)
+    await flushPromises()
+    return wrapper
+  }
+
+  it('passes promotion settings to quick amounts and keeps bonus credit separate from the payment', async () => {
+    const wrapper = await mountPromotion()
+    expect(wrapper.getComponent(AmountInput).props()).toMatchObject({
+      bonusTiers: [{ min_amount: 100, bonus_percent: 20 }], bonusMode: 'bonus', multiplier: 0.5, currency: 'USD',
+    })
+    expect(wrapper.get('[data-testid="recharge-bonus-row"]').text()).toContain('+$10.00')
+    expect(wrapper.get('[data-testid="recharge-credited-row"]').text()).toContain('60.00')
+    expect(wrapper.find('[data-testid="recharge-discount-row"]').exists()).toBe(false)
+    const submit = wrapper.findAll('button').find(button => button.text().includes('payment.createOrder'))!
+    expect(submit.text()).toContain(formatPaymentAmount(102, 'USD'))
+    await submit.trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 100, order_type: 'balance' }))
+    wrapper.unmount()
+  })
+
+  it('checks channel limits and fees against the discount while submitting the original amount', async () => {
+    const wrapper = await mountPromotion({ recharge_bonus_mode: 'discount' }, { single_max: 80 })
+    expect(wrapper.get('[data-testid="recharge-discount-row"]').text()).toContain(`-${formatPaymentAmount(20, 'USD')}`)
+    expect(wrapper.get('[data-testid="recharge-credited-row"]').text()).toContain('50.00')
+    expect(wrapper.find('[data-testid="recharge-bonus-row"]').exists()).toBe(false)
+    const submit = wrapper.findAll('button').find(button => button.text().includes('payment.createOrder'))!
+    expect(submit.attributes('disabled')).toBeUndefined()
+    expect(submit.text()).toContain(formatPaymentAmount(81.6, 'USD'))
+    await submit.trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 100, order_type: 'balance' }))
+    wrapper.unmount()
+  })
+
+  it('sanitizes the promotion notice and retains the existing independent help content', async () => {
+    const wrapper = await mountPromotion({
+      recharge_bonus_notice: '**Bonus**\n\n<script>alert(1)</script><img src="https://example.com/bonus.png" onerror="alert(1)">',
+      help_text: '## Payment help',
+    })
+    const notice = wrapper.get('[data-testid="recharge-bonus-notice"]')
+    expect(notice.get('strong').text()).toBe('Bonus')
+    expect(notice.find('script').exists()).toBe(false)
+    expect(notice.get('img').attributes('onerror')).toBeUndefined()
+    expect(wrapper.get('.markdown-body h2').text()).toBe('Payment help')
+    wrapper.unmount()
+  })
+})
+
 describe('PaymentView subscription plan grid', () => {
   it.each([3, 4, 6])('keeps %i plans on the existing mobile/tablet/desktop grid', async (planCount) => {
     const wrapper = await mountSubscriptionPlanList(planCount)
