@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import type { UpstreamHistoryRecord, UpstreamModelStatistics, UpstreamTarget } from '@/api/admin/upstreamCenter'
+import type { UpstreamBalanceSnapshot, UpstreamHistoryRecord, UpstreamModelStatistics, UpstreamTarget } from '@/api/admin/upstreamCenter'
 import AccountUpstreamStatus from './AccountUpstreamStatus.vue'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => values ? `${key}:${JSON.stringify(values)}` : key }) }))
@@ -28,7 +28,62 @@ async function selectSecondModel(wrapper: ReturnType<typeof mount>) {
   await wrapper.findAll('[role="option"]')[1]!.trigger('click')
 }
 
+function balance(overrides: Partial<UpstreamBalanceSnapshot> = {}): UpstreamBalanceSnapshot {
+  return { target_id: 10, wallet_ref: 'private-wallet', kind: 'wallet', balance: 16.25, quota_remaining: 4, today_used: 0, total_used: 0, currency: 'USD', status: 'ok', synced_at: '2026-10-03T02:00:00Z', error: '', ...overrides }
+}
+
 describe('API key account shared upstream status', () => {
+  it('shows the shared upstream wallet and updates low balances with the refreshed target', async () => {
+    const wrapper = mount(AccountUpstreamStatus, { props: { target: target({ balance: balance() }) }, global: { stubs } })
+    expect(wrapper.get('[data-testid="account-status-wallet-label"]').text()).toBe('upstreamCenter.wallet.title')
+    expect(wrapper.get('[data-testid="account-status-balance"]').text()).toContain('16.25')
+    expect(wrapper.get('[data-testid="account-status-balance"]').classes()).not.toContain('text-rose-600')
+    expect(wrapper.get('[data-testid="account-status-wallet"]').attributes('title')).toContain('upstreamCenter.wallet.syncedAt')
+    await wrapper.setProps({ target: target({ balance: balance({ balance: 0, status: 'error', last_attempt_at: '2026-10-03T03:00:00Z', error: 'upstream temporarily unavailable' }) }) })
+    expect(wrapper.get('[data-testid="account-status-balance"]').text()).toContain('0.00')
+    expect(wrapper.get('[data-testid="account-status-balance"]').classes()).toContain('text-rose-600')
+    const hint = wrapper.get('[data-testid="account-status-wallet"]').attributes('title')
+    expect(hint).toContain('upstreamCenter.wallet.error')
+    expect(hint).toContain('upstreamCenter.wallet.attemptAt')
+    expect(hint).toContain('upstream temporarily unavailable')
+    await wrapper.setProps({ target: target({ balance: balance({ balance: 5 }) }) })
+    expect(wrapper.get('[data-testid="account-status-balance"]').classes()).not.toContain('text-rose-600')
+    wrapper.unmount()
+  })
+
+  it('distinguishes key quotas and subscriptions from wallets and handles unlimited or raw quota units', async () => {
+    const wrapper = mount(AccountUpstreamStatus, { props: { target: target({ balance: balance({ kind: 'key_quota' }) }) }, global: { stubs } })
+    expect(wrapper.get('[data-testid="account-status-wallet-label"]').text()).toBe('upstreamCenter.wallet.quota')
+    expect(wrapper.get('[data-testid="account-status-balance"]').text()).toContain('4.00')
+    expect(wrapper.get('[data-testid="account-status-balance"]').classes()).toContain('text-rose-600')
+    await wrapper.setProps({ target: target({ balance: balance({ kind: 'key_quota', unlimited_quota: true }) }) })
+    expect(wrapper.get('[data-testid="account-status-balance"]').text()).toBe('upstreamCenter.newapi.unlimited')
+    expect(wrapper.get('[data-testid="account-status-balance"]').classes()).not.toContain('text-rose-600')
+    await wrapper.setProps({ target: target({ balance: balance({ kind: 'key_quota', currency: 'QUOTA' }) }) })
+    expect(wrapper.get('[data-testid="account-status-balance"]').text()).toBe('4 QUOTA')
+    expect(wrapper.get('[data-testid="account-status-balance"]').classes()).not.toContain('text-rose-600')
+    await wrapper.setProps({ target: target({ balance: balance({ kind: 'subscription', quota_remaining: 20 }) }) })
+    expect(wrapper.get('[data-testid="account-status-wallet-label"]').text()).toBe('upstreamCenter.wallet.subscription')
+    expect(wrapper.get('[data-testid="account-status-balance"]').text()).toContain('20.00')
+    await wrapper.setProps({ target: target({ balance: balance({ unlimited_quota: true }) }) })
+    expect(wrapper.get('[data-testid="account-status-wallet-label"]').text()).toBe('upstreamCenter.wallet.title')
+    expect(wrapper.get('[data-testid="account-status-balance"]').text()).toContain('16.25')
+    wrapper.unmount()
+  })
+
+  it('keeps missing wallet balances distinct from zero and explains unsupported or pending syncs', async () => {
+    const wrapper = mount(AccountUpstreamStatus, { props: { target: target() }, global: { stubs } })
+    expect(wrapper.get('[data-testid="account-status-balance"]').text()).toBe('—')
+    expect(wrapper.get('[data-testid="account-status-wallet"]').attributes('title')).toBe('upstreamCenter.wallet.unknown')
+    for (const status of ['unsupported', 'pending'] as const) {
+      await wrapper.setProps({ target: target({ balance: balance({ balance: null, status }) }) })
+      expect(wrapper.get('[data-testid="account-status-balance"]').text()).toBe('—')
+      expect(wrapper.get('[data-testid="account-status-balance"]').classes()).not.toContain('text-rose-600')
+      expect(wrapper.get('[data-testid="account-status-wallet"]').attributes('title')).toContain(`upstreamCenter.wallet.${status}`)
+    }
+    wrapper.unmount()
+  })
+
   it('uses the shared group finance values without deriving profit from remote usage or filtering by the health model', async () => {
     const item = target({ balance: { today_used: 9.3, currency: 'USD' } as UpstreamTarget['balance'], finance: { revenue: 12.5, business_cost: 5, monitor_cost: 1, profit: 6.5, currency: 'USD' } as UpstreamTarget['finance'] })
     const wrapper = mount(AccountUpstreamStatus, { props: { target: item }, global: { stubs } })

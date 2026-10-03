@@ -1,7 +1,7 @@
 <template>
   <component :is="embedded ? 'section' : BaseDialog" v-bind="embedded ? {} : { show: true, title: t(`${contextMessages}.title`, { name: contextName }), width: 'extra-wide', motion: 'fade', closeOnEscape: !childOpen, showCloseButton: true }" @close="close">
-    <div class="group-intelligence-content flex min-h-0 flex-col gap-4" :class="embedded && 'group-intelligence-embedded'" data-testid="group-intelligence-content">
-      <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
+    <div class="group-intelligence-content flex min-h-0 flex-col gap-4" :class="{ 'group-intelligence-embedded': embedded, 'group-intelligence-dual': fitTwoPlans }" data-testid="group-intelligence-content">
+      <div class="group-intelligence-heading flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
         <div v-if="!embedded" class="flex min-w-0 flex-1 items-center gap-3">
           <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400"><Icon name="lightbulb" size="sm" /></div>
           <div class="min-w-0"><p class="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{{ contextName }}</p><p class="mt-0.5 truncate text-[10px] text-gray-400" :class="!account && 'font-mono'" :title="contextHint">{{ contextHint }}</p></div>
@@ -13,11 +13,11 @@
           <button v-if="!embedded" type="button" class="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium text-gray-500 hover:bg-white hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400" :aria-busy="loading" data-testid="group-intelligence-refresh" @click="manualRefresh"><Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />{{ t('intelligenceMonitor.refresh') }}</button>
         </div>
       </div>
-      <div class="min-h-0 flex-1" :class="embedded ? '' : 'overflow-y-auto overscroll-contain [scrollbar-gutter:stable]'" data-testid="group-intelligence-viewport" :aria-busy="loading && !loaded">
+      <div class="group-intelligence-viewport min-h-0 flex-1" :class="embedded ? '' : 'overflow-y-auto overscroll-contain [scrollbar-gutter:stable]'" data-testid="group-intelligence-viewport" :aria-busy="loading && !loaded">
         <p v-if="error" role="alert" class="mb-3 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">{{ error }}</p>
         <div v-if="!loaded && !error" class="h-full animate-pulse rounded-2xl border border-gray-100 bg-gray-50 motion-reduce:animate-none dark:border-dark-700 dark:bg-dark-800" :class="embedded && 'min-h-[220px]'" data-testid="group-intelligence-loading" />
-        <div v-if="plans.length" class="space-y-3">
-          <IntelligencePlanCard v-for="plan in plans" :key="plan.id" :plan="plan" :overview="overview" :busy="busy.has(plan.id)" :visible="!childOpen" @run="run(plan)" @candy-run="runCandy(plan)" @candy-select="openCandy" @toggle="toggle(plan)" @edit="openEditor(plan)" @history="runID => openHistory(plan, runID)" @archive="openArchive(plan)" />
+        <div v-if="plans.length" class="group-intelligence-plans" :class="!fitTwoPlans && 'space-y-3'">
+          <IntelligencePlanCard v-for="plan in plans" :key="plan.id" :plan="plan" :overview="overview" :busy="busy.has(plan.id)" :visible="!childOpen" :compact="fitTwoPlans" @run="run(plan)" @candy-run="runCandy(plan)" @candy-select="openCandy" @toggle="toggle(plan)" @edit="openEditor(plan)" @history="runID => openHistory(plan, runID)" @archive="openArchive(plan)" />
         </div>
         <div v-else-if="loaded && !error" class="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 px-6 py-6 text-center dark:border-dark-700" :class="embedded ? 'min-h-[220px]' : 'min-h-full'" data-testid="group-intelligence-empty">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-500 dark:bg-primary-500/10"><Icon name="lightbulb" size="xl" /></div>
@@ -64,6 +64,7 @@ const emit = defineEmits<{ close: []; changed: []; refreshOverview: []; childOpe
 const { t } = useI18n()
 const app = useAppStore()
 const plans = ref<IntelligencePlan[]>([]), loaded = ref(false), error = ref('')
+const fitTwoPlans = computed(() => !props.embedded && !props.account && plans.value.length === 2)
 const contextMessages = computed(() => props.account ? 'intelligenceMonitor.accountMonitor' : 'intelligenceMonitor.groupMonitor')
 const contextName = computed(() => props.account ? plans.value[0]?.source_name || props.account.name : props.target?.name || '')
 const contextHint = computed(() => props.account ? t('intelligenceMonitor.source.openai_oauth') : props.target?.endpoint || '')
@@ -237,4 +238,22 @@ defineExpose({ refresh: () => { previewRefresh.value++; return refresh() } })
   height: min(468px, calc(90dvh - 112px));
 }
 .group-intelligence-embedded { height:auto; min-height:280px; }
+.group-intelligence-dual .group-intelligence-plans { display: grid; gap: 8px; }
+/* Fit the cards to their contents, shrinking together only when viewport space is limited. */
+@media (min-width: 1024px) {
+  .group-intelligence-dual {
+    height: auto;
+    max-height: calc(90vh - 104px);
+    max-height: calc(90dvh - 104px);
+    gap: 8px;
+  }
+  .group-intelligence-dual .group-intelligence-heading { padding-block: 6px; }
+  .group-intelligence-dual .group-intelligence-heading > div:first-child > div:first-child { width: 28px; height: 28px; }
+  .group-intelligence-dual .group-intelligence-viewport { display: flex; flex: 0 1 auto; flex-direction: column; }
+  .group-intelligence-dual .group-intelligence-plans {
+    flex: 0 1 auto;
+    min-height: 450px;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+}
 </style>

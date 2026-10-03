@@ -17,6 +17,46 @@ function render(value: IntelligencePlan, busy = false) {
 }
 
 describe('intelligence plan card result selection', () => {
+  it('keeps artwork playback DOM and history/candy actions available when switching between dual and regular layouts', async () => {
+    const completed = { ...run(91), html: '<svg></svg>' }
+    const candy = { ...run(100), plan_id: 1, test_kind: 'candy' as const, correct: true, answer: '21' }
+    const value = plan({ source_type: 'upstream', latest_run: completed, recent_runs: [completed], candy_enabled: true, candy_latest_run: candy })
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const view = mount(IntelligencePlanCard, {
+      attachTo: document.body,
+      props: { plan: value, overview: null, busy: false, compact: true },
+      global: { stubs: { Icon: true } },
+    })
+    try {
+      await flushPromises()
+      const artwork = view.getComponent(IntelligenceArtifactPreview)
+      const frame = artwork.get('iframe').element
+      const candyStrip = view.get('[data-testid="candy-monitor"]').element
+      await artwork.get('[aria-label="intelligenceMonitor.open"]').trigger('click')
+      await view.get('[data-testid="candy-run"]').trigger('click')
+      await view.get('[data-candy-status="correct"]').trigger('click')
+      expect(view.emitted('history')).toEqual([[91]])
+      expect(view.emitted('candyRun')).toEqual([[]])
+      expect(view.emitted('candySelect')).toEqual([[candy]])
+
+      for (const compact of [false, true]) {
+        await view.setProps({ compact, plan: { ...value, recent_runs: [{ ...completed }] } })
+        const retainedArtwork = view.getComponent(IntelligenceArtifactPreview)
+        expect(retainedArtwork.element).toBe(artwork.element)
+        expect(retainedArtwork.get('iframe').element).toBe(frame)
+        expect(view.get('[data-testid="candy-monitor"]').element).toBe(candyStrip)
+      }
+      const history = view.findAll('button').find(button => button.text().includes('intelligenceMonitor.history'))!
+      await history.trigger('click')
+      expect(view.emitted('history')).toEqual([[91], []])
+      await view.get('[data-testid="candy-run"]').trigger('click')
+      expect(view.emitted('candyRun')).toHaveLength(2)
+    } finally {
+      view.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('uses live independent target details and rates without remounting its shared artworks', async () => {
     const artwork = run(90)
     const value = plan({ source_type: 'upstream', upstream_target_id: 31, source_name: 'Independent source', group_note: 'Old group note', latest_run: artwork, recent_runs: [artwork] })

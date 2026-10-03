@@ -1,5 +1,5 @@
 <template>
-  <div class="mb-3 shrink-0 rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-900/40" data-testid="candy-monitor">
+  <div class="mb-3 shrink-0 rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-900/40" :class="compact && 'candy-monitor-compact'" data-testid="candy-monitor">
     <div class="mb-1.5 flex min-w-0 items-center justify-between gap-2 text-[10px]">
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"><span class="shrink-0 font-semibold text-gray-700 dark:text-gray-200">{{ t('intelligenceMonitor.candy.title') }}</span><span class="text-gray-400">{{ t('intelligenceMonitor.candy.recent') }}</span><span v-if="active" class="inline-flex shrink-0 items-center gap-1 text-violet-600 dark:text-violet-300"><Icon name="refresh" size="xs" class="animate-spin" />{{ t('intelligenceMonitor.candy.running') }}</span><span v-else-if="monitoringPaused" class="text-amber-600 dark:text-amber-400">{{ t('intelligenceMonitor.oauth.monitoringPaused') }}</span><template v-else-if="plan.enabled"><span class="text-gray-400">{{ t('intelligenceMonitor.minutes', { count: (plan.candy_interval_seconds || 180) / 60 }) }}</span><time v-if="remaining !== null && remaining > 0" :datetime="plan.candy_next_run_at || undefined" class="font-mono font-semibold tabular-nums text-violet-600 dark:text-violet-300" data-testid="candy-countdown">{{ countdown }}</time><span v-else class="text-gray-400">{{ t('intelligenceMonitor.waitingSchedule') }}</span></template><span v-else class="text-gray-400">{{ t('intelligenceMonitor.manual') }}</span></div>
       <button type="button" class="shrink-0 font-semibold text-violet-600 disabled:opacity-40 dark:text-violet-300" :disabled="busy || planActive || monitoringPaused" data-testid="candy-run" @click="emit('run')">{{ t('intelligenceMonitor.candy.run') }}</button>
@@ -33,7 +33,7 @@ import { intelligenceDurationLabel } from './intelligenceDuration'
 import { dateTime } from './format'
 import { intelligencePanelActiveKey } from './intelligenceMonitorContext'
 import { useIntelligenceCountdown } from './useIntelligenceCountdown'
-const props = defineProps<{ plan: IntelligencePlan; busy: boolean }>()
+const props = defineProps<{ plan: IntelligencePlan; busy: boolean; compact?: boolean }>()
 const emit = defineEmits<{ run: []; select: [run: IntelligenceRun] }>()
 const { t } = useI18n()
 const active = computed(() => isIntelligenceRunActive(props.plan.candy_latest_run))
@@ -62,4 +62,11 @@ function toneClass(run: IntelligenceRun) {
 .candy-bar-failed { background: linear-gradient(180deg, #fb595e, #ef3d45); }
 .candy-bar-warning { background: linear-gradient(180deg, #f9c74f, #edab26); }
 :global(.dark) .candy-bar-empty { background: linear-gradient(180deg, #465367, #3b475a); }
+@media (min-width: 1024px) {
+  .candy-monitor-compact { display: grid; grid-template-columns: auto minmax(120px, 1fr) auto; align-items: center; gap: 8px; }
+  .candy-monitor-compact > :first-child { display: contents; }
+  .candy-monitor-compact > :first-child > div { grid-column: 1; grid-row: 1; }
+  .candy-monitor-compact > :first-child > button { grid-column: 3; grid-row: 1; font-size: 10px; }
+  .candy-monitor-compact > .candy-strip { grid-column: 2; grid-row: 1; }
+}
 </style>

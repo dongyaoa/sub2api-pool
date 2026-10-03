@@ -15,7 +15,7 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
 vi.mock('@/api/admin/intelligenceMonitor', () => ({ intelligenceMonitorAPI: mocks, PELICAN_MODEL: 'gpt-6-astra', PELICAN_REASONING: 'high' }))
 vi.mock('@/api/admin/upstreamCenter', () => ({ upstreamCenterAPI: { purge: mocks.purge } }))
 vi.mock('./IntelligencePlanCard.vue', () => ({ default: {
-  name: 'IntelligencePlanCard', props: ['plan', 'overview', 'busy', 'visible'], emits: ['run', 'candyRun', 'candySelect', 'toggle', 'edit', 'history', 'archive'],
+  name: 'IntelligencePlanCard', props: ['plan', 'overview', 'busy', 'visible', 'compact'], emits: ['run', 'candyRun', 'candySelect', 'toggle', 'edit', 'history', 'archive'],
   setup(props: { visible: boolean }) {
     const panelActive = inject(intelligencePanelActiveKey, ref(true))
     const active = computed(() => panelActive.value && props.visible)
@@ -69,6 +69,14 @@ beforeEach(() => {
 })
 
 describe('embedded account upstream intelligence monitor', () => {
+  it('keeps both account-embedded model plans at their normal card size', async () => {
+    mocks.plans.mockResolvedValue({ items: [plan(1, { model: 'gpt-6-astra' }), plan(2, { model: 'gpt-6.1-sol' })] })
+    const view = render({ embedded: true }); await flushPromises()
+    expect(cards(view)).toHaveLength(2)
+    expect(cards(view).every(card => card.props('compact') === false)).toBe(true)
+    expect(view.findComponent({ name: 'BaseDialog' }).exists()).toBe(false)
+  })
+
   it('uses the existing target plan data in a section without another modal or duplicate refresh control', async () => {
     mocks.plans.mockResolvedValue({ items: [plan(1), plan(2, { upstream_target_id: 99 }), plan(3, { source_type: 'openai_oauth', account_id: 7 })] })
     const view = render({ embedded: true }); await flushPromises()
@@ -173,6 +181,35 @@ afterEach(() => {
 })
 
 describe('upstream group intelligence dialog', () => {
+  it('fits both models together without remounting retained cards during refresh or when one model is removed', async () => {
+    const astra = plan(1, { model: 'gpt-6-astra' })
+    const sol = plan(2, { model: 'gpt-6.1-sol' })
+    mocks.plans.mockResolvedValue({ items: [astra, sol] })
+    const view = render(); await flushPromises()
+    const originalCards = cards(view).map(card => card.element)
+    expect(cards(view).map(card => card.props('compact'))).toEqual([true, true])
+
+    const updated = { ...sol, name: 'Updated Sol plan' }
+    mocks.plans.mockResolvedValue({ items: [{ ...astra }, updated] })
+    await refresh(view); await flushPromises()
+    cards(view).forEach((card, index) => expect(card.element).toBe(originalCards[index]))
+    expect(cards(view)[1]!.text()).toBe(updated.name)
+    expect(cards(view).map(card => card.props('compact'))).toEqual([true, true])
+
+    mocks.plans.mockResolvedValue({ items: [{ ...astra }] })
+    await refresh(view); await flushPromises()
+    expect(cards(view)).toHaveLength(1)
+    expect(cards(view)[0]!.props('compact')).toBe(false)
+    expect(cards(view)[0]!.element).toBe(originalCards[0])
+  })
+
+  it('keeps legacy groups with more than two plans fully available in the regular list', async () => {
+    mocks.plans.mockResolvedValue({ items: [plan(1), plan(2), plan(3)] })
+    const view = render(); await flushPromises()
+    expect(cards(view).map(card => card.props('plan').id)).toEqual([1, 2, 3])
+    expect(cards(view).every(card => card.props('compact') === false)).toBe(true)
+  })
+
   it('uses the separate candy action, prevents duplicate runs and retains its result through refresh errors', async () => {
     mocks.plans.mockResolvedValue({ items: [plan(1, { candy_enabled: true })] })
     const view = render(); await flushPromises()
@@ -235,6 +272,7 @@ describe('upstream group intelligence dialog', () => {
   it('offers a separate Sol plan for a group with Astra, and hides creation when both models exist', async () => {
     mocks.plans.mockResolvedValue({ items: [plan(1, { model: 'gpt-6-astra' })] })
     const view = render(); await flushPromises()
+    expect(cards(view)[0]!.props('compact')).toBe(false)
     await view.get('[data-testid="group-intelligence-add-model"]').trigger('click')
     const editor = view.getComponent({ name: 'IntelligencePlanDialog' })
     expect(editor.props('initialModel')).toBe('gpt-6.1-sol')
@@ -242,6 +280,7 @@ describe('upstream group intelligence dialog', () => {
     mocks.plans.mockResolvedValue({ items: [plan(1, { model: 'gpt-6-astra' }), plan(2, { model: 'gpt-6.1-sol' })] })
     editor.vm.$emit('saved', plan(2, { model: 'gpt-6.1-sol' })); await flushPromises()
     expect(cards(view)).toHaveLength(2)
+    expect(cards(view).map(card => card.props('compact'))).toEqual([true, true])
     expect(view.find('[data-testid="group-intelligence-add-model"]').exists()).toBe(false)
   })
 
@@ -539,6 +578,7 @@ describe('account pelican monitoring dialog', () => {
     expect(mocks.plansForOAuthAccount).toHaveBeenCalledWith(42, expect.any(AbortSignal))
     expect(mocks.plans).not.toHaveBeenCalled()
     expect(cards(view).map(card => card.props('plan').id)).toEqual([7, 8])
+    expect(cards(view).every(card => card.props('compact') === false)).toBe(true)
     expect(view.text()).toContain('intelligenceMonitor.accountMonitor.sharedHint')
     expect(view.find('[data-testid="group-intelligence-create"]').exists()).toBe(false)
     expect(mocks.run).not.toHaveBeenCalled()

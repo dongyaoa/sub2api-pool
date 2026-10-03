@@ -1,9 +1,16 @@
 <template>
   <section class="account-status" :aria-label="t('intelligenceMonitor.apiKeyAccount.statusTitle')">
     <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-      <div class="flex min-w-0 items-center gap-2">
-        <Icon name="chart" size="sm" class="shrink-0 text-primary-500 dark:text-primary-400" />
-        <h3 class="text-xs font-semibold text-gray-700 dark:text-gray-200">{{ t('intelligenceMonitor.apiKeyAccount.statusTitle') }}</h3>
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+        <div class="flex items-center gap-2">
+          <Icon name="chart" size="sm" class="shrink-0 text-primary-500 dark:text-primary-400" />
+          <h3 class="text-xs font-semibold text-gray-700 dark:text-gray-200">{{ t('intelligenceMonitor.apiKeyAccount.statusTitle') }}</h3>
+        </div>
+        <div class="account-status-wallet" :title="walletHint" data-testid="account-status-wallet">
+          <span class="text-[10px] text-gray-500 dark:text-dark-400" data-testid="account-status-wallet-label">{{ walletLabel }}</span>
+          <strong class="text-xs font-semibold tabular-nums" :class="lowBalance ? 'text-rose-600 dark:text-rose-400' : 'text-gray-800 dark:text-gray-100'" data-testid="account-status-balance">{{ walletValue }}</strong>
+          <span v-if="target.balance?.status === 'error'" class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" :aria-label="t('upstreamCenter.wallet.error')"></span>
+        </div>
       </div>
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <span class="inline-flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-dark-400" data-testid="account-status-schedule">
@@ -70,7 +77,8 @@ import Icon from '@/components/icons/Icon.vue'
 import UpstreamHistoryBar from './UpstreamHistoryBar.vue'
 import UpstreamRateBadge from './UpstreamRateBadge.vue'
 import UpstreamStatusBadge from './UpstreamStatusBadge.vue'
-import { amount, money, availability, availabilityColor, latency, latencyColor, targetStatus } from './format'
+import { amount, money, availability, availabilityColor, dateTime, latency, latencyColor, targetStatus } from './format'
+import { upstreamSyncError } from './newapi'
 
 const props = withDefaults(defineProps<{ target: UpstreamTarget; supplierName?: string; busy?: boolean }>(), { supplierName: '', busy: false })
 const emit = defineEmits<{ configure: [] }>()
@@ -81,10 +89,26 @@ watch(() => [props.target.id, props.target.models] as const, ([id, models], [pre
 })
 const modelOptions = computed(() => props.target.models.map(model => ({ value: model, label: model })))
 const statistics = computed(() => props.target.statistics?.find(item => item.model === selectedModel.value))
+const walletLabel = computed(() => t(props.target.balance?.kind === 'key_quota' ? 'upstreamCenter.wallet.quota' : props.target.balance?.kind === 'subscription' ? 'upstreamCenter.wallet.subscription' : 'upstreamCenter.wallet.title'))
+const walletAmount = computed(() => props.target.balance?.kind === 'wallet' ? props.target.balance.balance : props.target.balance?.quota_remaining ?? props.target.balance?.balance)
+const unlimitedQuota = computed(() => props.target.balance?.kind === 'key_quota' && props.target.balance.unlimited_quota)
+const walletValue = computed(() => unlimitedQuota.value ? t('upstreamCenter.newapi.unlimited') : money(walletAmount.value, props.target.balance?.currency))
+const lowBalance = computed(() => !unlimitedQuota.value && props.target.balance?.currency !== 'QUOTA' && typeof walletAmount.value === 'number' && Number.isFinite(walletAmount.value) && walletAmount.value < 5)
+const walletHint = computed(() => {
+  const wallet = props.target.balance
+  if (!wallet) return t('upstreamCenter.wallet.unknown')
+  const details = [`${walletLabel.value} ${walletValue.value}`]
+  if (wallet.status !== 'ok') details.push(t(wallet.status === 'unsupported' ? 'upstreamCenter.wallet.unsupported' : wallet.status === 'error' ? 'upstreamCenter.wallet.error' : 'upstreamCenter.wallet.pending'))
+  if (wallet.synced_at) details.push(t('upstreamCenter.wallet.syncedAt', { time: dateTime(wallet.synced_at) }))
+  if (wallet.status === 'error' && wallet.last_attempt_at) details.push(t('upstreamCenter.wallet.attemptAt', { time: dateTime(wallet.last_attempt_at) }))
+  if (wallet.error) details.push(upstreamSyncError(wallet.error, t))
+  return details.join('\n')
+})
 </script>
 
 <style scoped>
 .account-status { @apply min-w-0 rounded-xl border border-gray-200/80 bg-white p-4 dark:border-dark-700 dark:bg-dark-800; }
+.account-status-wallet { @apply inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md border border-gray-100 bg-gray-50/80 px-2 py-1 leading-4 dark:border-dark-700 dark:bg-dark-900/50; }
 .account-status-metrics { @apply grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 text-gray-800 dark:text-gray-100 sm:grid-cols-5 sm:gap-x-0 sm:divide-x sm:divide-gray-100 dark:sm:divide-dark-700; }
 .account-status-metrics > div { @apply min-w-0 sm:px-3; }
 .account-status-metrics > div:first-child { @apply sm:pl-0; }
